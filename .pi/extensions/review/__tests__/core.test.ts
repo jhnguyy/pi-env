@@ -44,7 +44,17 @@ describe("review pull request deterministic contracts", () => {
         ],
       }),
     ).toBe(true);
-    expect(validatePlanShape({ goal: "", files: [] })).toBe(false);
+    expect(
+      validatePlanShape({
+        goal: "",
+        goalAssessment: "ok",
+        risk: "low",
+        riskReasons: [],
+        cohorts: [{ label: "all", purpose: "p", paths: ["a.ts"] }],
+        files: [{ path: "a.ts", attention: "normal", role: "a" }],
+        evidence: [{ kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "review" }],
+      }),
+    ).toBe(false);
     expect(
       validatePlanShape({
         goal: "g",
@@ -53,6 +63,7 @@ describe("review pull request deterministic contracts", () => {
         riskReasons: [],
         cohorts: [{ label: "all", purpose: "p", paths: ["a.ts"] }],
         files: [],
+        evidence: [{ kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "review" }],
       }),
     ).toBe(false);
     expect(
@@ -63,6 +74,7 @@ describe("review pull request deterministic contracts", () => {
         riskReasons: [],
         cohorts: [{ label: "all", purpose: "p", paths: ["a.ts"] }],
         files: [{ path: "a.ts", attention: "normal", role: "a" }],
+        evidence: [{ kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "review" }],
       }),
     ).toBe(false);
   });
@@ -112,6 +124,12 @@ describe("review pull request deterministic contracts", () => {
     expect(bad.message).toContain("Missing: b.ts");
     expect(bad.message).toContain("Duplicate: a.ts");
     expect(bad.message).toContain("Invented: c.ts");
+    expect(bad.message).toContain("Missing cohorts: b.ts");
+    expect(bad.message).toContain("Duplicate cohorts: a.ts");
+    expect(bad.message).toContain("Invented cohorts: c.ts");
+    expect(bad.message).toContain("Missing evidence: b.ts");
+    expect(bad.message).toContain("Unplanned evidence: c.ts");
+    expect(bad.message).toContain("Evidence contains reversed line ranges.");
   });
 
   it("validates GitHub PR URLs", () => {
@@ -172,7 +190,7 @@ describe("review pull request deterministic contracts", () => {
     ]);
   });
 
-  it("preserves invalid anchors unanchored and selects high-impact/blocking/serious only", () => {
+  it("preserves invalid anchors unanchored and selects high-impact and serious findings", () => {
     const diff =
       "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,2 +1,3 @@\n one\n+two\n three\n";
     const result = validateFindingAnchors(

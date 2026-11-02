@@ -1,35 +1,46 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
-
+import { Effect, Exit } from "effect";
+import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_SUBAGENT_CONFIG, type SubagentRuntimeConfig } from "../config";
 import * as Control from "../control";
 import * as ChildTypes from "../child-types";
+import { testCleanup } from "./cleanup";
 
 function config(overrides: Partial<SubagentRuntimeConfig> = {}): SubagentRuntimeConfig {
-  return {
-    ...DEFAULT_SUBAGENT_CONFIG,
-    maxConcurrentRuns: 2,
-    maxPendingRuns: 2,
-    ...overrides,
-  };
+  return { ...DEFAULT_SUBAGENT_CONFIG, maxConcurrentRuns: 2, maxPendingRuns: 2, ...overrides };
 }
-
-function request(
-  cwd: string,
-  workspaceAccess: (typeof Control.WorkspaceAccess)[keyof typeof Control.WorkspaceAccess] = Control.WorkspaceAccess.Read,
-) {
+function request(cwd: string, workspaceAccess: (typeof Control.WorkspaceAccess)[keyof typeof Control.WorkspaceAccess] = Control.WorkspaceAccess.Read) {
   return { cwd, workspaceAccess };
+}
+function fixture(id: string, overrides: Partial<SubagentRuntimeConfig> = {}, cleanup = testCleanup()) {
+  const supervisor = new Control.SubagentRunSupervisor(id, config(overrides));
+  const leases = new Set<Awaited<ReturnType<typeof supervisor.acquire>>>();
+  let closing = false;
+  cleanup(
+    () => { closing = true; for (const lease of leases) lease.release(); },
+    () => supervisor.shutdown(),
+  );
+  return { supervisor, cleanup, acquire: (input: Parameters<typeof supervisor.acquire>[0]) => {
+    const pending = supervisor.acquire(input).then((lease) => {
+      if (closing) lease.release();
+      else leases.add(lease);
+      return lease;
+    });
+    // Teardown may reject a queued acquisition after its scenario already failed.
+    void pending.catch(() => {});
+    return pending;
+  } };
 }
 
 describe("shared subagent run supervisor", () => {
   it.each([true, false])("reports rejected eviction cleanup at shutdown even when closed=%s", async (closedAfterFailure) => {
-    // Native shutdown hooks report through the SDK instead of reliably rejecting dispose.
-    // Inject that failure at the owner's existing close port to test supervisor recovery.
+    // Inject failure at the existing owner close port: SDK hooks do not reliably reject dispose.
     const supervisor = new Control.SubagentRunSupervisor("eviction-failure", config({ maxRetainedJobs: 1 }));
     const failure = new Error("native disposal failed");
+    const verifyShutdown = () => expect(supervisor.shutdown()).rejects.toMatchObject({ errors: expect.arrayContaining([expect.objectContaining({ cause: failure })]) });
+    testCleanup()(verifyShutdown);
     let closed = false;
     const child = (id: string, broken: boolean) => ({
       id, runId: id,
@@ -44,118 +55,96 @@ describe("shared subagent run supervisor", () => {
     supervisor.pruneChildren();
     await Promise.resolve();
     await Promise.resolve();
-    await expect(supervisor.shutdown()).rejects.toMatchObject({ errors: expect.arrayContaining([expect.objectContaining({ cause: failure })]) });
+    await verifyShutdown();
   });
+
   it("coalesces parent disposal until held work settles without reopening admission", async () => {
-    // Hold admission directly: this isolates coordinator disposal, not native SDK execution.
+    const cleanup = testCleanup();
     const supervisor = Control.getOrCreateSubagentRunSupervisor("coalesced-dispose", config());
+    cleanup(() => Control.disposeSubagentRunSupervisor("coalesced-dispose"));
     const lease = await supervisor.acquire(request("/coalesced"));
+    cleanup(() => lease.release());
     let secondFinished = false;
     const first = Control.disposeSubagentRunSupervisor("coalesced-dispose");
     const second = Control.disposeSubagentRunSupervisor("coalesced-dispose").then(() => { secondFinished = true; });
-    try {
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(secondFinished).toBe(false);
-      expect(Control.getOrCreateSubagentRunSupervisor("coalesced-dispose", config())).toBe(supervisor);
-      await expect(supervisor.acquire(request("/late"))).rejects.toMatchObject({reason:"closed"});
-    } finally {
-      lease.release();
-      await Promise.all([first,second]);
-    }
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(secondFinished).toBe(false);
+    expect(Control.getOrCreateSubagentRunSupervisor("coalesced-dispose", config())).toBe(supervisor);
+    await expect(supervisor.acquire(request("/late"))).rejects.toMatchObject({ reason: "closed" });
+    lease.release();
+    await Promise.all([first, second]);
     expect(Control.getSubagentRunSupervisor("coalesced-dispose")).toBeUndefined();
   });
 
-  it("bounds shared admission and removes an aborted pending run", async () => {
-    const supervisor = new Control.SubagentRunSupervisor(
-      "session",
-      config({ maxConcurrentRuns: 1, maxPendingRuns: 1 }),
-    );
-    const active = await supervisor.acquire(request("/active"));
+  it.each(["AbortSignal", "Effect"] as const)("removes pending %s admission before the active lease releases", async (mode) => {
+    const { supervisor, cleanup, acquire } = fixture(mode, { maxConcurrentRuns: 1, maxPendingRuns: 1 });
+    const active = await acquire(request("/active"));
     const controller = new AbortController();
-    const pending = supervisor.acquire({ ...request("/pending"), signal: controller.signal });
-    await expect(supervisor.acquire(request("/full"))).rejects.toMatchObject({
-      reason: "capacity",
+    cleanup(() => controller.abort());
+    const acquireAdmission = supervisor.acquire.bind(supervisor);
+    let queued!: () => void;
+    const enteredAdmission = new Promise<void>((resolve) => { queued = resolve; });
+    const spy = vi.spyOn(supervisor, "acquire").mockImplementation((input) => {
+      const pending = acquireAdmission(input);
+      if (input.cwd === "/pending") queued();
+      return pending;
     });
-
+    cleanup(() => spy.mockRestore());
+    const pending = mode === "Effect"
+      ? Effect.runPromiseExit(supervisor.acquireEffect(request("/pending")), { signal: controller.signal })
+      : supervisor.acquire({ ...request("/pending"), signal: controller.signal });
+    await enteredAdmission;
+    await expect(supervisor.acquire(request("/full"))).rejects.toMatchObject({ reason: "capacity" });
     controller.abort();
-    await expect(pending).rejects.toMatchObject({ reason: "aborted" });
+    if (mode === "Effect") {
+      const exit = await pending;
+      if (!Exit.isExit(exit)) throw new Error("Expected an Effect exit");
+      expect(Exit.hasInterrupts(exit)).toBe(true);
+    } else await expect(pending).rejects.toMatchObject({ reason: "aborted" });
+    const replacement = acquire(request("/replacement"));
+    // If cancellation left the old slot behind, replacement rejects instead of occupying it.
+    await expect(supervisor.acquire(request("/still-full"))).rejects.toMatchObject({ reason: "capacity" });
     active.release();
-
-    const replacement = await supervisor.acquire(request("/replacement"));
-    replacement.release();
-    await supervisor.shutdown();
+    (await replacement).release();
   });
 
-  it("removes a pending admission when its Effect is interrupted", async () => {
-    const supervisor = new Control.SubagentRunSupervisor(
-      "session",
-      config({ maxConcurrentRuns: 1, maxPendingRuns: 1 }),
-    );
-    const active = await supervisor.acquire(request("/active"));
-    const controller = new AbortController();
-    const pending = Effect.runPromise(supervisor.acquireEffect(request("/pending")), {
-      signal: controller.signal,
-    });
-    controller.abort();
-    await expect(pending).rejects.toBeDefined();
-    active.release();
-    const replacement = await supervisor.acquire(request("/replacement"));
-    replacement.release();
-    await supervisor.shutdown();
-  });
-
-  it("allows shared reads and serializes writes by canonical workspace key", async () => {
+  it("admits a read beside an active writer and serializes canonical-workspace writers", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "pi-subagent-supervisor-workspace-"));
+    const cleanup = testCleanup();
+    cleanup(() => rmSync(workspace, { recursive: true, force: true }));
     const child = join(workspace, "packages", "child");
     mkdirSync(join(workspace, ".git"));
     mkdirSync(child, { recursive: true });
-    const supervisor = new Control.SubagentRunSupervisor("session", config());
-
-    const firstWrite = await supervisor.acquire(request(workspace, Control.WorkspaceAccess.Write));
+    const { acquire } = fixture("workspace", {}, cleanup);
+    const firstWrite = await acquire(request(workspace, Control.WorkspaceAccess.Write));
     let secondWriteStarted = false;
-    const secondWrite = supervisor.acquire(request(child, Control.WorkspaceAccess.Write)).then((lease) => {
-      secondWriteStarted = true;
-      return lease;
-    });
-    const sharedRead = await supervisor.acquire(request(child));
+    const secondWrite = acquire(request(child, Control.WorkspaceAccess.Write)).then((lease) => { secondWriteStarted = true; return lease; });
+    const sharedRead = await acquire(request(child));
     expect(secondWriteStarted).toBe(false);
-
     sharedRead.release();
     firstWrite.release();
     const secondWriteLease = await secondWrite;
     expect(secondWriteStarted).toBe(true);
     secondWriteLease.release();
-    await supervisor.shutdown();
-    rmSync(workspace, { recursive: true, force: true });
   });
 
-  it("reports aggregate usage across sibling runs without enforcing a limit", async () => {
-    const supervisor = new Control.SubagentRunSupervisor("session", config());
-    const first = await supervisor.acquire({ ...request("/first"), runId: "dag:first" });
-    const second = await supervisor.acquire({ ...request("/second"), runId: "dag:second" });
+  it("aggregates usage from sibling leases", async () => {
+    const { supervisor, acquire } = fixture("usage");
+    const first = await acquire({ ...request("/first"), runId: "dag:first" });
+    const second = await acquire({ ...request("/second"), runId: "dag:second" });
     first.updateUsage({ input: 40, output: 10, cacheRead: 0, cacheWrite: 0, cost: 2, turns: 2 });
     second.updateUsage({ input: 41, output: 10, cacheRead: 0, cacheWrite: 0, cost: 2, turns: 2 });
     expect(first.signal.aborted).toBe(false);
     expect(second.signal.aborted).toBe(false);
     expect(supervisor.usage("dag:")).toMatchObject({ input: 81, output: 20, cost: 4 });
-    first.release();
-    second.release();
-    await supervisor.shutdown();
   });
 
   it("aborts a run at its wall-time limit", async () => {
-    const supervisor = new Control.SubagentRunSupervisor("session", config({ maxRunMs: 20 }));
-    const lease = await supervisor.acquire(request("/timed"));
-    try {
-      expect(lease.signal.aborted).toBe(false);
-      await new Promise<void>((resolve) => {
-        lease.signal.addEventListener("abort", () => resolve(), { once: true });
-      });
-      expect(lease.signal.aborted).toBe(true);
-    } finally {
-      lease.release();
-      await supervisor.shutdown();
-    }
+    const { acquire } = fixture("deadline", { maxRunMs: 20 });
+    const lease = await acquire(request("/timed"));
+    expect(lease.signal.aborted).toBe(false);
+    await new Promise<void>((resolve) => lease.signal.addEventListener("abort", () => resolve(), { once: true }));
+    expect(lease.signal.aborted).toBe(true);
   });
 });

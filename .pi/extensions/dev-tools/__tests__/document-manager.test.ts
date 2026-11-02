@@ -85,10 +85,10 @@ describe("DocumentManager", () => {
   describe("close", () => {
     it("returns uri for an open file and removes it", () => {
       const p = mkFile("a.ts", "const a = 1;");
-      dm.ensure(p);
-      const uri = dm.close(p);
-      expect(uri).not.toBeNull();
-      expect(uri).toMatch(/^file:\/\//);
+      const opened = dm.ensure(p);
+      expect(dm.openUris).toContain(opened.uri);
+      expect(dm.close(p)).toBe(opened.uri);
+      expect(dm.openUris).not.toContain(opened.uri);
     });
 
     it("returns null for a file that is not open", () => {
@@ -108,11 +108,12 @@ describe("DocumentManager", () => {
     it("preserves other files in the same project", () => {
       const p1 = mkFile("a.ts", "const a = 1;");
       const p2 = mkFile("b.ts", "const b = 2;");
-      dm.ensure(p1);
-      dm.ensure(p2);
-      dm.close(p1);
-      // Project root should remain since p2 is still open
-      expect(dm.projectRoots.length).toBe(1);
+      const first = dm.ensure(p1);
+      const second = dm.ensure(p2);
+      expect(dm.close(p1)).toBe(first.uri);
+      expect(dm.openUris).toEqual([second.uri]);
+      expect(dm.ensure(p2).notification).toBeNull();
+      expect(dm.projectRoots).toEqual([tmpDir]);
     });
 
     it("allows re-opening a closed file", () => {

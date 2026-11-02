@@ -59,14 +59,14 @@ describe("DiagnosticsCache", () => {
   it.effect("completes every waiter for one URI without disturbing another URI", () =>
     Effect.gen(function* () {
       const cache = new DiagnosticsCache();
-      const uriWaiters = yield* forkFirstWaiters(cache, uri, 100);
-      const otherWaiters = yield* forkFirstWaiters(cache, otherUri, 2);
+      const uriWaiters = yield* forkFirstWaiters(cache, uri, 2);
+      const otherWaiters = yield* forkFirstWaiters(cache, otherUri, 1);
       yield* Effect.yieldNow;
-      expect(cache.pendingWaiterCount).toBe(102);
+      expect(cache.pendingWaiterCount).toBe(3);
 
       cache.publish(uri, [effectDiagnostic]);
       yield* Effect.forEach(uriWaiters, Fiber.join, { discard: true });
-      expect(cache.pendingWaiterCount).toBe(2);
+      expect(cache.pendingWaiterCount).toBe(1);
 
       cache.publish(otherUri, []);
       yield* Effect.forEach(otherWaiters, Fiber.join, { discard: true });

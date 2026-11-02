@@ -148,10 +148,10 @@ afterEach(() => {
 describe("session-owned DAG runtime composition", () => {
   it("uses collision-resistant usage namespaces for nested run IDs", () => {
     expect(dagUsagePrefix("a")).not.toBe(dagUsagePrefix("a:b"));
-    expect(dagUsagePrefix("a:b")).not.toMatch(new RegExp(`^${dagUsagePrefix("a")}`));
+    expect(dagUsagePrefix("a:b").startsWith(dagUsagePrefix("a"))).toBe(false);
   });
 
-  it("reuses active authorities, persists one run in order, and reconstructs an immutable result", async () => {
+  it("reuses active authorities, persists ordered events, and freezes reconstruction containers", async () => {
     const cwd = mkdtempSync(path.join(tmpdir(), "pi-dag-session-"));
     tempDirectories.push(cwd);
     const pi = makePi();

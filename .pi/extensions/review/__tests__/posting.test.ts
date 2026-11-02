@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { ReviewEvent, type ReviewState } from "../core";
+import { Disclosure, ReviewEvent, type ReviewState } from "../core";
 import { postReview, restore } from "../index";
 import {
   githubStub,
@@ -104,14 +104,22 @@ describe("review pull request posting", () => {
           getCalls.push(args);
           return {
             code: 0,
-            stdout:
-              getCalls.length >= 2 && persistedMarker
-                ? JSON.stringify([{ id: "remote1", body: persistedMarker }])
-                : "[]",
+            stdout: JSON.stringify(
+              getCalls.length === 1
+                ? []
+                : args.includes("page=1")
+                  ? Array.from({ length: 100 }, (_, id) => ({ id, body: "Unrelated review" }))
+                  : [{ id: "remote1", body: persistedMarker }],
+            ),
             stderr: "",
           };
         },
         post: (args) => {
+          expect(appended.at(-1)?.state.posts[0]).toMatchObject({
+            status: "pending",
+            marker: persistedMarker,
+          });
+          expect(persistedMarker).not.toBe("");
           postCalls.push(args);
           return { code: 1, stdout: "", stderr: "lost" };
         },
@@ -128,12 +136,22 @@ describe("review pull request posting", () => {
       },
     };
     expect(await postReview(pi as any, ctx as any, ReviewEvent.Comment)).toContain("uncertain");
-    expect(appended.some((a) => a.state.posts[0]?.status === "pending")).toBe(true);
     expect(await postReview(pi as any, ctx as any, ReviewEvent.Comment)).toContain(
       "not posting duplicate",
     );
     expect(postCalls).toHaveLength(1);
-    expect(getCalls.filter((args) => args.includes("GET")).length).toBeGreaterThan(0);
+    expect(getCalls.map((args) => args.find((arg) => arg.startsWith("page=")))).toEqual([
+      "page=1", "page=1", "page=2",
+    ]);
+    for (const args of getCalls) {
+      expect(args).toContain("GET");
+      expect(args).toContain("per_page=100");
+    }
+    expect(appended.at(-1)?.state.posts[0]).toMatchObject({
+      status: "posted",
+      reviewId: "remote1",
+      marker: persistedMarker,
+    });
     expect(confirms).toHaveLength(1);
     expect(confirms[0][1]).toContain("Preface preview:\n(none)");
     expect(confirms[0][1]).toContain("Coverage: complete.");
@@ -350,6 +368,8 @@ describe("review pull request posting", () => {
   it("posts the explicit review ID with only human-selected decisions through the existing authority path", async () => {
     const older = state();
     older.snapshot.id = "older";
+    older.result!.findings[0].problem = "Selected anchored defect.";
+    older.result!.findings[1].problem = "Rejected unanchored defect.";
     older.decisions = {
       F1: { status: "selected", at: "now" },
       F2: { status: "rejected", at: "now" },
@@ -376,9 +396,15 @@ describe("review pull request posting", () => {
     h.handlers.session_start({}, runtime);
     await h.command("pr post older comment", runtime);
     expect(view.notes.at(-1)).toBe("Review posted.");
-    expect(payload?.comments).toHaveLength(1);
-    expect(payload?.comments[0]?.body).toContain("p");
-    expect(payload?.body).not.toContain("u");
+    expect(payload?.comments).toEqual([{
+      path: "a.ts",
+      line: 3,
+      side: "RIGHT",
+      body: `${Disclosure}\n\nSelected anchored defect.\n\nConsequence: c\n\nSuggested fix: f`,
+    }]);
+    expect(payload?.body).not.toContain(
+      "- Rejected unanchored defect.\n  Consequence: c\n  Suggested fix: f",
+    );
   });
 
   it("registered post rejects a session switch while confirmation is open", async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { Effect } from "effect";
 import {
   DuplicateWindowBinding,
@@ -39,8 +39,16 @@ describe("tmux session host", () => {
     const a = createTmuxSessionHost(exec, { ownerPid: 41, processAlive: (pid) => pid !== 99 });
     const b = createTmuxSessionHost(exec, { ownerPid: 42, processAlive: (pid) => pid !== 99 });
     const first = Effect.runPromise(a.bindCurrent("%1", "a"));
-    await observation;
+    const operations: Promise<unknown>[] = [first];
+    onTestFinished(async () => {
+      resume();
+      const settled = await Promise.allSettled(operations);
+      const failures = settled.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+      if (failures.length) throw new AggregateError(failures, "Host reclaim fixture cleanup failed");
+    });
+    await Promise.race([observation, first.then(() => { throw new Error("Binding completed before its verification gate"); })]);
     const second = Effect.runPromise(Effect.result(b.bindCurrent("%2", "b")));
+    operations.push(second);
     // Keep A paused until B finishes (bounded lock contention must fail closed).
     // Without serialization B succeeds, then A erases its verified live binding.
     const result = await second;
@@ -94,7 +102,12 @@ describe("tmux session host", () => {
       () => "completed",
       () => "interrupted",
     );
-    await pending;
+    onTestFinished(async () => {
+      controller.abort();
+      resume();
+      await first;
+    });
+    await Promise.race([pending, first.then(() => { throw new Error("Binding settled before its mutation gate"); })]);
     controller.abort();
     const successor = createTmuxSessionHost(state.exec);
     const blocked = await Effect.runPromise(Effect.result(successor.bindCurrent("%1", "b")));
@@ -143,7 +156,7 @@ describe("tmux session host", () => {
     expect(repeated).toEqual({ state: "existing", windowId: "@3" });
   });
 
-  it("accepts a child that wins the window-tag race only when it writes the expected identity", async () => {
+  it("accepts an expected identity written during the window-tag race", async () => {
     const tags: Record<string, string> = {};
     const socketPath = testSocket();
     const exec: Exec = async (_command, args) => {

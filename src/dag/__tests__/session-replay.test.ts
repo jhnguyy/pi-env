@@ -1,4 +1,4 @@
-import { Effect, Exit, Option } from "effect";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   DagBlockedReason,
@@ -40,12 +40,6 @@ function valid(def: DagDefinition) {
   return result.graph;
 }
 
-function failureTag(effect: Effect.Effect<unknown, { readonly _tag: string }>) {
-  const option = Exit.findErrorOption(Effect.runSyncExit(effect));
-  expect(Option.isSome(option)).toBe(true);
-  return Option.isSome(option) ? option.value._tag : "";
-}
-
 describe("DAG session replay", () => {
   it("replays a valid terminal history through public writer and reconstruction", () => {
     const def = Fixtures.definition([node("a")], 1);
@@ -79,7 +73,9 @@ describe("DAG session replay", () => {
     );
     expect(recovered.graphId).toBe(computeDagSessionGraphId(def));
     expect(recovered.terminalOutcome).toBe(DagRunOutcome.Succeeded);
-    expect(Fixtures.status(recovered.graph, recovered.state, "a")).toBe(DagNodeStatus.Succeeded);
+    expect(recovered.state.nodes).toEqual([
+      { nodeId: "a", status: DagNodeStatus.Succeeded, outputs: { value: 1 } },
+    ]);
     expect(recovered.attempts[0]?.statuses).toEqual([
       DagNodeStatus.Running,
       DagNodeStatus.Succeeded,

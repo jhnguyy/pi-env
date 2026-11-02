@@ -19,7 +19,7 @@ describe("LSP E2E", () => {
   it("daemon responds with status", async () => {
     const status = await fixture.callDaemon({ action: "status" });
     expect(status.action).toBe("status");
-    expect(typeof status.running).toBe("boolean");
+    expect(status.running).toBe(true);
     expect(status.pid).toBeGreaterThan(0);
   });
 
@@ -33,9 +33,11 @@ describe("LSP E2E", () => {
 
     const result = await fixture.callDaemon({ action: "diagnostics", path: badFile });
     expect(result.action).toBe("diagnostics");
-    expect(result.errorCount).toBeGreaterThan(0);
-    expect(result.items.length).toBeGreaterThan(0);
-    expect(result.items[0].code).toMatch(/^TS\d+/);
+    expect(result.errorCount).toBe(2);
+    expect(result.items).toEqual([
+      expect.objectContaining({ line: 1, severity: "error", code: "TS2322", message: "Type 'number' is not assignable to type 'string'." }),
+      expect.objectContaining({ line: 2, severity: "error", code: "TS2322", message: "Type 'string' is not assignable to type 'number'." }),
+    ]);
   });
 
   it("reports Effect diagnostics with Effect identity", async () => {
@@ -63,8 +65,7 @@ describe("LSP E2E", () => {
       character: 3,
     });
     expect(result.action).toBe("hover");
-    expect(result.signature).toBeTruthy();
-    expect(typeof result.signature).toBe("string");
+    expect(result.signature).toContain("(property) User.name: string");
   });
 
   // ─── Definition ───────────────────────────────────────────────────────
@@ -79,10 +80,14 @@ describe("LSP E2E", () => {
       character: 15,
     });
     expect(result.action).toBe("definition");
-    expect(result.locations.length).toBeGreaterThan(0);
-    const loc = result.locations[0];
-    expect(loc.body).toContain("User");
-    expect(loc.relativePath).toBeTruthy();
+    expect(result.locations).toEqual([
+      expect.objectContaining({
+        absolutePath: fixture.typesFile,
+        relativePath: "types.ts",
+        line: 1,
+        body: expect.stringContaining("export interface User {"),
+      }),
+    ]);
   });
 
   // ─── References ───────────────────────────────────────────────────────
@@ -96,8 +101,14 @@ describe("LSP E2E", () => {
       character: 17,
     });
     expect(result.action).toBe("references");
-    expect(result.total).toBeGreaterThan(0);
-    expect(result.items.length).toBeGreaterThan(0);
+    expect(result.total).toBe(3);
+    expect(result.truncated).toBe(false);
+    expect(result.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ absolutePath: fixture.typesFile, line: 7, content: "export function greet(user: User): string {" }),
+      expect.objectContaining({ absolutePath: fixture.mainFile, line: 2, content: 'import { greet } from "./types";' }),
+      expect.objectContaining({ absolutePath: fixture.mainFile, line: 10, content: "console.log(greet(bob));" }),
+    ]));
+    expect(result.items).toHaveLength(3);
   });
 
   // ─── Document Symbols ─────────────────────────────────────────────────
@@ -118,6 +129,8 @@ describe("LSP E2E", () => {
     onTestFinished(() => renameFixture.cleanup());
     await renameFixture.start();
 
+    const beforeTypes = await readFile(renameFixture.typesFile, "utf8");
+    const beforeMain = await readFile(renameFixture.mainFile, "utf8");
     const result = await renameFixture.callDaemon({
       action: "rename",
       path: renameFixture.typesFile,
@@ -127,11 +140,9 @@ describe("LSP E2E", () => {
     });
 
     expect(result.action).toBe("rename");
-    expect(result.totalEdits).toBeGreaterThanOrEqual(3);
+    expect(result.totalEdits).toBe(3);
     expect(result.files).toHaveLength(2);
-    await expect(readFile(renameFixture.typesFile, "utf8")).resolves.toContain("export function welcome");
-    const mainContent = await readFile(renameFixture.mainFile, "utf8");
-    expect(mainContent).toContain("import { welcome }");
-    expect(mainContent).toContain("welcome(bob)");
+    await expect(readFile(renameFixture.typesFile, "utf8")).resolves.toBe(beforeTypes.replace("function greet(", "function welcome("));
+    await expect(readFile(renameFixture.mainFile, "utf8")).resolves.toBe(beforeMain.replaceAll("greet", "welcome"));
   });
 });

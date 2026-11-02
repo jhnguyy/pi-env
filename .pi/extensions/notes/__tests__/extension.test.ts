@@ -14,8 +14,14 @@ const roots: string[] = [];
 const shutdowns: Array<() => void> = [];
 
 afterEach(async () => {
-  for (const shutdown of shutdowns.splice(0)) shutdown();
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  const failures: unknown[] = [];
+  for (const shutdown of shutdowns.splice(0)) {
+    try { shutdown(); } catch (error) { failures.push(error); }
+  }
+  for (const root of roots.splice(0)) {
+    try { await rm(root, { recursive: true, force: true }); } catch (error) { failures.push(error); }
+  }
+  if (failures.length) throw new AggregateError(failures, "Notes extension fixture cleanup failed");
 });
 
 function settingsEnv(document: unknown): SettingsEnv {
@@ -99,7 +105,7 @@ describe("notes extension", () => {
     expect(testHarness.tools).toEqual([]);
   });
 
-  it("resolves an external provider lazily regardless of extension load order", async () => {
+  it("resolves an external provider registered after activation", async () => {
     const testHarness = harness();
     await activateNotesExtension(
       testHarness.pi as any,
@@ -128,7 +134,7 @@ describe("notes extension", () => {
     });
   });
 
-  it("discovers an independently bundled provider that loads first", async () => {
+  it("discovers a provider registered through the discovery event", async () => {
     const testHarness = harness();
     const external: NotesProvider = {
       id: "notes-assistant",

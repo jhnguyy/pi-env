@@ -9,6 +9,7 @@ import * as ChildTypes from "../child-types";
 import * as Control from "../control";
 import * as Config from "../config";
 import * as ChildContext from "../../_shared/child-context";
+import { settleOperations, testCleanup } from "./cleanup";
 
 function execute(...args: Parameters<typeof Execute.runResolvedSubagentEffect>) {
   return ChildContext.withChildContext({ cwd: args[0].cwd, agentDir: join(args[0].cwd, "agent") }, () =>
@@ -20,9 +21,13 @@ function execute(...args: Parameters<typeof Execute.runResolvedSubagentEffect>) 
 // Hold the tool after abort here to prove close retains its lease until settlement.
 it("holds native ownership until close settles and rejects overlapping input", async () => {
   const root = await mkdtemp(join(tmpdir(), "native-child-active-"));
+  const cleanup = testCleanup();
+  cleanup(() => rm(root, { recursive: true, force: true }));
   let child: ChildTypes.NativeChildSession | undefined;
+  const operations: Promise<unknown>[] = [];
   const { Type } = await import("typebox");
   const supervisor = new Control.SubagentRunSupervisor("native-test", Config.resolveSubagentRuntimeConfig({}));
+  cleanup(() => supervisor.shutdown());
   const blocker = await supervisor.acquire({
     runId: "blocker",
     cwd: root,
@@ -44,7 +49,13 @@ it("holds native ownership until close settles and rejects overlapping input", a
   const sawAbort = new Promise<void>((resolve) => {
     aborted = resolve;
   });
-  try {
+  cleanup(
+    () => { blocker.release(); release(); },
+    () => child?.close(),
+    () => supervisor.shutdown(),
+    () => settleOperations(operations),
+  );
+  {
     await mkdir(join(root, ".pi"), { recursive: true });
     const extension = join(root, ".pi", "provider.mjs");
     await writeFile(
@@ -97,6 +108,7 @@ export default function(pi) {
         },
       },
     );
+    operations.push(running);
     await retention;
     expect(child!.inspect().state).toBe("queued");
     await expect(child!.input("not yet streaming", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow();
@@ -107,6 +119,7 @@ export default function(pi) {
     const closing = child!.close().then(() => {
       closed = true;
     });
+    operations.push(closing);
     await sawAbort;
     let competingAdmitted = false;
     const competing = supervisor
@@ -115,6 +128,7 @@ export default function(pi) {
         competingAdmitted = true;
         lease.release();
       });
+    operations.push(competing);
     await Promise.resolve();
     expect(competingAdmitted).toBe(false);
     expect(closed).toBe(false);
@@ -130,10 +144,5 @@ export default function(pi) {
     expect(
       entries.filter((e) => e.type === "custom" && e.customType === "shutdown-hook"),
     ).toHaveLength(1);
-  } finally {
-    blocker.release();
-    release?.();
-    await child?.close();
-    await rm(root, { recursive: true, force: true });
   }
 }, 30000);

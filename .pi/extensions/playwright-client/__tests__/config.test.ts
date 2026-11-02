@@ -84,7 +84,7 @@ describe("playwright-client config", () => {
     });
   });
 
-  it("rejects malformed target settings with a typed config boundary", () => {
+  it("rejects malformed target settings with a configuration error", () => {
     clearBrowserEnv();
     const cwd = tempProject({ playwrightClient: { targets: { bad: { host: "127.0.0.1", protocol: "ftp" } } } });
 
@@ -117,7 +117,7 @@ describe("BrowserClient targets", () => {
     expect(targets.some((target) => "active" in target)).toBe(false);
   });
 
-  it("keeps bounded action history for UX/debugging", () => {
+  it("returns recorded history and its latest entry", () => {
     clearBrowserEnv();
     const client = new BrowserClient(loadBrowserClientConfig(tempProject()));
 

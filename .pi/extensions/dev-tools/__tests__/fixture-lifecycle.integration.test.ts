@@ -54,6 +54,46 @@ it("closes a rejected request's client before fixture cleanup and accepts a fres
   expect(existsSync(fixture.project)).toBe(false);
 });
 
+it("attempts every client close and retains failed clients for cleanup retry", async () => {
+  const fixture = createLspDaemonFixture((directory) => directory);
+  onTestFinished(() => fixture.cleanup());
+  const firstError = new Error("First close failed");
+  const secondError = new Error("Second close failed");
+  await fixture.withClient(async (first) => {
+    const firstClose = vi.spyOn(first, "close").mockImplementationOnce(() => { throw firstError; });
+    await fixture.withClient(async (second) => {
+      const secondClose = vi.spyOn(second, "close").mockImplementationOnce(() => { throw secondError; });
+      await expect(fixture.cleanup()).rejects.toMatchObject({ errors: [firstError, secondError] });
+      expect(firstClose).toHaveBeenCalledTimes(1);
+      expect(secondClose).toHaveBeenCalledTimes(1);
+      await fixture.cleanup();
+      expect(firstClose).toHaveBeenCalledTimes(2);
+      expect(secondClose).toHaveBeenCalledTimes(2);
+      expect(existsSync(fixture.project)).toBe(false);
+    });
+  });
+});
+
+it("preserves request and client-close failures together", async () => {
+  const fixture = createLspDaemonFixture((directory) => directory);
+  onTestFinished(() => fixture.cleanup());
+  const operationError = new Error("Request failed");
+  const closeError = new Error("Client close failed");
+  let closeCalls = 0;
+  await expect(fixture.withClient(async (client) => {
+    const close = client.close.bind(client);
+    vi.spyOn(client, "close").mockImplementation(() => {
+      closeCalls += 1;
+      if (closeCalls === 1) throw closeError;
+      close();
+    });
+    throw operationError;
+  })).rejects.toMatchObject({ errors: [operationError, closeError] });
+  await fixture.cleanup();
+  expect(closeCalls).toBe(2);
+  expect(existsSync(fixture.project)).toBe(false);
+});
+
 it("refuses to spawn a replacement for an unavailable fixture-owned daemon", async () => {
   const fixture = createLspDaemonFixture((directory) => directory);
   onTestFinished(() => fixture.cleanup());

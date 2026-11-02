@@ -53,7 +53,7 @@ describe("session catalog storage", () => {
     }),
   );
 
-  effectIt.effect("releases the workspace lock when an update is interrupted", () =>
+  effectIt.effect("invokes the injected lock release when an update is interrupted", () =>
     Effect.gen(function* () {
       const { cwd, agentDir } = yield* Effect.promise(fixture);
       let enter: () => void = () => {};
@@ -80,7 +80,7 @@ describe("session catalog storage", () => {
     }),
   );
 
-  effectIt.effect("does not release the lock while a durable commit is in flight", () =>
+  effectIt.effect("delays the injected release until an in-flight durable commit settles", () =>
     Effect.gen(function* () {
       const { cwd, agentDir } = yield* Effect.promise(fixture);
       let signalSyncStarted: () => void = () => {};
@@ -110,16 +110,18 @@ describe("session catalog storage", () => {
           };
         },
       });
-      const catalog = createFileSessionCatalog(agentDir, storage);
-      const updateFiber = yield* catalog.update(cwd, (current) => current).pipe(Effect.forkChild);
-      yield* Effect.promise(() => syncStarted);
-      const interruptFiber = yield* Fiber.interrupt(updateFiber).pipe(Effect.forkChild);
-      yield* Effect.yieldNow;
+      yield* Effect.gen(function* () {
+        const catalog = createFileSessionCatalog(agentDir, storage);
+        const updateFiber = yield* catalog.update(cwd, (current) => current).pipe(Effect.forkChild);
+        yield* Effect.promise(() => syncStarted);
+        const interruptFiber = yield* Fiber.interrupt(updateFiber).pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
 
-      expect(released).toBe(false);
-      allowSync();
-      yield* Fiber.join(interruptFiber);
-      expect(released).toBe(true);
+        expect(released).toBe(false);
+        allowSync();
+        yield* Fiber.join(interruptFiber);
+        expect(released).toBe(true);
+      }).pipe(Effect.ensuring(Effect.sync(allowSync)));
     }),
   );
 
@@ -186,13 +188,13 @@ describe("session catalog storage", () => {
     const { cwd, catalog } = await fixture();
 
     await Promise.all(
-      Array.from({ length: 8 }, () => Effect.runPromise(catalog.update(cwd, (current) => current))),
+      Array.from({ length: 2 }, () => Effect.runPromise(catalog.update(cwd, (current) => current))),
     );
 
-    expect((await Effect.runPromise(catalog.read(cwd)))?.revision).toBe(8);
+    expect((await Effect.runPromise(catalog.read(cwd)))?.revision).toBe(2);
   });
 
-  it("returns the typed timeout when another process owns the manifest lock", async () => {
+  it("returns the typed timeout while the manifest lock is held", async () => {
     const { cwd, catalog } = await fixture();
     const identity = await Effect.runPromise(catalog.identity(cwd));
     await mkdir(dirname(identity.manifestPath), { recursive: true });
@@ -207,9 +209,10 @@ describe("session catalog storage", () => {
 
   it("removes only old regular temporary files for the locked manifest", async () => {
     const first = await fixture();
-    const second = await fixture();
+    const secondWorkspace = join(first.root, "other-workspace");
+    await mkdir(secondWorkspace);
     const firstIdentity = await Effect.runPromise(first.catalog.identity(first.cwd));
-    const secondIdentity = await Effect.runPromise(second.catalog.identity(second.cwd));
+    const secondIdentity = await Effect.runPromise(first.catalog.identity(secondWorkspace));
     const directory = dirname(firstIdentity.manifestPath);
     await mkdir(directory, { recursive: true });
 

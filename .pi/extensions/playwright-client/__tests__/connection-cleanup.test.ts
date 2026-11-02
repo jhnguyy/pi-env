@@ -6,7 +6,7 @@ import {
   type BrowserLike,
   type PlaywrightLoader,
 } from "../browser";
-import { loadBrowserClientConfig } from "../config";
+import type { BrowserClientConfig } from "../config";
 import type { LocatorLike, PageLike } from "../locators";
 
 type DisconnectHandler = () => void;
@@ -18,7 +18,7 @@ type FakeBrowser = BrowserLike & {
 
 const browsers: FakeBrowser[] = [];
 const connectOverCDP = vi.fn(async () => {
-  const browser = fakeBrowser();
+  const browser = fakeBrowser(`Page ${browsers.length + 1}`);
   browsers.push(browser);
   return browser;
 });
@@ -31,13 +31,13 @@ beforeEach(() => {
 
 describe("BrowserClient connection cleanup", () => {
   it("evicts unhealthy cached connections and reconnects on the next use", async () => {
-    const client = new BrowserClient(loadBrowserClientConfig(), loadPlaywright);
+    const client = new BrowserClient(config(), loadPlaywright);
 
     await client.status("local");
     expect(connectOverCDP).toHaveBeenCalledTimes(1);
 
     browsers[0].connected = false;
-    await client.status("local");
+    expect(await client.status("local")).toContain("activePage: 0 Page 2 — https://example.test/");
 
     expect(browsers[0].closeCalls).toBe(1);
     expect(connectOverCDP).toHaveBeenCalledTimes(2);
@@ -49,7 +49,7 @@ describe("BrowserClient connection cleanup", () => {
   });
 
   it("evicts when Playwright reports browser disconnection", async () => {
-    const client = new BrowserClient(loadBrowserClientConfig(), loadPlaywright);
+    const client = new BrowserClient(config(), loadPlaywright);
 
     await client.listPages("local");
     expect(connectOverCDP).toHaveBeenCalledTimes(1);
@@ -57,16 +57,20 @@ describe("BrowserClient connection cleanup", () => {
     browsers[0].disconnectHandler?.();
     await vi.waitFor(() => expect(browsers[0].closeCalls).toBe(1));
 
-    await client.listPages("local");
+    expect(await client.listPages("local")).toEqual([
+      { id: "0", index: 0, title: "Page 2", url: "https://example.test/", active: true },
+    ]);
     expect(connectOverCDP).toHaveBeenCalledTimes(2);
   });
 
   it("allows tool execution to drop cached connections after connection-level errors", async () => {
-    const client = new BrowserClient(loadBrowserClientConfig(), loadPlaywright);
+    const client = new BrowserClient(config(), loadPlaywright);
 
     await client.listPages("local");
     await client.cleanupAfterError("local", new Error("Target closed"));
-    await client.listPages("local");
+    expect(await client.listPages("local")).toEqual([
+      { id: "0", index: 0, title: "Page 2", url: "https://example.test/", active: true },
+    ]);
 
     expect(browsers[0].closeCalls).toBe(1);
     expect(connectOverCDP).toHaveBeenCalledTimes(2);
@@ -79,8 +83,17 @@ describe("BrowserClient connection cleanup", () => {
   });
 });
 
-function fakeBrowser(): FakeBrowser {
-  const page = fakePage();
+function config(): BrowserClientConfig {
+  return {
+    artifactDir: "/unused",
+    profileName: "test",
+    profilePath: "/unused",
+    targets: [{ name: "local", host: "127.0.0.1", port: 9222, protocol: "http", path: "", cdpUrl: "http://127.0.0.1:9222" }],
+  };
+}
+
+function fakeBrowser(title: string): FakeBrowser {
+  const page = fakePage(title);
   const browser: FakeBrowser = {
     connected: true,
     closeCalls: 0,
@@ -100,7 +113,7 @@ function fakeBrowser(): FakeBrowser {
   return browser;
 }
 
-function fakePage(): PageLike {
+function fakePage(title: string): PageLike {
   const locator: LocatorLike = {
     click: async () => undefined,
     fill: async () => undefined,
@@ -110,7 +123,7 @@ function fakePage(): PageLike {
     ariaSnapshot: async () => "snapshot",
   };
   return {
-    title: async () => "Test Page",
+    title: async () => title,
     url: () => "https://example.test/",
     goto: async () => undefined,
     goBack: async () => undefined,

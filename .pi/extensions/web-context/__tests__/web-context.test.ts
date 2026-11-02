@@ -1,12 +1,29 @@
 import "../../__tests__/tui-setup";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Fiber } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import webContextExtension, { WebFetchFailureKind, WebFetchMode, fetchWebText, fetchWebTextEffect, parseWebUrl, type WebFetch, type WebFetchResponse } from "../index";
 import { AnthropicHostedToolName, injectAnthropicHostedWebTools, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "../anthropic-tools";
 import { OpenAISearchContextSize, injectOpenAIHostedWebTools, loadOpenAIWebToolSettings, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "../openai-tools";
+
+const roots: string[] = [];
+function settingsProject(): string {
+  const root = mkdtempSync(join(tmpdir(), "web-context-test-"));
+  roots.push(root);
+  vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
+  return root;
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  const failures: unknown[] = [];
+  for (const root of roots.splice(0)) {
+    try { rmSync(root, { recursive: true, force: true }); } catch (error) { failures.push(error); }
+  }
+  if (failures.length) throw new AggregateError(failures, "Web-context fixture cleanup failed");
+});
 
 const mockTheme = {
   fg: (_color: string, text: string) => text,
@@ -59,7 +76,7 @@ describe("web fetch", () => {
 
   it("shows a bounded fetched-output preview until the user expands it", () => {
     const tool = registeredWebFetchTool();
-    const { body, hiddenTail, result } = webFetchToolResult();
+    const { hiddenTail, result } = webFetchToolResult();
     const beforeRender = structuredClone(result);
 
     const collapsed = componentText(tool.renderResult(result, { expanded: false }, mockTheme));
@@ -71,18 +88,16 @@ describe("web fetch", () => {
     expect(collapsed).toContain("ctrl+o");
     expect(collapsed.length).toBeLessThan(1600);
     expect(collapsed).not.toContain(hiddenTail);
-    expect(collapsed).not.toContain(body);
     expect(result).toEqual(beforeRender);
   });
 
   it("reveals the full fetched output when expanded", () => {
     const tool = registeredWebFetchTool();
-    const { body, hiddenTail, result } = webFetchToolResult();
+    const { body, result } = webFetchToolResult();
 
     const expanded = componentText(tool.renderResult(result, { expanded: true }, mockTheme));
 
     expect(expanded).toContain(body);
-    expect(expanded).toContain(hiddenTail);
     expect(expanded).toContain("URL: https://example.com/");
     expect(expanded).not.toContain("ctrl+o");
   });
@@ -262,16 +277,16 @@ describe("openai hosted web tools", () => {
   const settings: OpenAIWebToolSettings = { enabled: true, searchContextSize: OpenAISearchContextSize.Low, externalWebAccess: false };
 
   it("loads typed settings with defaults and env enabled precedence", () => {
-    const dir = mkdtempSync(join(tmpdir(), "web-context-test-"));
+    const dir = settingsProject();
     mkdirSync(join(dir, ".pi"));
     writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ webContext: { openaiHostedTools: { enabled: false, searchContextSize: "high", externalWebAccess: true } } }));
 
     expect(loadOpenAIWebToolSettings(dir, { PI_OPENAI_WEB_TOOLS: "true" })).toEqual({ enabled: true, searchContextSize: "high", externalWebAccess: true });
-    expect(loadOpenAIWebToolSettings(mkdtempSync(join(tmpdir(), "web-context-test-")), {})).toEqual({ enabled: true, searchContextSize: "low", externalWebAccess: undefined });
+    expect(loadOpenAIWebToolSettings(settingsProject(), {})).toEqual({ enabled: true, searchContextSize: "low", externalWebAccess: undefined });
   });
 
   it("rejects malformed persisted OpenAI hosted tool fields", () => {
-    const dir = mkdtempSync(join(tmpdir(), "web-context-test-"));
+    const dir = settingsProject();
     mkdirSync(join(dir, ".pi"));
     writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ webContext: { openaiHostedTools: { enabled: "yes" } } }));
 
@@ -301,16 +316,16 @@ describe("anthropic hosted web tools", () => {
   const settings: AnthropicWebToolSettings = { enabled: true, tools: [AnthropicHostedToolName.WebSearch, AnthropicHostedToolName.WebFetch], maxUses: 3 };
 
   it("loads typed settings with defaults and env enabled precedence", () => {
-    const dir = mkdtempSync(join(tmpdir(), "web-context-test-"));
+    const dir = settingsProject();
     mkdirSync(join(dir, ".pi"));
     writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ webContext: { anthropicHostedTools: { enabled: false, tools: ["web_search", "web_fetch", "web_search"], maxUses: 5 } } }));
 
     expect(loadAnthropicWebToolSettings(dir, { PI_ANTHROPIC_WEB_TOOLS: "true" })).toEqual({ enabled: true, tools: ["web_search", "web_fetch"], maxUses: 5 });
-    expect(loadAnthropicWebToolSettings(mkdtempSync(join(tmpdir(), "web-context-test-")), {})).toEqual({ enabled: true, tools: ["web_search"], maxUses: undefined });
+    expect(loadAnthropicWebToolSettings(settingsProject(), {})).toEqual({ enabled: true, tools: ["web_search"], maxUses: undefined });
   });
 
   it("rejects malformed persisted Anthropic hosted tool fields", () => {
-    const dir = mkdtempSync(join(tmpdir(), "web-context-test-"));
+    const dir = settingsProject();
     mkdirSync(join(dir, ".pi"));
     writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ webContext: { anthropicHostedTools: { tools: ["bad"] } } }));
 

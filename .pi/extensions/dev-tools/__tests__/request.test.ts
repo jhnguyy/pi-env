@@ -81,7 +81,7 @@ describe("request builder", () => {
     });
   });
 
-  it("rejects missing paths before daemon work", () => {
+  it("returns action-specific validation errors for missing paths", () => {
     expect(failureMessage({ action: DevToolsAction.Diagnostics })).toBe("diagnostics requires a path.");
 
     for (const action of positionActions) {
@@ -96,7 +96,7 @@ describe("request builder", () => {
     }
   });
 
-  it("rejects relative paths before daemon work", () => {
+  it("returns an absolute-path validation error for a relative rename path", () => {
     expect(failureMessage({
       action: DevToolsAction.Rename,
       path: "src/a.ts",
@@ -106,7 +106,7 @@ describe("request builder", () => {
     })).toBe("rename requires absolute paths.");
   });
 
-  it("rejects incomplete positions before daemon work", () => {
+  it("returns position validation errors for missing line or character", () => {
     for (const action of positionActions) {
       const extra = action === DevToolsAction.Rename ? { newName: "updatedName" } : {};
       expect(failureMessage({ action, path: "/repo/a.ts", character: 1, ...extra })).toBe(`${action} requires line and character values.`);

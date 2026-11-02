@@ -14,10 +14,8 @@ import {
   DagNodeStatus,
   DagRunOutcome,
   DagRunOutcomeResultTag,
-  DagRuntimeGraphStateMismatch,
   DagRuntimeJournalFailed,
   DagRuntimeLive,
-  DagRuntimeNonFreshInitialState,
   DagSessionSeamFailed,
   DagTransitionType,
   createDagRunState,
@@ -65,6 +63,8 @@ function registryFromMap(executors: Record<string, DagEffectExecutor>) {
   return { service, lookups };
 }
 
+const ownedScope = () => Effect.acquireRelease(Scope.make(), (scope) => Scope.close(scope, Exit.void));
+
 function dependency(
   nodeId: string,
   mode: typeof DagDependencyMode.Required | typeof DagDependencyMode.Settled,
@@ -89,6 +89,10 @@ describe("DAG runtime", () => {
       );
       const request = yield* Ref.get(requestRef);
 
+      expect(snapshot.transitions.map((transition) => transition.type)).toEqual([
+        DagTransitionType.Start,
+        DagTransitionType.Complete,
+      ]);
       expect(lookups).toEqual([[DagExecutorKind.Transform, "executor-key"]]);
       expect(request).toMatchObject({
         runId: "run-test",
@@ -133,7 +137,7 @@ describe("DAG runtime", () => {
           ),
       });
 
-      const scope = yield* Scope.make();
+      const scope = yield* ownedScope();
       const handle = yield* submitDagRun(dag).pipe(
         Effect.provide(runtimeLayer(service)),
         Scope.provide(scope),
@@ -172,22 +176,6 @@ describe("DAG runtime", () => {
     }),
   );
 
-  it.effect("preserves start before complete transition ordering", () =>
-    Effect.gen(function* () {
-      const dag = Fixtures.graph([runtimeNode("task")]);
-      const { service } = registryFromMap({ task: () => Effect.succeed({}) });
-      const snapshot = yield* submitDagRun(dag).pipe(
-        Effect.flatMap((handle) => handle.await),
-        Effect.provide(runtimeLayer(service)),
-        Effect.scoped,
-      );
-      expect(snapshot.transitions.map((transition) => transition.type)).toEqual([
-        DagTransitionType.Start,
-        DagTransitionType.Complete,
-      ]);
-    }),
-  );
-
   it.effect("appends graph and start before executor invocation", () =>
     Effect.gen(function* () {
       const dag = Fixtures.graph([runtimeNode("task")]);
@@ -223,7 +211,7 @@ describe("DAG runtime", () => {
             Effect.as({}),
           ),
       });
-      const scope = yield* Scope.make();
+      const scope = yield* ownedScope();
       const handle = yield* submitDagRun(dag, undefined, { journal }).pipe(
         Effect.provide(runtimeLayer(service)),
         Scope.provide(scope),
@@ -302,7 +290,7 @@ describe("DAG runtime", () => {
       const { service } = registryFromMap({
         task: () => Ref.update(invocations, (count) => count + 1).pipe(Effect.as({})),
       });
-      const scope = yield* Scope.make();
+      const scope = yield* ownedScope();
       const handle = yield* submitDagRun(dag, undefined, { journal }).pipe(
         Effect.provide(runtimeLayer(service)),
         Scope.provide(scope),
@@ -340,7 +328,7 @@ describe("DAG runtime", () => {
       const { service } = registryFromMap({
         task: () => Ref.update(invocations, (count) => count + 1).pipe(Effect.as({})),
       });
-      const scope = yield* Scope.make();
+      const scope = yield* ownedScope();
       const handle = yield* submitDagRun(dag, undefined, { journal }).pipe(
         Effect.provide(runtimeLayer(service)),
         Scope.provide(scope),
@@ -410,7 +398,7 @@ describe("DAG runtime", () => {
             ),
           dependent: () => Queue.offer(started, "dependent").pipe(Effect.as({})),
         });
-        const scope = yield* Scope.make();
+        const scope = yield* ownedScope();
         const handle = yield* submitDagRun(dag, undefined, { journal }).pipe(
           Effect.provide(runtimeLayer(service)),
           Scope.provide(scope),
@@ -642,7 +630,7 @@ describe("DAG runtime", () => {
               ).pipe(Effect.andThen(Effect.never)),
             ),
         };
-        const scope = yield* Scope.make();
+        const scope = yield* ownedScope();
         const handle = yield* submitDagRun(dag).pipe(
           Effect.provide(runtimeLayer(service)),
           Scope.provide(scope),
@@ -693,13 +681,13 @@ describe("DAG runtime", () => {
             Effect.as({ done: true }),
           ),
       });
-      const scope = yield* Scope.make();
+      const scope = yield* ownedScope();
       const handle = yield* submitDagRun(dag).pipe(
         Effect.provide(runtimeLayer(service)),
         Scope.provide(scope),
       );
       yield* Deferred.await(started);
-      const observerScope = yield* Scope.make();
+      const observerScope = yield* ownedScope();
       const observer = yield* handle.await.pipe(Effect.forkIn(observerScope));
       yield* Fiber.interrupt(observer);
       const interrupted = yield* Fiber.await(observer);
@@ -724,13 +712,13 @@ describe("DAG runtime", () => {
           task: () =>
             Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never), Effect.as({})),
         });
-        const scope = yield* Scope.make();
+        const scope = yield* ownedScope();
         const handle = yield* submitDagRun(dag).pipe(
           Effect.provide(runtimeLayer(service)),
           Scope.provide(scope),
         );
         yield* Deferred.await(started);
-        const cancelScope = yield* Scope.make();
+        const cancelScope = yield* ownedScope();
         const cancelFiber = yield* handle.cancel.pipe(Effect.forkIn(cancelScope));
         yield* Effect.yieldNow;
         yield* Scope.close(scope, Exit.void);
@@ -793,7 +781,7 @@ describe("DAG runtime", () => {
             Effect.as({ done: true }),
           ),
       });
-      const scope = yield* Scope.make();
+      const scope = yield* ownedScope();
       const handle = yield* submitDagRun(dag).pipe(
         Effect.provide(runtimeLayer(service)),
         Scope.provide(scope),
@@ -828,7 +816,7 @@ describe("DAG runtime", () => {
         lookup: () =>
           Ref.updateAndGet(lookupCount, (count) => count + 1).pipe(Effect.as(undefined)),
       };
-      const scope = yield* Scope.make();
+      const scope = yield* ownedScope();
       const handle = yield* submitDagRun(dag).pipe(
         Effect.provide(runtimeLayer(service)),
         Scope.provide(scope),
@@ -859,7 +847,7 @@ describe("DAG runtime", () => {
             Ref.update(finalizers, (count) => count + 1),
           ).pipe(Effect.andThen(Deferred.await(release)), Effect.as({})),
       });
-      const scope = yield* Scope.make();
+      const scope = yield* ownedScope();
       const handle = yield* submitDagRun(dag).pipe(
         Effect.provide(runtimeLayer(service)),
         Scope.provide(scope),
@@ -887,7 +875,7 @@ describe("DAG runtime", () => {
       const dag = Fixtures.graph([runtimeNode("task")]);
       const finalizers = yield* Ref.make(0);
       const started = yield* Deferred.make<void>();
-      const childScope = yield* Scope.make();
+      const childScope = yield* ownedScope();
       const { service } = registryFromMap({
         task: () =>
           Effect.acquireRelease(Effect.as(Deferred.succeed(started, undefined), undefined), () =>
@@ -963,7 +951,7 @@ describe("DAG runtime", () => {
     }),
   );
 
-  it.effect("has no executor fiber or finalizer leak after completion and cancellation", () =>
+  it.effect("executes observed executor scope finalizers after completion and cancellation", () =>
     Effect.gen(function* () {
       const finalizers = yield* Ref.make(0);
       const makeExecutor = (started: Deferred.Deferred<void>, gate: Deferred.Deferred<void>) =>
@@ -973,7 +961,7 @@ describe("DAG runtime", () => {
 
       const completionStarted = yield* Deferred.make<void>();
       const completionGate = yield* Deferred.make<void>();
-      const completionScope = yield* Scope.make();
+      const completionScope = yield* ownedScope();
       const completionHandle = yield* submitDagRun(Fixtures.graph([runtimeNode("done")])).pipe(
         Effect.provide(
           runtimeLayer(
@@ -994,7 +982,7 @@ describe("DAG runtime", () => {
 
       const cancelStarted = yield* Deferred.make<void>();
       const cancelGate = yield* Deferred.make<void>();
-      const cancelScope = yield* Scope.make();
+      const cancelScope = yield* ownedScope();
       const cancelHandle = yield* submitDagRun(Fixtures.graph([runtimeNode("cancel")])).pipe(
         Effect.provide(
           runtimeLayer(

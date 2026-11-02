@@ -5,7 +5,7 @@ import * as ChildTypes from "../child-types";
 
 // Deterministic viewport and arbitrary-key presentation gap. The registered
 // native workflow and terminal smoke cover real owner actions and editor transport.
-it("renders authoritative views and parses only supported editor shortcut keys", async () => {
+it("renders supplied snapshot fields and handles supported editor shortcut keys", async () => {
   const child: ChildTypes.NativeChildSnapshot = {
     id: "child-id", runId: "operation-id", name: "界 child", task: "\u001b]52;c;evil\u0007First line\nSecond line\u0000",
     cwd: "/target", sessionFile: "/sessions/child.jsonl", model: "child/model", systemPrompt: "Native system\nDelegated instruction" + "\nContext line".repeat(80),
@@ -59,7 +59,7 @@ it("renders authoritative views and parses only supported editor shortcut keys",
   } finally { browser.dispose(); }
 });
 
-it("bounds native rendering on resize and ignores keys after view disposal", () => {
+it("bounds rendered dimensions on resize and ignores keys after view disposal", () => {
   const tui = { terminal: { rows: 20 }, requestRender: () => {} };
   const source = { listChildren: () => [], inspectChild: () => undefined, cancelChild: async () => {} };
   let viewOpen = true;

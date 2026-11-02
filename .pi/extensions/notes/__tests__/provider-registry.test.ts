@@ -17,7 +17,7 @@ function provider(id: string): NotesProvider {
 
 
 describe("notes provider registry", () => {
-  it("resolves a provider registered by another extension bundle", () => {
+  it("resolves and unregisters a registered provider", () => {
     const external = provider("notes-assistant");
     const unregister = registerNotesProvider(external);
     onTestFinished(unregister);

@@ -1,15 +1,7 @@
 import { describe, expect, it, onTestFinished } from "vitest";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-  cpSync,
-  existsSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,9 +18,18 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-work
 import { resolveNotesProvider } from "../notes/provider-registry";
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "../../..");
-const bundles = ["analyze", "web-context", "dev-tools", "notes", "subagent"].map((name) =>
-  join(repo, `.pi/extensions/${name}/dist/index.js`),
+const bundles = ["analyze", "web-context", "dev-tools", "notes", "subagent"].map(
+  (name) => join(repo, `.pi/extensions/${name}/dist/index.js`),
 );
+
+function toolText(message: { role: string; content?: unknown } | undefined): string {
+  expect(message?.role).toBe("toolResult");
+  if (!message || !Array.isArray(message.content)) throw new Error("Expected tool result content.");
+  return message.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+}
 
 /** Real Pi session and built bundles, with a scripted provider and synthetic network response. */
 describe("native tool workflows", () => {
@@ -40,9 +41,7 @@ describe("native tool workflows", () => {
     const artifact = join(mkdtempSync(join(evidenceDir, "pi-native-tools-")), "result.json");
     const evidence: Record<string, unknown> = {
       revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim(),
-      dirty:
-        execFileSync("git", ["status", "--porcelain"], { cwd: repo, encoding: "utf8" }).trim()
-          .length > 0,
+      dirty: execFileSync("git", ["status", "--porcelain"], { cwd: repo, encoding: "utf8" }).trim().length > 0,
       repeat: "nub run build && nub run test:workflows",
       input: {
         defaultTools: ["+codemode", "+tool_search"],
@@ -60,8 +59,7 @@ describe("native tool workflows", () => {
         webFetches: "synthetic result from deferred codemode and activated direct calls",
         composition: "nested read and Bash results combined with session context",
         bashFailure: "direct Bash reports an error; codemode receives structured exit_code 9",
-        notes:
-          "create and read a Wiki note in a temporary vault; reject an unguarded overwrite and release the provider",
+        notes: "create and read a Wiki note in a temporary vault; reject an unguarded overwrite and release the provider",
       },
       actual: {},
       verdict: "failed",
@@ -78,16 +76,10 @@ describe("native tool workflows", () => {
     let fetchCount = 0;
     let phase = "initialization";
     let notesShutdown = false;
+    const failures: unknown[] = [];
     try {
-      evidence.bundleHashes = Object.fromEntries(
-        bundles.map((path) => [
-          path.slice(repo.length + 1),
-          createHash("sha256").update(readFileSync(path)).digest("hex"),
-        ]),
-      );
-      const settingsManager = SettingsManager.inMemory({
-        defaultTools: ["+codemode", "+tool_search"],
-      });
+      evidence.bundleHashes = Object.fromEntries(bundles.map((path) => [path.slice(repo.length + 1), createHash("sha256").update(readFileSync(path)).digest("hex")]));
+      const settingsManager = SettingsManager.inMemory({ defaultTools: ["+codemode", "+tool_search"] });
       const faux = fauxProvider();
       const modelRuntime = await ModelRuntime.create({
         authPath: join(workspace, "auth.json"),
@@ -97,10 +89,7 @@ describe("native tool workflows", () => {
       modelRuntime.registerNativeProvider(faux.provider);
       const vault = join(workspace, "vault");
       mkdirSync(vault);
-      writeFileSync(
-        join(workspace, "settings.json"),
-        JSON.stringify({ notes: { provider: "obsidian", vaultPath: vault } }),
-      );
+      writeFileSync(join(workspace, "settings.json"), JSON.stringify({ notes: { provider: "obsidian", vaultPath: vault } }));
       const resourceLoader = new DefaultResourceLoader({
         cwd: workspace,
         agentDir: workspace,
@@ -127,13 +116,9 @@ describe("native tool workflows", () => {
       const activeBefore = session.getActiveToolNames();
       const callableBefore = session.getCallableToolNames();
       evidence.actual = { activeBefore, callableBefore };
-      expect(activeBefore).toEqual(
-        expect.arrayContaining(["codemode", "tool_search", "closeout", "subagent", "notes"]),
-      );
+      expect(activeBefore).toEqual(expect.arrayContaining(["codemode", "tool_search", "closeout", "subagent", "notes"]));
       for (const name of ["web_fetch", "dev-tools"]) expect(activeBefore).not.toContain(name);
-      expect(callableBefore).toEqual(
-        expect.arrayContaining(["analyze", "web_fetch", "dev-tools", "notes", "subagent"]),
-      );
+      expect(callableBefore).toEqual(expect.arrayContaining(["analyze", "web_fetch", "dev-tools", "notes", "subagent"]));
       for (const name of ["tool_search", "closeout"]) expect(callableBefore).not.toContain(name);
 
       const webUrl = "https://example.invalid/pi-env-fixture";
@@ -141,118 +126,78 @@ describe("native tool workflows", () => {
         const requestedUrl = input instanceof Request ? input.url : String(input);
         if (requestedUrl !== webUrl) throw new Error(`Unexpected test fetch: ${requestedUrl}`);
         fetchCount += 1;
-        return new Response("synthetic-web-fixture", {
-          status: 200,
-          headers: { "content-type": "text/plain" },
-        });
+        return new Response("synthetic-web-fixture", { status: 200, headers: { "content-type": "text/plain" } });
       };
       const ordinaryPath = join(workspace, "ordinary.txt");
       writeFileSync(ordinaryPath, "ordinary-fixture");
       const sessionCommand = `printf 'session=%s' "$PI_SESSION_ID"`;
       faux.setResponses([
-        fauxAssistantMessage(
-          fauxToolCall("codemode", {
-            code: `text(await tools.web_fetch({ url: ${JSON.stringify(webUrl)}, mode: "raw" }))`,
-          }),
-          { stopReason: "toolUse" },
-        ),
+        fauxAssistantMessage(fauxToolCall("codemode", {
+          code: `text(await tools.web_fetch({ url: ${JSON.stringify(webUrl)}, mode: "raw" }))`,
+        }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
-        fauxAssistantMessage(fauxToolCall("tool_search", { query: "web fetch", limit: 1 }), {
-          stopReason: "toolUse",
-        }),
+        fauxAssistantMessage(fauxToolCall("tool_search", { query: "web fetch", limit: 1 }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
-        fauxAssistantMessage(fauxToolCall("web_fetch", { url: webUrl, mode: "raw" }), {
-          stopReason: "toolUse",
-        }),
+        fauxAssistantMessage(fauxToolCall("web_fetch", { url: webUrl, mode: "raw" }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
-        fauxAssistantMessage(fauxToolCall("read", { path: ordinaryPath }), {
-          stopReason: "toolUse",
-        }),
+        fauxAssistantMessage(fauxToolCall("read", { path: ordinaryPath }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
-        fauxAssistantMessage(
-          fauxToolCall("codemode", {
-            code: `const [file, shell] = await Promise.all([tools.read({ path: ${JSON.stringify(ordinaryPath)} }), tools.bash({ command: ${JSON.stringify(sessionCommand)} })]); text(JSON.stringify({ file, output: shell.output, exit_code: shell.exit_code }))`,
-          }),
-          { stopReason: "toolUse" },
-        ),
+        fauxAssistantMessage(fauxToolCall("codemode", {
+          code: `const [file, shell] = await Promise.all([tools.read({ path: ${JSON.stringify(ordinaryPath)} }), tools.bash({ command: ${JSON.stringify(sessionCommand)} })]); text(JSON.stringify({ file, output: shell.output, exit_code: shell.exit_code }))`,
+        }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
-        fauxAssistantMessage(
-          fauxToolCall("codemode", {
-            code: `const status = await tools.bash({ command: "exit 9" }); if (status.exit_code !== 9) throw Error("wrong exit code"); text("nested-bash-exit:" + status.exit_code)`,
-          }),
-          { stopReason: "toolUse" },
-        ),
+        fauxAssistantMessage(fauxToolCall("codemode", {
+          code: `const status = await tools.bash({ command: "exit 9" }); if (status.exit_code !== 9) throw Error("wrong exit code"); text("nested-bash-exit:" + status.exit_code)`,
+        }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
-        fauxAssistantMessage(fauxToolCall("bash", { command: "exit 9" }), {
-          stopReason: "toolUse",
-        }),
+        fauxAssistantMessage(fauxToolCall("bash", { command: "exit 9" }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
-        fauxAssistantMessage(
-          fauxToolCall("notes", {
-            collection: "wiki",
-            action: "write",
-            target: "smoke.md",
-            content: "# Smoke\n\nsynthetic-note",
-            revision: null,
-          }),
-          { stopReason: "toolUse" },
-        ),
+        fauxAssistantMessage(fauxToolCall("notes", { collection: "wiki", action: "write", target: "smoke.md", content: "# Smoke\n\nsynthetic-note", revision: null }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
-        fauxAssistantMessage(
-          fauxToolCall("notes", { collection: "wiki", action: "read", target: "smoke.md" }),
-          { stopReason: "toolUse" },
-        ),
+        fauxAssistantMessage(fauxToolCall("notes", { collection: "wiki", action: "read", target: "smoke.md" }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
-        fauxAssistantMessage(
-          fauxToolCall("notes", {
-            collection: "wiki",
-            action: "write",
-            target: "smoke.md",
-            content: "unguarded overwrite",
-            revision: null,
-          }),
-          { stopReason: "toolUse" },
-        ),
+        fauxAssistantMessage(fauxToolCall("notes", { collection: "wiki", action: "write", target: "smoke.md", content: "unguarded overwrite", revision: null }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
       ]);
       phase = "deferred codemode call";
       await session.prompt("Fetch the synthetic web fixture through codemode before discovery.");
       expect(session.getActiveToolNames()).not.toContain("web_fetch");
-      expect(JSON.stringify(session.messages)).toContain("synthetic-web-fixture");
+      const deferredFetch = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "codemode").at(-1);
+      expect(toolText(deferredFetch)).toContain("synthetic-web-fixture");
       phase = "model-issued tool search";
       await session.prompt("Search for the web fetch tool.");
       const activeAfter = session.getActiveToolNames();
-      const searchResult = session.messages.find(
-        (message) => message.role === "toolResult" && message.toolName === "tool_search",
-      );
-      const searchDetails =
-        searchResult && "details" in searchResult ? searchResult.details : undefined;
+      const searchResult = session.messages.find((message) => message.role === "toolResult" && message.toolName === "tool_search");
+      const searchDetails = searchResult && "details" in searchResult ? searchResult.details : undefined;
       evidence.actual = { activeBefore, callableBefore, activeAfter, loaded: searchDetails };
       expect(searchDetails).toEqual({ loaded: ["web_fetch"] });
       expect(activeAfter).toContain("web_fetch");
       phase = "active direct web fetch";
       await session.prompt("Fetch the synthetic web fixture directly.");
-      const directFetch = session.messages.find(
-        (message) => message.role === "toolResult" && message.toolName === "web_fetch",
-      );
-      expect(JSON.stringify(directFetch)).toContain("synthetic-web-fixture");
+      const directFetch = session.messages.find((message) => message.role === "toolResult" && message.toolName === "web_fetch");
+      expect(toolText(directFetch)).toContain("synthetic-web-fixture");
       phase = "ordinary read";
       await session.prompt("Read the ordinary fixture directly.");
+      const ordinaryRead = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "read").at(-1);
+      const ordinaryReadText = toolText(ordinaryRead);
+      expect(ordinaryReadText).toBe("ordinary-fixture");
       phase = "nested tool composition";
       await session.prompt("Compose an ordinary read and session-aware Bash call in codemode.");
-      const composedResult = session.messages
-        .filter((message) => message.role === "toolResult" && message.toolName === "codemode")
-        .at(-1);
-      const composedText = JSON.stringify(composedResult);
+      const composedResult = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "codemode").at(-1);
+      const composedText = toolText(composedResult);
+      const outputMarker = "Output:\n";
+      expect(composedText).toContain(outputMarker);
+      const composedOutput = JSON.parse(composedText.slice(composedText.indexOf(outputMarker) + outputMarker.length).trim());
+      expect(composedOutput).toEqual({
+        file: "ordinary-fixture",
+        output: `session=${session.sessionManager.getSessionId()}`,
+        exit_code: 0,
+      });
       phase = "Bash nonzero exit contract";
       await session.prompt("Check the structured exit code from Bash in codemode.");
-      const nestedBashResult = session.messages
-        .filter((message) => message.role === "toolResult" && message.toolName === "codemode")
-        .at(-1);
+      const nestedBashResult = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "codemode").at(-1);
       await session.prompt("Run a failing Bash command directly.");
-      const directBashResult = session.messages
-        .filter((message) => message.role === "toolResult" && message.toolName === "bash")
-        .at(-1);
+      const directBashResult = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "bash").at(-1);
       const notePath = join(vault, "wiki/smoke.md");
       phase = "notes creation";
       await session.prompt("Create a synthetic Wiki note in the temporary vault.");
@@ -261,50 +206,26 @@ describe("native tool workflows", () => {
       expect(noteCreated).toBe(true);
       phase = "notes read";
       await session.prompt("Read the synthetic Wiki note.");
-      const noteRead = session.messages
-        .filter((message) => message.role === "toolResult" && message.toolName === "notes")
-        .at(-1);
-      const noteReadReturnedContent = JSON.stringify(noteRead).includes("synthetic-note");
+      const noteRead = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "notes").at(-1);
+      const noteReadReturnedContent = toolText(noteRead).includes("synthetic-note");
       evidence.actual = { ...(evidence.actual as object), noteReadReturnedContent };
       expect(noteReadReturnedContent).toBe(true);
       phase = "notes create-only conflict";
       await session.prompt("Attempt an unguarded overwrite of the synthetic Wiki note.");
-      const noteConflict = session.messages
-        .filter((message) => message.role === "toolResult" && message.toolName === "notes")
-        .at(-1);
-      const noteConflictIsError =
-        !!noteConflict && "isError" in noteConflict && noteConflict.isError === true;
-      const noteConflictSpecific = JSON.stringify(noteConflict).includes(
-        "Note changed since it was read: wiki/smoke.md",
-      );
+      const noteConflict = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "notes").at(-1);
+      const noteConflictIsError = !!noteConflict && "isError" in noteConflict && noteConflict.isError === true;
+      const noteConflictSpecific = toolText(noteConflict).includes("Note changed since it was read: wiki/smoke.md");
       const noteContentPreserved = readFileSync(notePath, "utf8") === "# Smoke\n\nsynthetic-note";
-      evidence.actual = {
-        ...(evidence.actual as object),
-        noteConflictIsError,
-        noteConflictSpecific,
-        noteContentPreserved,
-      };
+      evidence.actual = { ...(evidence.actual as object), noteConflictIsError, noteConflictSpecific, noteContentPreserved };
       expect(noteConflictIsError && noteConflictSpecific && noteContentPreserved).toBe(true);
-      const transcript = JSON.stringify(session.messages);
       evidence.actual = {
-        activeBefore,
-        callableBefore,
-        activeAfter,
-        loaded: searchDetails,
+        activeBefore, callableBefore, activeAfter, loaded: searchDetails,
         webFetches: fetchCount,
-        ordinaryRead: transcript.includes("ordinary-fixture"),
-        nestedComposition:
-          composedText.includes("ordinary-fixture") &&
-          composedText.includes(session.sessionManager.getSessionId()) &&
-          composedText.includes('"name":"bash"'),
-        nestedBashExitCode: JSON.stringify(nestedBashResult).includes("nested-bash-exit:9")
-          ? 9
-          : null,
-        directBashIsError:
-          !!directBashResult && "isError" in directBashResult && directBashResult.isError === true,
-        directBashStatusVisible: JSON.stringify(directBashResult).includes(
-          "Command exited with code 9",
-        ),
+        ordinaryRead: ordinaryReadText === "ordinary-fixture",
+        nestedComposition: composedOutput.file === "ordinary-fixture" && composedOutput.output === `session=${session.sessionManager.getSessionId()}` && composedOutput.exit_code === 0,
+        nestedBashExitCode: toolText(nestedBashResult).includes("nested-bash-exit:9") ? 9 : null,
+        directBashIsError: !!directBashResult && "isError" in directBashResult && directBashResult.isError === true,
+        directBashStatusVisible: toolText(directBashResult).includes("Command exited with code 9"),
         noteCreated,
         noteReadReturnedContent,
         noteConflictIsError,
@@ -312,21 +233,7 @@ describe("native tool workflows", () => {
         noteContentPreserved,
         fauxCalls: faux.state.callCount,
       };
-      expect(evidence.actual).toEqual(
-        expect.objectContaining({
-          webFetches: 2,
-          ordinaryRead: true,
-          nestedComposition: true,
-          nestedBashExitCode: 9,
-          directBashIsError: true,
-          directBashStatusVisible: true,
-          noteCreated: true,
-          noteReadReturnedContent: true,
-          noteConflictIsError: true,
-          noteConflictSpecific: true,
-          noteContentPreserved: true,
-        }),
-      );
+      expect(evidence.actual).toEqual(expect.objectContaining({ webFetches: 2, ordinaryRead: true, nestedComposition: true, nestedBashExitCode: 9, directBashIsError: true, directBashStatusVisible: true, noteCreated: true, noteReadReturnedContent: true, noteConflictIsError: true, noteConflictSpecific: true, noteContentPreserved: true }));
       phase = "notes provider shutdown";
       writeFileSync(join(workspace, "settings.json"), "{}");
       await session.reload();
@@ -336,39 +243,51 @@ describe("native tool workflows", () => {
       try {
         resolveNotesProvider("obsidian");
       } catch (error) {
-        notesProviderUnregistered =
-          error instanceof Error &&
-          error.message === "Configured notes provider is not registered: obsidian";
+        notesProviderUnregistered = error instanceof Error && error.message === "Configured notes provider is not registered: obsidian";
       }
-      evidence.actual = {
-        ...(evidence.actual as object),
-        notesUnregistered,
-        notesProviderUnregistered,
-      };
+      evidence.actual = { ...(evidence.actual as object), notesUnregistered, notesProviderUnregistered };
       expect(notesUnregistered && notesProviderUnregistered).toBe(true);
       evidence.verdict = "passed";
     } catch (error) {
       evidence.failedPhase = phase;
       evidence.failureType = error instanceof Error ? error.name : "UnknownError";
-      throw error;
+      failures.push(error);
     } finally {
-      try {
-        if (session && !notesShutdown) {
-          writeFileSync(join(workspace, "settings.json"), "{}");
-          await session.reload();
+      for (const cleanup of [
+        async () => {
+          if (session && !notesShutdown) {
+            writeFileSync(join(workspace, "settings.json"), "{}");
+            await session.reload();
+          }
+        },
+        () => session?.dispose(),
+        () => { process.cwd = previousCwd; },
+        () => { globalThis.fetch = previousFetch; },
+        () => {
+          if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+          else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        },
+        () => {
+          if (previousTelemetry === undefined) delete process.env.PI_TELEMETRY;
+          else process.env.PI_TELEMETRY = previousTelemetry;
+        },
+      ]) {
+        try {
+          await cleanup();
+        } catch (error) {
+          failures.push(error);
         }
-      } finally {
-        session?.dispose();
-        process.cwd = previousCwd;
-        globalThis.fetch = previousFetch;
-        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-        if (previousTelemetry === undefined) delete process.env.PI_TELEMETRY;
-        else process.env.PI_TELEMETRY = previousTelemetry;
+      }
+      if (failures.length) evidence.verdict = "failed";
+      try {
         writeFileSync(artifact, JSON.stringify(evidence, null, 2) + "\n");
         console.info(`Native tool evidence: ${artifact}`);
+      } catch (error) {
+        failures.push(error);
       }
     }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, "Native tool workflow or cleanup failed.", { cause: failures[0] });
   });
 });
 
@@ -380,53 +299,29 @@ it("runs the named session introspection scenarios in an isolated HOME", () => {
   const artifact = join(mkdtempSync(join(evidenceRoot, "pi-session-search-")), "result.json");
   const evidence = {
     revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim(),
-    bundleHash: createHash("sha256")
-      .update(readFileSync(join(repo, ".pi/extensions/introspection/dist/index.js")))
-      .digest("hex"),
+    bundleHash: createHash("sha256").update(readFileSync(join(repo, ".pi/extensions/introspection/dist/index.js"))).digest("hex"),
     repeat: "nub run build && nub run test:workflows",
-    input:
-      "native persistent Pi parent/child sessions, built-in skill reads and /skill expansion, controlled command failures and ctx.executeTool composition; synthetic legacy, missing-record, and adversarial histories in fixtures/search-workflow.ts",
+    input: "native persistent Pi parent/child sessions, built-in skill reads and /skill expansion, controlled command failures and ctx.executeTool composition; synthetic legacy, missing-record, and adversarial histories in fixtures/search-workflow.ts",
     retainedInputs: { sessions: "sessions/", skills: "skills/", originalHome: home },
     retentionErrors: [] as string[],
-    expected:
-      "all named public-workflow scenarios pass, including session IDs, read modes, field filters, timing, privacy boundaries, and bounded JSON",
-    actual: "",
-    verdict: "failed",
+    expected: "all named public-workflow scenarios pass, including session IDs, read modes, field filters, timing, privacy boundaries, and bounded JSON",
+    actual: "", verdict: "failed",
   };
   const failures: unknown[] = [];
   try {
     // Native homedir() needs process-level isolation. The child owns typed setup and assertions.
-    evidence.actual = execFileSync(
-      process.execPath,
-      [
-        "--test",
-        "--test-reporter=tap",
-        join(repo, ".pi/extensions/introspection/__tests__/fixtures/search-workflow.ts"),
-      ],
-      {
-        cwd: repo,
-        env: {
-          ...process.env,
-          HOME: home,
-          PI_CODING_AGENT_DIR: join(home, ".pi/agent"),
-          PI_TELEMETRY: "0",
-        },
-        encoding: "utf8",
-        timeout: 25_000,
-      },
-    );
+    evidence.actual = execFileSync(process.execPath, [
+      "--test", "--test-reporter=tap",
+      join(repo, ".pi/extensions/introspection/__tests__/fixtures/search-workflow.ts"),
+    ], { cwd: repo, env: { ...process.env, HOME: home, PI_CODING_AGENT_DIR: join(home, ".pi/agent"), PI_TELEMETRY: "0" }, encoding: "utf8", timeout: 25_000 });
     evidence.verdict = "passed";
   } catch (error) {
     if (error instanceof Error && "stdout" in error) evidence.actual = String(error.stdout);
     failures.push(error);
   } finally {
-    for (const [source, target] of [
-      [join(home, ".pi/agent/sessions"), "sessions"],
-      [join(home, "skills"), "skills"],
-    ]) {
+    for (const [source, target] of [[join(home, ".pi/agent/sessions"), "sessions"], [join(home, "skills"), "skills"]]) {
       try {
-        if (existsSync(source))
-          cpSync(source, join(dirname(artifact), target), { recursive: true });
+        if (existsSync(source)) cpSync(source, join(dirname(artifact), target), { recursive: true });
       } catch (error) {
         failures.push(error);
         evidence.retentionErrors.push(error instanceof Error ? error.message : String(error));
@@ -441,10 +336,5 @@ it("runs the named session introspection scenarios in an isolated HOME", () => {
     }
   }
   if (failures.length === 1) throw failures[0];
-  if (failures.length > 1)
-    throw new AggregateError(
-      failures,
-      "Session introspection workflow or evidence retention failed.",
-      { cause: failures[0] },
-    );
+  if (failures.length > 1) throw new AggregateError(failures, "Session introspection workflow or evidence retention failed.", { cause: failures[0] });
 });

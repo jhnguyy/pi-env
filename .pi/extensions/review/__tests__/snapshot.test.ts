@@ -370,7 +370,7 @@ describe("review pull request snapshot", () => {
     expect(overlap).toBe(false);
   });
 
-  it("cleans artifact and Git worktree registration on failure", async () => {
+  it("removes artifacts and requests scripted Git worktree cleanup on failure", async () => {
     const cwd = roots();
     const { exec, calls } = execFor({
       url: "https://github.com/acme/widgets/pull/7",

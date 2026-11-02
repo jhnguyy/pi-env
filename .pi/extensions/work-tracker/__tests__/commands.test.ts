@@ -1,59 +1,26 @@
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-
-// ─── Shared mock builder ──────────────────────────────────────────────────────
-
-function makeCommandCaptureMock(targetCommand?: string, captureMessages?: string[]) {
-  const registered: Array<{ name: string; opts: { description: string; handler: (...a: any[]) => any } }> = [];
-  const messages: string[] = captureMessages ?? [];
-
-  const mockPi = {
-    registerCommand(name: string, opts: { description: string; handler: (...a: any[]) => any }) {
-      registered.push({ name, opts });
-      // If a target command is specified, invoke its handler immediately
-      if (targetCommand && name === targetCommand) {
-        opts.handler(undefined, { waitForIdle: async () => {}, model: { provider: "test", id: "model" } });
-      }
-    },
-    registerTool: () => {},
-    getActiveTools: () => [] as string[],
-    setActiveTools: () => {},
-    on: () => {},
-    sendUserMessage(msg: string) { messages.push(msg); },
-  };
-
-  return { mockPi, registered, messages };
-}
-
-// ─── /review-retros ───────────────────────────────────────────────────────────
+import { registerCommands } from "../commands";
 
 describe("/review-retros command", () => {
-  it("handler sends a user message mentioning default count (5)", async () => {
-    const mod = await import("../index");
-    const messages: string[] = [];
-    const { mockPi } = makeCommandCaptureMock("review-retros", messages);
-    mod.default(mockPi as any);
-
-    expect(messages.length).toBeGreaterThan(0);
-    expect(messages[0]).toContain("5");
-    expect(messages[0]).toContain("retro");
-  });
-
-  it("handler sends a user message mentioning custom count when arg is passed", async () => {
-    const mod = await import("../index");
-    const registered: Array<{ name: string; opts: { description: string; handler: (...a: any[]) => any } }> = [];
-    const messages: string[] = [];
-    const mockPi = {
-      registerCommand(name: string, opts: { description: string; handler: (...a: any[]) => any }) {
-        registered.push({ name, opts });
-        if (name === "review-retros") opts.handler("3", {});
+  it.each([["", 5], ["3", 3]])("uses argument %s to request %i retrospectives", async (args, count) => {
+    let command: Parameters<ExtensionAPI["registerCommand"]>[1] | undefined;
+    const messages: Parameters<ExtensionAPI["sendUserMessage"]>[0][] = [];
+    const pi: Pick<ExtensionAPI, "registerCommand" | "sendUserMessage"> = {
+      registerCommand(name, registered) {
+        expect(name).toBe("review-retros");
+        command = registered;
       },
-      registerTool: () => {}, getActiveTools: () => [] as string[],
-      setActiveTools: () => {}, on: () => {},
-      sendUserMessage(msg: string) { messages.push(msg); },
+      sendUserMessage(message) { messages.push(message); },
     };
-    mod.default(mockPi as any);
+    registerCommands(pi as ExtensionAPI);
 
-    expect(messages.length).toBeGreaterThan(0);
-    expect(messages[0]).toContain("3");
+    expect(command).toBeDefined();
+    await command!.handler(String(args), {} as ExtensionCommandContext);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain(
+      `Review the last ${count} session retrospectives and propose behavioral improvements.`,
+    );
   });
 });

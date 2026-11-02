@@ -88,6 +88,7 @@ describe("provenance-backed editorial consolidation", () => {
   it("assigns stable distinct IDs and indexes to duplicate occurrences", () => {
     const source = reviewer("correctness", [finding, finding]);
     const raw = buildRawFindingRecords(admitted([source]));
+    expect(buildRawFindingRecords(admitted([source]))).toEqual(raw);
     expect(raw.map((record) => record.index)).toEqual([0, 1]);
     expect(new Set(raw.map((record) => record.id)).size).toBe(2);
     expect(

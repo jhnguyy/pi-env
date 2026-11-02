@@ -12,7 +12,9 @@ describe("share destination", () => {
     await f.invoke();
     expect(f.uploads[0]?.["branch"]).toBe(branch);
     expect(f.confirmations[0]).toContain(branch);
-    expect(f.events.indexOf("branch")).toBeLessThan(f.events.indexOf("confirm"));
+    const checked = f.events.indexOf("branch");
+    expect(checked).toBeGreaterThanOrEqual(0);
+    expect(f.events.indexOf("confirm")).toBeGreaterThan(checked);
   });
 
   it("pins the repository default branch when no branch is configured", async () => {

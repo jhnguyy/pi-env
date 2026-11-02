@@ -18,12 +18,18 @@ describe("manage private shares", () => {
 
   it("confirms and deletes only the selected share using its SHA and branch", async () => {
     const f = fixture();
+    f.github.shares = [
+      { ...exampleShare, name: "other.html", path: "sessions/other.html" },
+      exampleShare,
+    ];
+    f.select(exampleShare.path);
     writeFileSync(f.settings, JSON.stringify({ share: { repo: "owner/private-exports", branch: "shares" } }));
     await f.invoke(undefined, "delete");
     expect(f.deletions).toEqual([{ path: exampleShare.path, body: expect.objectContaining({ branch: "shares", sha: exampleShare.sha }) }]);
     expect(f.confirmations[0]).toContain(exampleShare.path);
     expect(f.confirmations[0]).toContain("shares");
     expect(f.notices.join("\n")).toMatch(/history/i);
+    expect(f.notices.join("\n")).toContain(`Deleted ${exampleShare.path} from owner/private-exports@shares.`);
     expect(f.events).not.toContain("export");
   });
 
@@ -34,7 +40,7 @@ describe("manage private shares", () => {
     expect(f.deletions).toEqual([]);
   });
 
-  it.each(["README.md", "sessions/../README.html", "sessions/nested/file.html", "sessions/different-name.html"])("rejects an unsafe listed path: %s", async (path) => {
+  it.each(["README.md", "sessions/../README.html", "sessions/nested/file.html", "sessions/different-name.html"])("does not delete an unsafe or inconsistent listed path: %s", async (path) => {
     const f = fixture();
     f.github.shares = [{ ...exampleShare, path }];
     await f.invoke(undefined, "delete");

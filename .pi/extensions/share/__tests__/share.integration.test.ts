@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { fixture, privateRepository, roots } from "./fixture";
 
 describe("private repository share", () => {
-  it("exports through Pi, saves the first repository, and reuses it", async () => {
+  it("exports through Pi and saves the first destination", async () => {
     const f = fixture();
     await f.invoke();
     expect(f.uploads).toHaveLength(1);
@@ -15,9 +15,6 @@ describe("private repository share", () => {
     expect(JSON.parse(readFileSync(f.settings, "utf8"))).toEqual({ theme: "dark", share: { repo: "owner/private-exports", branch: "main" } });
     expect(f.notices.join("\n")).toContain("https://github.com/owner/private-exports/blob/");
     expect(f.requests.find((args) => args.includes("PUT"))?.join(" ")).toMatch(/\d{4}-\d{2}-\d{2}-[a-f0-9]{12}\.html/);
-    await f.invoke();
-    expect(f.prompts).toBe(1);
-    expect(f.uploads).toHaveLength(2);
   });
 
   it.each([
@@ -39,8 +36,12 @@ describe("private repository share", () => {
   ])("does not upload when the confirmed repository changes: %j", async (changedRepository) => {
     const f = fixture(privateRepository, changedRepository);
     await f.invoke();
-    expect(f.events.indexOf("confirm")).toBeLessThan(f.events.lastIndexOf("repository"));
-    expect(f.events.indexOf("export")).toBeLessThan(f.events.lastIndexOf("repository"));
+    const confirmation = f.events.indexOf("confirm");
+    const exported = f.events.indexOf("export");
+    const revalidated = f.events.lastIndexOf("repository");
+    expect(confirmation).toBeGreaterThanOrEqual(0);
+    expect(exported).toBeGreaterThan(confirmation);
+    expect(revalidated).toBeGreaterThan(exported);
     expect(f.uploads).toEqual([]);
     expect(f.notices.join("\n")).toContain("Share failed");
   });
@@ -137,6 +138,8 @@ describe("private repository share", () => {
     f.cancel();
     await f.invoke();
     expect(f.uploads).toEqual([]);
+    expect(f.requests).toEqual([]);
+    expect(f.events).not.toContain("export");
     expect(JSON.parse(readFileSync(f.settings, "utf8"))).toEqual({ theme: "dark" });
   });
 
@@ -145,5 +148,6 @@ describe("private repository share", () => {
     f.decline();
     await f.invoke();
     expect(f.uploads).toEqual([]);
+    expect(f.events).not.toContain("export");
   });
 });

@@ -70,8 +70,8 @@ describe("filesystem Trivy reporting", () => {
 
     expect(result.status).toBe(1);
     expect(result.stdout).toContain("Trivy policy: 52 actionable HIGH/CRITICAL finding(s).");
-    expect(result.stdout).toContain("CVE-TEST-50");
-    expect(result.stdout).not.toContain("CVE-TEST-51");
+    expect(result.stdout.split("\n").filter((line) => line.startsWith("VULNERABILITY ")))
+      .toEqual(report.split("\n").slice(0, 50));
     expect(result.stdout).toContain("Trivy omitted 2 additional finding(s) from the job log.");
   });
 });

@@ -1,36 +1,21 @@
 import { Effect, Exit, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-  DagBlockedReason,
-  DagDependencyMode,
-  DagNodeResultTag,
   DagNodeStatus,
-  DagRunOutcome,
   DagTransitionType,
-  computeDagSessionGraphId,
-  createDagRunState,
   createDagSessionWriter,
   reconstructDagSession,
   validateDagDefinition,
-  type DagCompletionGuardKind,
   type DagDefinition,
   type DagSessionStore,
 } from "../index.js";
 import * as Fixtures from "./shared.js";
 
-function node(
-  id: string,
-  dependencies: readonly { readonly nodeId: string; readonly mode: "required" | "settled" }[] = [],
-  completionGuard?: {
-    readonly kind: typeof DagCompletionGuardKind.AtLeastOneSucceeded;
-    readonly dependencyIds: readonly string[];
-  },
-) {
+function node(id: string) {
   return {
     id,
     executor: { kind: "transform" as const, key: "test", payload: null },
-    dependencies,
-    ...(completionGuard ? { completionGuard } : {}),
+    dependencies: [],
   };
 }
 
@@ -68,11 +53,19 @@ describe("DAG session writer", () => {
     expect(failureTag(writer.appendGraph(def))).toBe("seam-failed");
     Effect.runSync(writer.appendGraph(def));
     expect(Effect.runSync(reconstructDagSession(store, def.runId)).persistedEntryCount).toBe(1);
+  });
 
+  it("rejects a definition that does not match the validated graph", () => {
+    const def = Fixtures.definition([node("a")], 1);
+    const dag = valid(def);
     const mismatchedDefinition = Fixtures.definition([node("other")], 1);
     const mismatchWriter = createDagSessionWriter(Fixtures.sessionStore(), dag, mismatchedDefinition);
     expect(failureTag(mismatchWriter.appendGraph(mismatchedDefinition))).toBe("graph-mismatch");
+  });
 
+  it("rejects a transition beyond the persisted entry limit", () => {
+    const def = Fixtures.definition([node("a")], 1);
+    const dag = valid(def);
     const boundedStore = Fixtures.sessionStore();
     const boundedWriter = createDagSessionWriter(boundedStore, dag, def, {
       limits: { totalMatchingEntries: 1 },

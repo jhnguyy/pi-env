@@ -42,7 +42,8 @@ describe("findBinary", () => {
       expect(bin).toBeTruthy();
       expect(bin).toContain("node_modules/.bin");
     } finally {
-      process.env["PATH"] = oldPath;
+      if (oldPath === undefined) delete process.env["PATH"];
+      else process.env["PATH"] = oldPath;
     }
   });
 });

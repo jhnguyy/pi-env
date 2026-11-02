@@ -305,8 +305,8 @@ describe("rename action", () => {
     const outsideRoot = await mkdtemp(join(tmpdir(), "dev-tools-rename-outside-"));
     const outsidePath = join(outsideRoot, "outside.ts");
     const outsideContent = "console.log(userName);\n";
-    await writeFile(outsidePath, outsideContent, "utf8");
     try {
+      await writeFile(outsidePath, outsideContent, "utf8");
       const { deps, invalidate } = dependencies({
         changes: {
           [pathToUri(declarationPath)]: [{ range: range(0, 13, 0, 21), newText: "accountName" }],
@@ -336,9 +336,9 @@ describe("rename action", () => {
     const outsideRoot = await mkdtemp(join(tmpdir(), "dev-tools-rename-symlink-"));
     const outsideTarget = join(outsideRoot, "target.ts");
     const linkPath = join(root, "escape.ts");
-    await writeFile(outsideTarget, declarationContent, "utf8");
-    await symlink(outsideTarget, linkPath);
     try {
+      await writeFile(outsideTarget, declarationContent, "utf8");
+      await symlink(outsideTarget, linkPath);
       const { deps, invalidate } = dependencies({
         changes: {
           [pathToUri(linkPath)]: [{ range: range(0, 13, 0, 21), newText: "accountName" }],
@@ -367,9 +367,9 @@ describe("rename action", () => {
     const secondRoot = await mkdtemp(join(tmpdir(), "dev-tools-rename-symlink-backend-"));
     const realTarget = join(secondRoot, "target.ts");
     const linkPath = join(root, "cross-backend-link.ts");
-    await writeFile(realTarget, declarationContent, "utf8");
-    await symlink(realTarget, linkPath);
     try {
+      await writeFile(realTarget, declarationContent, "utf8");
+      await symlink(realTarget, linkPath);
       const { backend, deps, invalidate } = dependencies({
         changes: {
           [pathToUri(linkPath)]: [
@@ -406,8 +406,8 @@ describe("rename action", () => {
     const secondRoot = await mkdtemp(join(tmpdir(), "dev-tools-rename-second-"));
     const secondPath = join(secondRoot, "other.ts");
     const secondContent = "console.log(userName);\n";
-    await writeFile(secondPath, secondContent, "utf8");
     try {
+      await writeFile(secondPath, secondContent, "utf8");
       const { backend, deps } = dependencies({
         changes: {
           [pathToUri(declarationPath)]: [{ range: range(0, 13, 0, 21), newText: "accountName" }],
@@ -470,8 +470,8 @@ describe("rename action", () => {
     const secondRoot = await mkdtemp(join(tmpdir(), "dev-tools-rename-backend-"));
     const secondPath = join(secondRoot, "other.ts");
     const secondContent = "console.log(userName);\n";
-    await writeFile(secondPath, secondContent, "utf8");
     try {
+      await writeFile(secondPath, secondContent, "utf8");
       const { backend: sourceBackend, deps } = dependencies({
         documentChanges: [
           {
@@ -509,6 +509,8 @@ describe("rename action", () => {
       expect(response.ok).toBe(true);
       expect(secondSnapshot).toHaveBeenCalledWith(secondPath);
       expect(secondEnsureFile).toHaveBeenCalledWith(secondPath);
+      await expect(readFile(declarationPath, "utf8")).resolves.toBe('export const accountName = "Ada";\n');
+      await expect(readFile(secondPath, "utf8")).resolves.toBe("console.log(accountName);\n");
     } finally {
       await rm(secondRoot, { recursive: true, force: true });
     }
