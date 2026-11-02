@@ -9,11 +9,7 @@ A functional test establishes what a unit promises while leaving it free to chan
 
 Find the target project's guidance through its `README.md`, `CONTRIBUTING.md`, applicable agent instructions, and linked testing conventions. Discover that guidance in the target repository rather than relative to this skill.
 
-## Configuration verification
-
-Do not add unit, integration, or end-to-end tests whose subject is configuration choices, theme or dotfile content, or native configuration integration unless the user explicitly requests those tests. Wrapping configuration in a lifecycle fixture does not change its subject. The restriction does not prohibit tests whose subject is independently useful executable application logic, such as mutation or transport behavior, rather than the configuration itself.
-
-For configuration changes, prefer the actual native parser, option schema, build, dry run, or activation check, supplemented by manual verification as appropriate. Keep activation checks isolated or obtain approval before changing a live environment. Distinguish evaluated source from the options and behavior of the deployed environment: a successful evaluation against a stub does not establish that the real host schema accepts an option or that the deployed application loaded it.
+Create unit tests for code changes, not configs or templates. Validate configs and templates with native tooling and manual checks.
 
 ## Define the promise
 
