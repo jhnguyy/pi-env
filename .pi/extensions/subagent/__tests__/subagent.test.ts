@@ -17,6 +17,11 @@ const mockTheme = {
   bold: (text: string) => text,
 };
 
+const hints = {
+  keyText: () => "alt+e",
+  keyHint: (_id: string, description: string) => `alt+e ${description}`,
+};
+
 // ─── Mock ExtensionAPI ────────────────────────────────────────────────────────
 
 let registeredTool: any;
@@ -86,7 +91,7 @@ describe("subagent extension", () => {
         content: [{ type: "text", text: "Started subagent job job-1 (audit)." }],
         details: { jobId: "job-1", status: "queued", name: "audit" },
       };
-      const context = { args: { action: "start", task: longTask } };
+      const context = { ...hints, args: { action: "start", task: longTask } };
       expect(extractText(registeredTool.renderResult(result, {}, mockTheme, context))).toBe("");
       expect(
         extractText(registeredTool.renderResult(result, { expanded: true }, mockTheme, context)),
@@ -114,8 +119,7 @@ describe("subagent extension", () => {
 
       const context = {
         args: { action: "result", job_id: "job-1" },
-        keyText: () => "",
-        keyHint: () => "",
+        ...hints,
       };
       const collapsed = extractText(registeredTool.renderResult(result, {}, mockTheme, context));
       expect(collapsed).toContain("completed");
@@ -178,7 +182,7 @@ describe("subagent extension", () => {
 
     it("keeps delegated content out of the collapsed result summary", () => {
       const rendered = extractText(
-        registeredTool.renderResult({ content: [], details: successDetails }, {}, mockTheme),
+        registeredTool.renderResult({ content: [], details: successDetails }, {}, mockTheme, hints),
       );
 
       expect(rendered).toContain("3 tool calls");
@@ -201,6 +205,7 @@ describe("subagent extension", () => {
           { content: [], details: { ...successDetails, ...detailOverrides } },
           {},
           mockTheme,
+          hints,
         ),
       );
 
@@ -213,6 +218,7 @@ describe("subagent extension", () => {
           { content: [{ type: "text", text: "raw output" }] },
           {},
           mockTheme,
+          hints,
         ),
       );
 
@@ -225,6 +231,7 @@ describe("subagent extension", () => {
           { content: [], details: successDetails },
           { expanded: true },
           mockTheme,
+          hints,
         ),
       );
 

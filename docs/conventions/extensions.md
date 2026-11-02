@@ -34,7 +34,7 @@ Register each model-facing Pi tool through `.pi/extensions/_shared/tool-render.t
 
 Use the shared short-description helper for compact prose. Its default limit is 70 content characters plus `...`. Keep the source text unchanged for expanded output. Apply ANSI-safe viewport truncation at the component render boundary.
 
-Thread the host's injected `KeybindingHints` through renderer helpers: tool renderers receive them in `context`, and message/entry renderers in `options`. Do not import global `keyHint`/`keyText` or substitute a default key: a bundled package copy may not share the host's bindings. Omit expansion hints when `keyText("app.tools.expand")` is empty.
+Thread the host's injected `KeybindingHints` through renderer helpers: tool renderers receive them in `context`, and message/entry renderers in `options`. Tool-result helpers that use or forward hints must require that dependency, including direct callers and test fixtures. Do not import global `keyHint`/`keyText` or substitute a default key: a bundled package copy may not share the host's bindings. An empty `keyText("app.tools.expand")` means the binding is disabled; omit the hint and its decoration without calling `keyHint`.
 
 For inline custom dialogs that wait for an answer, follow upstream [custom screens and overlays](https://pi.dev/docs/tui#use-custom-screens-and-overlays) and set `blocked`. Overlays ignore that option; the `/subagents` overlay does not need it.
 

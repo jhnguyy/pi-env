@@ -149,11 +149,17 @@ describe("web fetch", () => {
     const tool = registeredWebFetchTool();
     const { body, result } = webFetchToolResult();
 
-    const expanded = componentText(tool.renderResult(result, { expanded: true }, mockTheme));
+    const expanded = componentText(
+      tool.renderResult(result, { expanded: true }, mockTheme, {
+        keyText: () => "alt+e",
+        keyHint: (_id: string, description: string) => `alt+e ${description}`,
+      }),
+    );
 
     expect(expanded).toContain(body);
     expect(expanded).toContain("URL: https://example.com/");
     expect(expanded).not.toContain("ctrl+o");
+    expect(expanded).not.toContain("alt+e");
   });
 
   it("rejects non-web protocols", () => {

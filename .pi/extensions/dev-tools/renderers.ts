@@ -29,7 +29,7 @@ export function renderDevToolsResult(
   },
   opts: { expanded?: boolean },
   theme: RenderTheme,
-  hints?: KeybindingHints,
+  hints: KeybindingHints,
 ): Text {
   if (result.isError) {
     const msg = result.content[0]?.text ?? "error";

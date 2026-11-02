@@ -8,6 +8,12 @@ const recordingTheme = {
   bold: (text: string) => `<bold>${text}</bold>`,
 };
 
+const context = {
+  isError: false,
+  keyText: () => "alt+e",
+  keyHint: (_id: string, description: string) => `alt+e ${description}`,
+};
+
 function textOf(component: unknown): string {
   return (component as { text: string }).text;
 }
@@ -41,7 +47,7 @@ describe("review tool rendering", () => {
     };
 
     const collapsed = textOf(
-      renderReviewResult(result, { expanded: false, isPartial: false }, recordingTheme),
+      renderReviewResult(result, { expanded: false, isPartial: false }, recordingTheme, context),
     );
     const verdictLine = collapsed.split("\n").find((line) => line.includes("verdict:"));
 
@@ -68,6 +74,7 @@ describe("review tool rendering", () => {
         },
         { expanded: true, isPartial: false },
         recordingTheme,
+        context,
       ),
     );
 
@@ -94,6 +101,7 @@ describe("review tool rendering", () => {
         },
         { expanded: false, isPartial: false },
         recordingTheme,
+        { ...context, isError: status === "failed" },
       ),
     );
 
@@ -118,6 +126,7 @@ describe("review tool rendering", () => {
         },
         { expanded: false, isPartial: false },
         recordingTheme,
+        context,
       ),
     );
 
@@ -148,6 +157,7 @@ describe("review tool rendering", () => {
         { content: [], details },
         { expanded: false, isPartial: true },
         recordingTheme,
+        context,
       ),
     );
 
@@ -179,6 +189,7 @@ describe("review tool rendering", () => {
         },
         { expanded: false, isPartial: true },
         recordingTheme,
+        context,
       ),
     );
 

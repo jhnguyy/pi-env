@@ -148,7 +148,7 @@ function renderCollapsedSubagentResult(
   usage: string,
   tools: string,
   theme: any,
-  hints?: KeybindingHints,
+  hints: KeybindingHints,
 ): Text {
   // The call renderer already shows the truncated task; full output belongs in the expanded view.
   let text = `${icon} ${theme.fg("toolTitle", theme.bold("subagent"))}`;
@@ -171,7 +171,7 @@ export function renderSubagentResult(
   result: AgentToolResult<Types.SubagentDetails>,
   { expanded }: { expanded: boolean },
   theme: any,
-  context?: KeybindingHints,
+  context: KeybindingHints,
 ) {
   const details = result.details as Types.SubagentDetails | undefined;
   if (!details) {
@@ -266,7 +266,7 @@ export function renderSubagentJobResult(
   result: AgentToolResult<Types.SubagentJobRenderDetails>,
   { expanded }: { expanded: boolean },
   theme: any,
-  context?: KeybindingHints,
+  context: KeybindingHints,
 ) {
   const details = result.details ?? {};
   const status = details.status;
@@ -323,9 +323,9 @@ export function renderSubagentToolResult(
   result: AgentToolResult<Types.SubagentDetails | Types.SubagentJobRenderDetails>,
   options: { expanded?: boolean },
   theme: any,
-  context?: ToolRenderContext,
+  context: ToolRenderContext,
 ) {
-  const action = context?.args?.action ?? "run";
+  const action = context.args?.action ?? "run";
   if (action === "start") {
     return renderSubagentStartResult(result, options, theme);
   }

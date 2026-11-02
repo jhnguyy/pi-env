@@ -57,7 +57,7 @@ function renderDiagnostics(
   d: DiagnosticsResult,
   opts: { expanded?: boolean },
   theme: RenderTheme,
-  hints?: KeybindingHints,
+  hints: KeybindingHints,
 ): Text {
   if (opts.expanded) {
     return new Text(JSON.stringify(d, null, 2), 0, 0);

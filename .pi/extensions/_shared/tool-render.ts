@@ -53,10 +53,10 @@ export class WidthBoundedText implements Component {
 
 export function toolExpandHint(
   theme: ToolRenderTheme,
-  hints?: KeybindingHints,
+  hints: KeybindingHints,
   description = "to expand",
 ): string {
-  if (!hints?.keyText("app.tools.expand")) return "";
+  if (!hints.keyText("app.tools.expand")) return "";
   return `${theme.fg("muted", "(")}${hints.keyHint("app.tools.expand", description)}${theme.fg("muted", ")")}`;
 }
 
@@ -114,10 +114,10 @@ export function renderTextToolResult(
   result: AgentToolResult<unknown>,
   options: ToolRenderResultOptions,
   theme: ToolRenderTheme,
-  context?: ToolResultRenderContext,
+  context: ToolResultRenderContext,
 ): Component {
   const text = toolResultText(result);
-  const failed = context?.isError === true;
+  const failed = context.isError;
   const icon = theme.fg(failed ? "error" : "success", failed ? "✗" : "✓");
   const header = `${icon} ${theme.fg("toolTitle", bold(theme, name))}`;
   if (options.expanded) {

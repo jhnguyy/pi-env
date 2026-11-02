@@ -1,5 +1,7 @@
 import "./tui-setup";
-import type { KeybindingHints } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, KeybindingHints } from "@earendil-works/pi-coding-agent";
+import { stripTerminalSequences, type Component } from "@earendil-works/pi-tui";
+import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { describe, expect, it } from "vitest";
 import { renderTextToolResult } from "../_shared/tool-render";
 import initDevTools from "../dev-tools/index";
@@ -10,27 +12,37 @@ const theme = { fg: (_color: string, text: string) => text, bold: (text: string)
 const options = { expanded: false, isPartial: false };
 const result = { content: [{ type: "text" as const, text: "complete" }], details: {} };
 
-function registeredTool(init: (pi: any) => void, name: string): any {
-  const tools: any[] = [];
+interface CapturedTool {
+  name: string;
+  renderResult(
+    result: AgentToolResult<Record<string, unknown>>,
+    options: { expanded: boolean; isPartial?: boolean },
+    renderTheme: typeof theme,
+    context: KeybindingHints & { args?: { action: string } },
+  ): Component;
+}
+
+function registeredTool(init: (pi: ExtensionAPI) => void, name: string): CapturedTool {
+  const tools: CapturedTool[] = [];
   init({
-    registerTool: (tool: any) => tools.push(tool),
+    registerTool: (tool: CapturedTool) => tools.push(tool),
     registerCommand() {},
     on() {},
     events: { on() {}, emit() {} },
-  });
-  return tools.find((tool) => tool.name === name);
+  } as unknown as ExtensionAPI);
+  const tool = tools.find((entry) => entry.name === name);
+  if (!tool) throw new Error(`Expected registered tool: ${name}`);
+  return tool;
 }
 
-function renderedText(component: any): string {
-  return component.children
-    ? component.children.map(renderedText).join("\n")
-    : (component.text ?? component.render(500).join("\n"));
+function renderedText(component: Component): string {
+  return stripTerminalSequences(component.render(500).join("\n"));
 }
 
 const devTools = registeredTool(initDevTools, "dev-tools");
 const subagent = registeredTool(initSubagent, "subagent");
 
-const chains: Record<string, (hints: KeybindingHints, expanded: boolean) => unknown> = {
+const chains: Record<string, (hints: KeybindingHints, expanded: boolean) => Component> = {
   generic: (hints, expanded) =>
     renderTextToolResult("sample", result, { ...options, expanded }, theme, {
       ...hints,

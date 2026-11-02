@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import {
   WidthBoundedText,
+  toolExpandHint,
   registerPublicTool,
   renderTextToolResult,
   shortDescription,
@@ -50,6 +51,22 @@ describe("shared compact tool rendering", () => {
       throw new TypeError("Expected a rendered text component");
     }
     expect(rendered.text).toContain("<error>✗</error>");
+  });
+
+  it("requires injected hints at compile time", () => {
+    const theme = { fg: (_style: string, text: string) => text };
+    const missingDependencies = () => {
+      // @ts-expect-error Expansion hints require host-injected bindings.
+      toolExpandHint(theme);
+      // @ts-expect-error Result rendering requires the host context even when expanded.
+      renderTextToolResult(
+        "sample",
+        { content: [], details: {} },
+        { expanded: true, isPartial: false },
+        theme,
+      );
+    };
+    expect(missingDependencies).toBeTypeOf("function");
   });
 
   it("requires both render hooks at compile time at the public registration boundary", () => {

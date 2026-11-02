@@ -11,6 +11,11 @@ const mockTheme: RenderTheme = {
   bold: (text: string) => `**${text}**`,
 };
 
+const hints = {
+  keyText: () => "alt+e",
+  keyHint: (_id: string, description: string) => `alt+e ${description}`,
+};
+
 function text(rendered: unknown): string {
   if (
     typeof rendered !== "object" ||
@@ -28,13 +33,20 @@ describe("Renderers", () => {
 
   describe("renderDevToolsCall", () => {
     it("includes tool title and action", () => {
-      const t = text(renderDevToolsCall({ action: "diagnostics", path: "/project/src/foo.ts" }, mockTheme));
+      const t = text(
+        renderDevToolsCall({ action: "diagnostics", path: "/project/src/foo.ts" }, mockTheme),
+      );
       expect(t).toContain("[toolTitle:**dev-tools**]");
       expect(t).toContain("[accent:diagnostics]");
     });
 
     it("shows last 2 path segments", () => {
-      const t = text(renderDevToolsCall({ action: "hover", path: "/project/src/foo.ts", line: 5, character: 10 }, mockTheme));
+      const t = text(
+        renderDevToolsCall(
+          { action: "hover", path: "/project/src/foo.ts", line: 5, character: 10 },
+          mockTheme,
+        ),
+      );
       expect(t).toContain("[muted:src/foo.ts]");
       expect(t).toContain("[muted::5][muted::10]");
       expect(t).not.toContain("/project/");
@@ -66,57 +78,104 @@ describe("Renderers", () => {
 
   describe("renderDevToolsResult diagnostics", () => {
     const noDiags: DiagnosticsResult = {
-      action: "diagnostics", path: "/a.ts", errorCount: 0, warnCount: 0, items: [],
+      action: "diagnostics",
+      path: "/a.ts",
+      errorCount: 0,
+      warnCount: 0,
+      items: [],
     };
 
     const withErrors: DiagnosticsResult = {
-      action: "diagnostics", path: "/a.ts", errorCount: 2, warnCount: 1,
+      action: "diagnostics",
+      path: "/a.ts",
+      errorCount: 2,
+      warnCount: 1,
       items: [
-        { line: 5, character: 3, severity: "error", code: "TS2339", message: "Property 'x' does not exist." },
-        { line: 7, character: 1, severity: "error", code: "TS2322", message: "Type 'number' not assignable." },
+        {
+          line: 5,
+          character: 3,
+          severity: "error",
+          code: "TS2339",
+          message: "Property 'x' does not exist.",
+        },
+        {
+          line: 7,
+          character: 1,
+          severity: "error",
+          code: "TS2322",
+          message: "Type 'number' not assignable.",
+        },
         { line: 12, character: 8, severity: "warning", code: "TS7006", message: "Implicit any." },
       ],
     };
 
     it("shows success and scanned file summary for no errors", () => {
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: noDiags }, {}, mockTheme));
+      const t = text(
+        renderDevToolsResult(
+          { isError: false, content: [], details: noDiags },
+          {},
+          mockTheme,
+          hints,
+        ),
+      );
       expect(t).toContain("no errors");
       expect(t).toContain("[success:✓ no errors]");
       expect(t).toContain("scanned 1 file: a.ts");
     });
 
     it("shows error count with error color", () => {
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: withErrors }, {}, mockTheme));
+      const t = text(
+        renderDevToolsResult(
+          { isError: false, content: [], details: withErrors },
+          {},
+          mockTheme,
+          hints,
+        ),
+      );
       expect(t).toContain("[error:✗ 2 errors]");
       expect(t).toContain("[warning:⚠ 1 warning]");
     });
 
     it("expanded=true shows pretty-printed diagnostics JSON", () => {
-      const t = text(renderDevToolsResult(
-        { isError: false, content: [], details: withErrors },
-        { expanded: true },
-        mockTheme,
-      ));
+      const t = text(
+        renderDevToolsResult(
+          { isError: false, content: [], details: withErrors },
+          { expanded: true },
+          mockTheme,
+          hints,
+        ),
+      );
       expect(t).toContain('{\n  "action": "diagnostics"');
       expect(t).toContain('"line": 5');
       expect(t).toContain('"code": "TS2339"');
     });
 
     it("expanded=false does not show individual diagnostics", () => {
-      const t = text(renderDevToolsResult(
-        { isError: false, content: [], details: withErrors },
-        { expanded: false },
-        mockTheme,
-      ));
+      const t = text(
+        renderDevToolsResult(
+          { isError: false, content: [], details: withErrors },
+          { expanded: false },
+          mockTheme,
+          hints,
+        ),
+      );
       expect(t).not.toContain("L5:3");
     });
 
     it("shows warning color when warnings present", () => {
-      const r: DiagnosticsResult = { action: "diagnostics", path: "/a.ts", errorCount: 0, warnCount: 2, items: [
-        { line: 1, character: 1, severity: "warning", code: "TS7006", message: "Implicit any." },
-        { line: 2, character: 1, severity: "warning", code: "TS7006", message: "Implicit any." },
-      ]};
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
+      const r: DiagnosticsResult = {
+        action: "diagnostics",
+        path: "/a.ts",
+        errorCount: 0,
+        warnCount: 2,
+        items: [
+          { line: 1, character: 1, severity: "warning", code: "TS7006", message: "Implicit any." },
+          { line: 2, character: 1, severity: "warning", code: "TS7006", message: "Implicit any." },
+        ],
+      };
+      const t = text(
+        renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme, hints),
+      );
       expect(t).toContain("[warning:⚠ 2 warnings]");
     });
 
@@ -129,12 +188,20 @@ describe("Renderers", () => {
         items: [],
         files: [
           { action: "diagnostics", path: "/repo/src/a.ts", errorCount: 0, warnCount: 0, items: [] },
-          { action: "diagnostics", path: "/repo/test/b.ts", errorCount: 0, warnCount: 0, items: [] },
+          {
+            action: "diagnostics",
+            path: "/repo/test/b.ts",
+            errorCount: 0,
+            warnCount: 0,
+            items: [],
+          },
           { action: "diagnostics", path: "/repo/lib/c.ts", errorCount: 0, warnCount: 0, items: [] },
           { action: "diagnostics", path: "/repo/lib/d.ts", errorCount: 0, warnCount: 0, items: [] },
         ],
       };
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
+      const t = text(
+        renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme, hints),
+      );
       expect(t).toContain("scanned 4 files: src/a.ts, test/b.ts, lib/c.ts, +1 more");
     });
   });
@@ -143,10 +210,17 @@ describe("Renderers", () => {
 
   describe("renderDevToolsResult error state", () => {
     it("shows error text on tool error", () => {
-      const t = text(renderDevToolsResult({
-        isError: true,
-        content: [{ type: "text", text: "No hover information" }],
-      }, {}, mockTheme));
+      const t = text(
+        renderDevToolsResult(
+          {
+            isError: true,
+            content: [{ type: "text", text: "No hover information" }],
+          },
+          {},
+          mockTheme,
+          hints,
+        ),
+      );
       expect(t).toBe("[error:✗ No hover information]");
     });
   });
@@ -155,8 +229,16 @@ describe("Renderers", () => {
 
   describe("renderDevToolsResult other actions", () => {
     it("renders hover success", () => {
-      const r: HoverResult = { action: "hover", path: "/a.ts", line: 1, character: 1, signature: "string" };
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
+      const r: HoverResult = {
+        action: "hover",
+        path: "/a.ts",
+        line: 1,
+        character: 1,
+        signature: "string",
+      };
+      const t = text(
+        renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme, hints),
+      );
       expect(t).toBe("[success:✓ hover]");
     });
   });

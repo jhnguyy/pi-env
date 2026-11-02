@@ -242,9 +242,9 @@ function renderReviewTerminal(
   details: ReviewRenderDetails,
   options: ToolRenderResultOptions,
   theme: ToolRenderTheme,
-  context?: ToolResultRenderContext,
+  isError: boolean,
 ): Component {
-  const presentation = terminalPresentation(details.status, context?.isError);
+  const presentation = terminalPresentation(details.status, isError);
   const header = `${theme.fg(presentation.color, presentation.icon)} ${theme.fg("toolTitle", "review")}`;
   const usage = details.metrics?.usage;
   const verdict = details.verdict;
@@ -285,10 +285,10 @@ export function renderReviewResult(
   result: AgentToolResult<Record<string, unknown>>,
   options: ToolRenderResultOptions,
   theme: ToolRenderTheme,
-  context?: ToolResultRenderContext,
+  context: ToolResultRenderContext,
 ): Component {
   const details = (result.details ?? {}) as ReviewRenderDetails;
   if (options.isPartial || details.nodes) return renderReviewProgress(details, theme);
   if (!details.reviewId) return renderTextToolResult("review", result, options, theme, context);
-  return renderReviewTerminal(result, details, options, theme, context);
+  return renderReviewTerminal(result, details, options, theme, context.isError);
 }

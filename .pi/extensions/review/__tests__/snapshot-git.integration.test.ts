@@ -100,7 +100,11 @@ describe("review snapshot Git integration", () => {
     const result = await managedGitExec("git", ["--version"]);
     expect(result).toMatchObject({ code: 0, killed: false, truncated: false, stderr: "" });
     expect(result.stdout).toMatch(/^git version /u);
-    await expect(managedGitExec("git", ["--version"], { maxBuffer: 1 })).rejects.toBeDefined();
+    await expect(managedGitExec("git", ["--version"], { maxBuffer: 1 })).rejects.toMatchObject({
+      _tag: "ProcessFailure",
+      kind: "output-limit",
+      command: "git",
+    });
   });
 
   it.skipIf(process.platform === "win32")(

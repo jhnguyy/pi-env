@@ -33,7 +33,7 @@ export type ResultRenderer = (
   result: any,
   opts: { expanded?: boolean },
   theme: RenderTheme,
-  hints?: KeybindingHints,
+  hints: KeybindingHints,
 ) => Text;
 
 interface ActionEntry {
