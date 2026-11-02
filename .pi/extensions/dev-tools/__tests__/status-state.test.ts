@@ -40,13 +40,15 @@ function status(snapshot: any, projectRoots: string[] = []) {
 
 describe("status state model", () => {
   it("maps an initializing snapshot to initializing status", () => {
-    expect(status({
-      name: "typescript",
-      running: false,
-      initializationState: "initializing",
-      semanticAvailable: false,
-      projectMode: "unknown",
-    })).toMatchObject({
+    expect(
+      status({
+        name: "typescript",
+        running: false,
+        initializationState: "initializing",
+        semanticAvailable: false,
+        projectMode: "unknown",
+      }),
+    ).toMatchObject({
       state: "initializing",
       backend: { running: false },
       initialization: { state: "initializing" },
@@ -55,16 +57,21 @@ describe("status state model", () => {
   });
 
   it("maps an available snapshot with zero items to ready status", () => {
-    expect(status({
-      name: "typescript",
-      running: true,
-      initializationState: "initialized",
-      semanticAvailable: true,
-      lastSemanticRequest: { method: "textDocument/references", itemCount: 0 },
-      projectMode: "configured",
-      projectRoot: "/repo",
-      tsconfigPath: "/repo/tsconfig.json",
-    }, ["/repo"])).toMatchObject({
+    expect(
+      status(
+        {
+          name: "typescript",
+          running: true,
+          initializationState: "initialized",
+          semanticAvailable: true,
+          lastSemanticRequest: { method: "textDocument/references", itemCount: 0 },
+          projectMode: "configured",
+          projectRoot: "/repo",
+          tsconfigPath: "/repo/tsconfig.json",
+        },
+        ["/repo"],
+      ),
+    ).toMatchObject({
       state: "ready",
       project: { mode: "configured", root: "/repo", tsconfigPath: "/repo/tsconfig.json" },
       semantic: { available: true, lastRequest: { itemCount: 0 } },
@@ -72,17 +79,25 @@ describe("status state model", () => {
   });
 
   it("maps a running snapshot with a semantic failure to degraded status", () => {
-    expect(status({
-      name: "typescript",
-      running: true,
-      initializationState: "initialized",
-      semanticAvailable: false,
-      lastSemanticRequest: { method: "textDocument/definition", itemCount: 0 },
-      semanticFailure: { method: "textDocument/definition", detail: "typescript LSP request timed out" },
-      projectMode: "configured",
-      projectRoot: "/repo",
-      tsconfigPath: "/repo/tsconfig.json",
-    }, ["/repo"])).toMatchObject({
+    expect(
+      status(
+        {
+          name: "typescript",
+          running: true,
+          initializationState: "initialized",
+          semanticAvailable: false,
+          lastSemanticRequest: { method: "textDocument/definition", itemCount: 0 },
+          semanticFailure: {
+            method: "textDocument/definition",
+            detail: "typescript LSP request timed out",
+          },
+          projectMode: "configured",
+          projectRoot: "/repo",
+          tsconfigPath: "/repo/tsconfig.json",
+        },
+        ["/repo"],
+      ),
+    ).toMatchObject({
       state: "degraded",
       running: true,
       backend: { running: true },
@@ -113,15 +128,20 @@ describe("status state model", () => {
   });
 
   it("maps an available snapshot with a hover result to ready status", () => {
-    expect(status({
-      name: "typescript",
-      running: true,
-      initializationState: "initialized",
-      semanticAvailable: true,
-      lastSemanticRequest: { method: "textDocument/hover", itemCount: 1 },
-      projectMode: "inferred",
-      projectRoot: "/repo",
-    }, ["/repo"])).toMatchObject({
+    expect(
+      status(
+        {
+          name: "typescript",
+          running: true,
+          initializationState: "initialized",
+          semanticAvailable: true,
+          lastSemanticRequest: { method: "textDocument/hover", itemCount: 1 },
+          projectMode: "inferred",
+          projectRoot: "/repo",
+        },
+        ["/repo"],
+      ),
+    ).toMatchObject({
       state: "ready",
       semantic: { available: true, lastRequest: { method: "textDocument/hover", itemCount: 1 } },
     });
@@ -145,12 +165,15 @@ describe("status state model", () => {
       projectRoot: "/repo",
     };
     const dependencies = deps(idleTypeScript);
-    dependencies.backends.push({
-      name: "bash",
-      openUris: [],
-      projectRoots: ["/repo"],
-      getStatusSnapshot: () => readyBash,
-    } as any);
+    dependencies.backends = [
+      ...dependencies.backends,
+      {
+        name: "bash",
+        openUris: [],
+        projectRoots: ["/repo"],
+        getStatusSnapshot: () => readyBash,
+      } as any,
+    ];
 
     expect(handleStatus({ id: 1, action: "status" }, dependencies).result).toMatchObject({
       state: "ready",
@@ -166,14 +189,16 @@ describe("status state model", () => {
   });
 
   it("maps a startup-failure snapshot to failed status without semantic failure", () => {
-    expect(status({
-      name: "typescript",
-      running: false,
-      initializationState: "failed",
-      semanticAvailable: false,
-      startupFailure: "typescript LSP initialize timed out",
-      projectMode: "unknown",
-    })).toMatchObject({
+    expect(
+      status({
+        name: "typescript",
+        running: false,
+        initializationState: "failed",
+        semanticAvailable: false,
+        startupFailure: "typescript LSP initialize timed out",
+        projectMode: "unknown",
+      }),
+    ).toMatchObject({
       state: "failed",
       running: true,
       backend: { running: false, startupFailure: "typescript LSP initialize timed out" },

@@ -2,27 +2,53 @@
 
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import {
-  uriToPath, toZeroBased, relativePath, symbolKindLabel,
-} from "./utils";
+import { uriToPath, toZeroBased, relativePath, symbolKindLabel } from "./utils";
 import type { FileCache } from "./file-cache";
 import { okResponse, errorResponse } from "./protocol";
 import type {
-  DaemonRequest, DaemonResponse,
-  DiagnosticsResult, HoverResult,
-  DefinitionLocation, DefinitionResult, ImplementationResult,
-  CallHierarchyItem, IncomingCallsResult, OutgoingCallsResult,
-  ReferenceItem, ReferencesResult, RenameResult,
-  SymbolItem, SymbolsResult, StatusResult,
+  DaemonRequest,
+  DaemonResponse,
+  DiagnosticsResult,
+  HoverResult,
+  DefinitionLocation,
+  DefinitionResult,
+  ImplementationResult,
+  CallHierarchyItem,
+  IncomingCallsResult,
+  OutgoingCallsResult,
+  ReferenceItem,
+  ReferencesResult,
+  RenameResult,
+  SymbolItem,
+  SymbolsResult,
+  StatusResult,
 } from "./protocol";
 import type { LspBackend } from "./backend";
 import type { LspMessage } from "./lsp-transport";
 import { applyWorkspaceEdit } from "./workspace-edit";
 
+export type HandlerBackend = Pick<
+  LspBackend,
+  | "handles"
+  | "supportsWorkspaceSymbols"
+  | "name"
+  | "projectRoots"
+  | "openUris"
+  | "ensureFile"
+  | "ensureReady"
+  | "getProjectRoot"
+  | "getDocumentSnapshot"
+  | "lspRequest"
+  | "recordSemanticResult"
+  | "waitForDiagnostics"
+  | "getDiagnostics"
+  | "getStatusSnapshot"
+>;
+
 export interface HandlerDeps {
-  getBackend: (filePath: string) => LspBackend;
-  getWorkspaceSymbolBackends: () => LspBackend[];
-  backends: LspBackend[];
+  getBackend: (filePath: string) => HandlerBackend;
+  getWorkspaceSymbolBackends: () => readonly HandlerBackend[];
+  backends: readonly HandlerBackend[];
   fileCache: FileCache;
   /** Returns ms since last activity *before* the current request. */
   getIdleMs: () => number;
@@ -42,7 +68,7 @@ export interface RenameHandlerDeps {
   fileCache: Pick<FileCache, "invalidate">;
 }
 
-interface RequestContext<Backend extends RenameBackend = LspBackend> {
+interface RequestContext<Backend extends RenameBackend = HandlerBackend> {
   backend: Backend;
   uri: string;
   pos: { line: number; character: number };
@@ -77,7 +103,7 @@ const BULK_OPEN_CONCURRENCY = 4;
 
 interface PendingDiagnostics {
   path: string;
-  backend: LspBackend;
+  backend: HandlerBackend;
   uri: string;
 }
 
@@ -142,10 +168,15 @@ async function mapConcurrent<T, R>(
   return results;
 }
 
-export async function handleDiagnostics(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
+export async function handleDiagnostics(
+  req: DaemonRequest,
+  deps: HandlerDeps,
+): Promise<DaemonResponse> {
   if (req.paths && req.paths.length > 0) {
     const unique = [...new Set(req.paths)];
-    const prepared = await mapConcurrent(unique, BULK_OPEN_CONCURRENCY, (p) => prepareDiagnostics(p, deps));
+    const prepared = await mapConcurrent(unique, BULK_OPEN_CONCURRENCY, (p) =>
+      prepareDiagnostics(p, deps),
+    );
     const settled = await Promise.all(prepared.map(finishPreparedDiagnostics));
 
     const files: DiagnosticsResult[] = [];
@@ -162,7 +193,7 @@ export async function handleDiagnostics(req: DaemonRequest, deps: HandlerDeps): 
     }
 
     const totalErrors = files.reduce((s, f) => s + f.errorCount, 0);
-    const totalWarns  = files.reduce((s, f) => s + f.warnCount,  0);
+    const totalWarns = files.reduce((s, f) => s + f.warnCount, 0);
 
     return okResponse(req.id, {
       action: "diagnostics",
@@ -181,8 +212,11 @@ export async function handleDiagnostics(req: DaemonRequest, deps: HandlerDeps): 
 
 export async function handleHover(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
   let ctx: RequestContext;
-  try { ctx = await prepareRequest(req, deps, "hover"); }
-  catch (e) { return errorResponse(req.id, (e as Error).message); }
+  try {
+    ctx = await prepareRequest(req, deps, "hover");
+  } catch (e) {
+    return errorResponse(req.id, (e as Error).message);
+  }
 
   const lspRes = await ctx.backend.lspRequest("textDocument/hover", {
     textDocument: { uri: ctx.uri },
@@ -214,8 +248,11 @@ async function handleLocationAction(
   emptyMsg: string,
 ): Promise<DaemonResponse> {
   let ctx: RequestContext;
-  try { ctx = await prepareRequest(req, deps, action); }
-  catch (e) { return errorResponse(req.id, (e as Error).message); }
+  try {
+    ctx = await prepareRequest(req, deps, action);
+  } catch (e) {
+    return errorResponse(req.id, (e as Error).message);
+  }
 
   const lspRes = await ctx.backend.lspRequest(lspMethod, {
     textDocument: { uri: ctx.uri },
@@ -235,7 +272,7 @@ async function handleLocationAction(
     const startLine = loc.range.start.line;
     const endLine = loc.range.end.line;
     const expandedEnd = await deps.fileCache.expandToBlock(defPath, startLine, endLine, 30);
-    const body = await deps.fileCache.extractLines(defPath, startLine, expandedEnd) ?? "";
+    const body = (await deps.fileCache.extractLines(defPath, startLine, expandedEnd)) ?? "";
     const bodyLines = body.split("\n");
     const truncated = bodyLines.length > 30 ? bodyLines.length - 30 : 0;
 
@@ -260,12 +297,30 @@ async function handleLocationAction(
   } as DefinitionResult | ImplementationResult);
 }
 
-export async function handleDefinition(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
-  return handleLocationAction(req, deps, "definition", "textDocument/definition", "No definition found");
+export async function handleDefinition(
+  req: DaemonRequest,
+  deps: HandlerDeps,
+): Promise<DaemonResponse> {
+  return handleLocationAction(
+    req,
+    deps,
+    "definition",
+    "textDocument/definition",
+    "No definition found",
+  );
 }
 
-export async function handleImplementation(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
-  return handleLocationAction(req, deps, "implementation", "textDocument/implementation", "No implementations found");
+export async function handleImplementation(
+  req: DaemonRequest,
+  deps: HandlerDeps,
+): Promise<DaemonResponse> {
+  return handleLocationAction(
+    req,
+    deps,
+    "implementation",
+    "textDocument/implementation",
+    "No implementations found",
+  );
 }
 
 async function handleCallHierarchy(
@@ -276,8 +331,11 @@ async function handleCallHierarchy(
   peerField: "from" | "to",
 ): Promise<DaemonResponse> {
   let ctx: RequestContext;
-  try { ctx = await prepareRequest(req, deps, action); }
-  catch (e) { return errorResponse(req.id, (e as Error).message); }
+  try {
+    ctx = await prepareRequest(req, deps, action);
+  } catch (e) {
+    return errorResponse(req.id, (e as Error).message);
+  }
 
   const prepareRes = await ctx.backend.lspRequest("textDocument/prepareCallHierarchy", {
     textDocument: { uri: ctx.uri },
@@ -294,8 +352,14 @@ async function handleCallHierarchy(
   const callsRes = await ctx.backend.lspRequest(lspMethod, { item });
 
   const emptyResult = {
-    action, path: req.path, line: req.line, character: req.character,
-    symbol: symbolName, total: 0, items: [], truncated: false,
+    action,
+    path: req.path,
+    line: req.line,
+    character: req.character,
+    symbol: symbolName,
+    total: 0,
+    items: [],
+    truncated: false,
   } as IncomingCallsResult | OutgoingCallsResult;
 
   if (!callsRes?.result || !Array.isArray(callsRes.result)) {
@@ -323,23 +387,41 @@ async function handleCallHierarchy(
 
   ctx.backend.recordSemanticResult(lspMethod, all.length);
   return okResponse(req.id, {
-    action, path: req.path, line: req.line, character: req.character,
-    symbol: symbolName, total: all.length, items, truncated: all.length > MAX,
+    action,
+    path: req.path,
+    line: req.line,
+    character: req.character,
+    symbol: symbolName,
+    total: all.length,
+    items,
+    truncated: all.length > MAX,
   } as IncomingCallsResult | OutgoingCallsResult);
 }
 
-export async function handleIncomingCalls(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
+export async function handleIncomingCalls(
+  req: DaemonRequest,
+  deps: HandlerDeps,
+): Promise<DaemonResponse> {
   return handleCallHierarchy(req, deps, "incoming-calls", "callHierarchy/incomingCalls", "from");
 }
 
-export async function handleOutgoingCalls(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
+export async function handleOutgoingCalls(
+  req: DaemonRequest,
+  deps: HandlerDeps,
+): Promise<DaemonResponse> {
   return handleCallHierarchy(req, deps, "outgoing-calls", "callHierarchy/outgoingCalls", "to");
 }
 
-export async function handleReferences(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
+export async function handleReferences(
+  req: DaemonRequest,
+  deps: HandlerDeps,
+): Promise<DaemonResponse> {
   let ctx: RequestContext;
-  try { ctx = await prepareRequest(req, deps, "references"); }
-  catch (e) { return errorResponse(req.id, (e as Error).message); }
+  try {
+    ctx = await prepareRequest(req, deps, "references");
+  } catch (e) {
+    return errorResponse(req.id, (e as Error).message);
+  }
 
   const lspRes = await ctx.backend.lspRequest("textDocument/references", {
     textDocument: { uri: ctx.uri },
@@ -350,8 +432,13 @@ export async function handleReferences(req: DaemonRequest, deps: HandlerDeps): P
   if (!lspRes?.result) {
     ctx.backend.recordSemanticResult("textDocument/references", 0);
     return okResponse(req.id, {
-      action: "references", path: req.path, line: req.line, character: req.character,
-      total: 0, items: [], truncated: false,
+      action: "references",
+      path: req.path,
+      line: req.line,
+      character: req.character,
+      total: 0,
+      items: [],
+      truncated: false,
     } as ReferencesResult);
   }
 
@@ -371,12 +458,20 @@ export async function handleReferences(req: DaemonRequest, deps: HandlerDeps): P
 
   ctx.backend.recordSemanticResult("textDocument/references", all.length);
   return okResponse(req.id, {
-    action: "references", path: req.path, line: req.line, character: req.character,
-    total: all.length, items, truncated: all.length > MAX,
+    action: "references",
+    path: req.path,
+    line: req.line,
+    character: req.character,
+    total: all.length,
+    items,
+    truncated: all.length > MAX,
   } as ReferencesResult);
 }
 
-export async function handleRename(req: DaemonRequest, deps: RenameHandlerDeps): Promise<DaemonResponse> {
+export async function handleRename(
+  req: DaemonRequest,
+  deps: RenameHandlerDeps,
+): Promise<DaemonResponse> {
   if (!req.newName?.trim()) return errorResponse(req.id, "newName required for rename");
   let ctx: RequestContext<RenameBackend>;
   try {
@@ -405,14 +500,15 @@ export async function handleRename(req: DaemonRequest, deps: RenameHandlerDeps):
         }
         authorizedBackends.set(requestedPath, requestedBackend);
         return {
-          getDocumentSnapshot: (absolutePath) =>
-            requestedBackend.getDocumentSnapshot(absolutePath),
+          getDocumentSnapshot: (absolutePath) => requestedBackend.getDocumentSnapshot(absolutePath),
         };
       },
     });
     for (const file of applied.files) deps.fileCache.invalidate(file.absolutePath);
     await Promise.all(
-      applied.files.map((file) => authorizedBackends.get(file.absolutePath)!.ensureFile(file.absolutePath)),
+      applied.files.map((file) =>
+        authorizedBackends.get(file.absolutePath)!.ensureFile(file.absolutePath),
+      ),
     );
     ctx.backend.recordSemanticResult("textDocument/rename", applied.totalEdits);
     return okResponse(req.id, {
@@ -433,7 +529,10 @@ export async function handleRename(req: DaemonRequest, deps: RenameHandlerDeps):
   }
 }
 
-export async function handleSymbols(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
+export async function handleSymbols(
+  req: DaemonRequest,
+  deps: HandlerDeps,
+): Promise<DaemonResponse> {
   const MAX = 50;
 
   if (req.path) {
@@ -450,8 +549,11 @@ export async function handleSymbols(req: DaemonRequest, deps: HandlerDeps): Prom
     backend.recordSemanticResult("textDocument/documentSymbol", raw.length);
 
     return okResponse(req.id, {
-      action: "symbols", path: req.path,
-      total: items.length, items, truncated: raw.length > MAX,
+      action: "symbols",
+      path: req.path,
+      total: items.length,
+      items,
+      truncated: raw.length > MAX,
     });
   }
 
@@ -491,20 +593,35 @@ export async function handleSymbols(req: DaemonRequest, deps: HandlerDeps): Prom
     });
 
     return okResponse(req.id, {
-      action: "symbols", query: req.query,
-      total: allRaw.length, items, truncated: allRaw.length > MAX,
+      action: "symbols",
+      query: req.query,
+      total: allRaw.length,
+      items,
+      truncated: allRaw.length > MAX,
     });
   }
 
   return errorResponse(req.id, "symbols requires either path or query");
 }
 
-function deriveHealthState(snapshot: ReturnType<LspBackend["getStatusSnapshot"]> | undefined): StatusResult["state"] {
+function deriveHealthState(
+  snapshot: ReturnType<HandlerBackend["getStatusSnapshot"]> | undefined,
+): StatusResult["state"] {
   if (!snapshot) return "failed";
   if (snapshot.initializationState === "failed") return "failed";
   if (!snapshot.running || snapshot.initializationState !== "initialized") return "initializing";
   if (snapshot.semanticAvailable) return "ready";
   return snapshot.semanticFailure ? "degraded" : "initializing";
+}
+
+function projectSemanticStatus(
+  snapshot: ReturnType<HandlerBackend["getStatusSnapshot"]> | undefined,
+): StatusResult["semantic"] {
+  return {
+    available: snapshot?.semanticAvailable ?? false,
+    ...(snapshot?.lastSemanticRequest ? { lastRequest: snapshot.lastSemanticRequest } : {}),
+    ...(snapshot?.semanticFailure ? { semanticFailure: snapshot.semanticFailure } : {}),
+  };
 }
 
 export function handleStatus(req: DaemonRequest, deps: HandlerDeps): DaemonResponse {
@@ -525,23 +642,23 @@ export function handleStatus(req: DaemonRequest, deps: HandlerDeps): DaemonRespo
     state,
     running: true,
     pid: process.pid,
-    backend: snapshot ? {
-      name: snapshot.name,
-      running: snapshot.running,
-      ...(snapshot.stderrTail ? { stderrTail: snapshot.stderrTail } : {}),
-      ...(snapshot.startupFailure ? { startupFailure: snapshot.startupFailure } : {}),
-    } : { name: "unknown", running: false },
-    project: snapshot ? {
-      mode: snapshot.projectMode,
-      ...(snapshot.projectRoot ? { root: snapshot.projectRoot } : {}),
-      ...(snapshot.tsconfigPath ? { tsconfigPath: snapshot.tsconfigPath } : {}),
-    } : { mode: "unknown" },
+    backend: snapshot
+      ? {
+          name: snapshot.name,
+          running: snapshot.running,
+          ...(snapshot.stderrTail ? { stderrTail: snapshot.stderrTail } : {}),
+          ...(snapshot.startupFailure ? { startupFailure: snapshot.startupFailure } : {}),
+        }
+      : { name: "unknown", running: false },
+    project: snapshot
+      ? {
+          mode: snapshot.projectMode,
+          ...(snapshot.projectRoot ? { root: snapshot.projectRoot } : {}),
+          ...(snapshot.tsconfigPath ? { tsconfigPath: snapshot.tsconfigPath } : {}),
+        }
+      : { mode: "unknown" },
     initialization: { state: snapshot?.initializationState ?? "failed" },
-    semantic: {
-      available: snapshot?.semanticAvailable ?? false,
-      ...(snapshot?.lastSemanticRequest ? { lastRequest: snapshot.lastSemanticRequest } : {}),
-      ...(snapshot?.semanticFailure ? { semanticFailure: snapshot.semanticFailure } : {}),
-    },
+    semantic: projectSemanticStatus(snapshot),
     projects: allProjects,
     openFiles: allOpenFiles,
     watchedFiles: allOpenFiles.length,
@@ -556,16 +673,22 @@ function parseHoverContent(hover: any): { signature: string; docs?: string } {
   if (typeof contents === "string") {
     raw = contents;
   } else if (Array.isArray(contents)) {
-    raw = contents.map((c: any) => (typeof c === "string" ? c : c.value ?? "")).join("\n");
+    raw = contents.map((c: any) => (typeof c === "string" ? c : (c.value ?? ""))).join("\n");
   } else if (contents && typeof contents === "object") {
     raw = contents.value ?? "";
   }
 
-  raw = raw.replace(/^```[a-z]*\n?/gm, "").replace(/^```\n?/gm, "").trim();
+  raw = raw
+    .replace(/^```[a-z]*\n?/gm, "")
+    .replace(/^```\n?/gm, "")
+    .trim();
 
   const blankIdx = raw.indexOf("\n\n");
   if (blankIdx > 0) {
-    return { signature: raw.slice(0, blankIdx).trim(), docs: raw.slice(blankIdx + 2).trim() || undefined };
+    return {
+      signature: raw.slice(0, blankIdx).trim(),
+      docs: raw.slice(blankIdx + 2).trim() || undefined,
+    };
   }
 
   return { signature: raw };

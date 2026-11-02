@@ -19,6 +19,8 @@ Code changes require a design agent and a different implementation agent. This i
 
 The designer investigates existing owners, callers, and contracts and applies the [planning](../planning/SKILL.md) and [testing-practices](../testing-practices/SKILL.md) skills to produce an evidence-grounded design, not production code. Use the ownership and production-contract guidance below to shape the design.
 
+For structural changes, the designer also consults the [refactor skill](../refactor/SKILL.md) to assess opportunities, ownership, and preservation evidence.
+
 Keep the handoff proportional to the change, covering:
 
 - the intended outcome, scope, and invariants

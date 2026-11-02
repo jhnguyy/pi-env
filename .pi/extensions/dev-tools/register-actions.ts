@@ -4,28 +4,37 @@
  * Import this file for side effects to wire up dispatch. Adding a new action:
  * 1. Add type to protocol.ts
  * 2. Add handler to handlers.ts
- * 3. Add formatter to formatters.ts
- * 4. Add renderer to renderers.ts
- * 5. Add registerAction() call here
+ * 3. Add routing entry to action-handlers.ts
+ * 4. Add formatter to formatters.ts
+ * 5. Add renderer to renderers.ts
+ * 6. Add registerAction() call here
  */
 
 import { registerAction } from "./action-registry";
+import { actionHandlers } from "./action-handlers";
 import {
-  handleDiagnostics, handleHover, handleDefinition, handleImplementation,
-  handleReferences, handleRename, handleIncomingCalls, handleOutgoingCalls,
-  handleSymbols, handleStatus,
-} from "./handlers";
-import {
-  formatDiagnostics, formatHover, formatDefinition, formatImplementation,
-  formatReferences, formatRename, formatIncomingCalls, formatOutgoingCalls,
-  formatSymbols, formatStatus,
+  formatDiagnostics,
+  formatHover,
+  formatDefinition,
+  formatImplementation,
+  formatReferences,
+  formatRename,
+  formatIncomingCalls,
+  formatOutgoingCalls,
+  formatSymbols,
+  formatStatus,
 } from "./formatters";
 import { toolExpandHint } from "../_shared/tool-render";
 import { Text } from "@earendil-works/pi-tui";
 import { DevToolsAction } from "./action-contract";
 import type { RenderTheme } from "./render-contracts";
 import type {
-  DiagnosticsResult, IncomingCallsResult, OutgoingCallsResult, RenameResult, SymbolsResult, StatusResult,
+  DiagnosticsResult,
+  IncomingCallsResult,
+  OutgoingCallsResult,
+  RenameResult,
+  SymbolsResult,
+  StatusResult,
 } from "./protocol";
 
 // ─── Shared renderer helpers ──────────────────────────────────────────────────
@@ -43,7 +52,11 @@ function diagnosticsFileSummary(d: DiagnosticsResult): string {
   return `${files.length} file${files.length !== 1 ? "s" : ""}: ${visible.join(", ")}${suffix}`;
 }
 
-function renderDiagnostics(d: DiagnosticsResult, opts: { expanded?: boolean }, theme: RenderTheme): Text {
+function renderDiagnostics(
+  d: DiagnosticsResult,
+  opts: { expanded?: boolean },
+  theme: RenderTheme,
+): Text {
   if (opts.expanded) {
     return new Text(JSON.stringify(d, null, 2), 0, 0);
   }
@@ -53,8 +66,10 @@ function renderDiagnostics(d: DiagnosticsResult, opts: { expanded?: boolean }, t
     text = theme.fg("success", "✓ no errors");
   } else {
     const parts: string[] = [];
-    if (d.errorCount > 0) parts.push(theme.fg("error", `✗ ${d.errorCount} error${d.errorCount !== 1 ? "s" : ""}`));
-    if (d.warnCount > 0) parts.push(theme.fg("warning", `⚠ ${d.warnCount} warning${d.warnCount !== 1 ? "s" : ""}`));
+    if (d.errorCount > 0)
+      parts.push(theme.fg("error", `✗ ${d.errorCount} error${d.errorCount !== 1 ? "s" : ""}`));
+    if (d.warnCount > 0)
+      parts.push(theme.fg("warning", `⚠ ${d.warnCount} warning${d.warnCount !== 1 ? "s" : ""}`));
     text = parts.join(" ");
   }
 
@@ -65,18 +80,24 @@ function renderDiagnostics(d: DiagnosticsResult, opts: { expanded?: boolean }, t
   return new Text(text, 0, 0);
 }
 
-function renderCallHierarchy(d: IncomingCallsResult | OutgoingCallsResult, _opts: { expanded?: boolean }, theme: RenderTheme): Text {
+function renderCallHierarchy(
+  d: IncomingCallsResult | OutgoingCallsResult,
+  _opts: { expanded?: boolean },
+  theme: RenderTheme,
+): Text {
   const direction = d.action === "incoming-calls" ? "caller" : "callee";
-  const text = d.total === 0
-    ? theme.fg("muted", `— no ${direction}s`)
-    : theme.fg("success", `✓ ${d.total} ${direction}${d.total !== 1 ? "s" : ""}`) +
-      ` ${theme.fg("muted", `of ${d.symbol}`)}`;
+  const text =
+    d.total === 0
+      ? theme.fg("muted", `— no ${direction}s`)
+      : theme.fg("success", `✓ ${d.total} ${direction}${d.total !== 1 ? "s" : ""}`) +
+        ` ${theme.fg("muted", `of ${d.symbol}`)}`;
   return new Text(text, 0, 0);
 }
 
 function renderSymbols(d: SymbolsResult, _opts: { expanded?: boolean }, theme: RenderTheme): Text {
-  const label = d.query ? `"${d.query}"` : d.path?.split("/").pop() ?? "";
-  const text = theme.fg("success", `✓ ${d.total} symbol${d.total !== 1 ? "s" : ""}`) +
+  const label = d.query ? `"${d.query}"` : (d.path?.split("/").pop() ?? "");
+  const text =
+    theme.fg("success", `✓ ${d.total} symbol${d.total !== 1 ? "s" : ""}`) +
     (label ? ` ${theme.fg("muted", label)}` : "");
   return new Text(text, 0, 0);
 }
@@ -90,44 +111,46 @@ function renderStatus(d: StatusResult, _opts: { expanded?: boolean }, theme: Ren
 
 // ─── Simple one-liner renderers ───────────────────────────────────────────────
 
-const successRenderer = (label: string) =>
-  (r: any, _opts: { expanded?: boolean }, theme: RenderTheme) =>
+const successRenderer =
+  (label: string) => (r: any, _opts: { expanded?: boolean }, theme: RenderTheme) =>
     new Text(theme.fg("success", `✓ ${label}`), 0, 0);
 
 // ─── Register all actions ─────────────────────────────────────────────────────
 
 registerAction(DevToolsAction.Diagnostics, {
-  handler: handleDiagnostics,
+  handler: actionHandlers.diagnostics,
   formatter: formatDiagnostics,
   renderer: renderDiagnostics,
 });
 
 registerAction(DevToolsAction.Hover, {
-  handler: handleHover,
+  handler: actionHandlers.hover,
   formatter: formatHover,
   renderer: (_r, _opts, theme) => new Text(theme.fg("success", "✓ hover"), 0, 0),
 });
 
 registerAction(DevToolsAction.Definition, {
-  handler: handleDefinition,
+  handler: actionHandlers.definition,
   formatter: formatDefinition,
-  renderer: (r, _opts, theme) => new Text(theme.fg("success", `✓ ${r.locations.length} location(s)`), 0, 0),
+  renderer: (r, _opts, theme) =>
+    new Text(theme.fg("success", `✓ ${r.locations.length} location(s)`), 0, 0),
 });
 
 registerAction(DevToolsAction.Implementation, {
-  handler: handleImplementation,
+  handler: actionHandlers.implementation,
   formatter: formatImplementation,
-  renderer: (r, _opts, theme) => new Text(theme.fg("success", `✓ ${r.locations.length} implementation(s)`), 0, 0),
+  renderer: (r, _opts, theme) =>
+    new Text(theme.fg("success", `✓ ${r.locations.length} implementation(s)`), 0, 0),
 });
 
 registerAction(DevToolsAction.References, {
-  handler: handleReferences,
+  handler: actionHandlers.references,
   formatter: formatReferences,
   renderer: (r, _opts, theme) => new Text(theme.fg("success", `✓ ${r.total} reference(s)`), 0, 0),
 });
 
 registerAction(DevToolsAction.Rename, {
-  handler: handleRename,
+  handler: actionHandlers.rename,
   formatter: formatRename,
   renderer: (r: RenameResult, _opts, theme) =>
     new Text(
@@ -140,25 +163,25 @@ registerAction(DevToolsAction.Rename, {
     ),
 });
 registerAction(DevToolsAction.IncomingCalls, {
-  handler: handleIncomingCalls,
+  handler: actionHandlers["incoming-calls"],
   formatter: formatIncomingCalls,
   renderer: renderCallHierarchy,
 });
 
 registerAction(DevToolsAction.OutgoingCalls, {
-  handler: handleOutgoingCalls,
+  handler: actionHandlers["outgoing-calls"],
   formatter: formatOutgoingCalls,
   renderer: renderCallHierarchy,
 });
 
 registerAction(DevToolsAction.Symbols, {
-  handler: handleSymbols,
+  handler: actionHandlers.symbols,
   formatter: formatSymbols,
   renderer: renderSymbols,
 });
 
 registerAction(DevToolsAction.Status, {
-  handler: handleStatus,
+  handler: actionHandlers.status,
   formatter: formatStatus,
   renderer: renderStatus,
 });

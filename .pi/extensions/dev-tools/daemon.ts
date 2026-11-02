@@ -9,7 +9,7 @@
  * Business logic lives in:
  *   - backend.ts   — LspBackend: per-language-server subprocess manager
  *   - handlers.ts  — LSP action handlers (diagnostics, hover, definition, etc.)
- *   - action-registry.ts — handler/formatter/renderer dispatch (no switch chains)
+ *   - daemon-request.ts — parsed-request routing, execution, and telemetry
  *
  * Lifecycle:
  *   - Spawned by client.ts if socket not available
@@ -24,28 +24,21 @@ import { createServer, type Socket, type Server } from "node:net";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { Data, Effect, Result } from "effect";
+import { Effect, Result } from "effect";
 
 import { LspBackend } from "./backend";
 import { BACKEND_CONFIGS } from "./backend-configs";
 import { FileCache } from "./file-cache";
-import type { HandlerDeps } from "./handlers";
-import { getAction } from "./action-registry";
-import "./register-actions"; // side-effect: populates the action registry
-import { parseRequest, serializeResponse, errorResponse, okResponse, SOCKET_PATH, PID_PATH } from "./protocol";
-import type { DaemonRequest, DaemonResponse, StatusResult } from "./protocol";
+import type { HandlerBackend } from "./handlers";
+import { createDaemonRequestExecutor } from "./daemon-request";
+import { parseRequest, serializeResponse, errorResponse, SOCKET_PATH, PID_PATH } from "./protocol";
+import type { DaemonRequest, DaemonResponse } from "./protocol";
 import { removeStaleArtifact, removeStaleArtifacts } from "./socket-artifacts";
 import {
   createToolingTelemetryRuntime,
   noopToolingTelemetryRuntime,
   type ToolingTelemetryRuntime,
 } from "../../../src/telemetry/tooling.js";
-import {
-  DevToolsOperation,
-  DevToolsSpanName,
-  runWithDevToolsParentSpan,
-  withSafeDevToolsSpan,
-} from "./telemetry";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -62,21 +55,18 @@ function lspIdleTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
 /** Limit each connection buffer to prevent malformed clients from causing out-of-memory errors. */
 const MAX_BUFFER_BYTES = 1024 * 1024; // 1MB
 
-function telemetryAction(action: string): string {
-  if (action === "shutdown") return action;
-  return getAction(action as Parameters<typeof getAction>[0]) ? action : "unknown";
+export type ManagedBackend = HandlerBackend & { shutdown(): Promise<void> };
+
+export interface LspDaemonDeps {
+  /** Supplied backends transfer shutdown ownership to this daemon. */
+  readonly backends: readonly ManagedBackend[];
 }
-
-class DaemonDispatchFailure extends Data.TaggedError("DaemonDispatchFailure")<{
-  readonly cause: unknown;
-}> {}
-
-// ─── Per-backend LSP capabilities ─────────────────────────────────────────────
 
 // ─── LspDaemon ───────────────────────────────────────────────────────────────
 
 export class LspDaemon {
-  private backends: LspBackend[];
+  private readonly backends: readonly ManagedBackend[];
+  private readonly executeRequest: (req: DaemonRequest) => Promise<DaemonResponse>;
   private server: Server | null = null;
   private sockets = new Set<Socket>();
   private fileCache = new FileCache();
@@ -91,20 +81,16 @@ export class LspDaemon {
     private pidPath = PID_PATH,
     private idleTimeoutMs = lspIdleTimeoutMs(),
     private readonly telemetry: ToolingTelemetryRuntime = noopToolingTelemetryRuntime,
+    deps?: LspDaemonDeps,
   ) {
-    this.backends = BACKEND_CONFIGS.map((config) => new LspBackend(config, telemetry));
-  }
-
-  /** Return the backend that handles this file. Throws if no backend matches. */
-  private getBackend(filePath: string): LspBackend {
-    const backend = this.backends.find((b) => b.handles(filePath));
-    if (!backend) throw new Error(`No language server configured for: ${filePath}`);
-    return backend;
-  }
-
-  /** Return backends that support workspace/symbol queries. */
-  private getWorkspaceSymbolBackends(): LspBackend[] {
-    return this.backends.filter((b) => b.supportsWorkspaceSymbols);
+    this.backends =
+      deps?.backends ?? BACKEND_CONFIGS.map((config) => new LspBackend(config, telemetry));
+    this.executeRequest = createDaemonRequestExecutor({
+      backends: this.backends,
+      fileCache: this.fileCache,
+      getIdleMs: () => Date.now() - this.previousActivity,
+      telemetry,
+    });
   }
 
   // ─── Startup ────────────────────────────────────────────────────────────────
@@ -164,83 +150,16 @@ export class LspDaemon {
       return;
     }
 
-    let response: DaemonResponse;
-    try {
-      const dispatchWithoutParent = () =>
-        Effect.tryPromise({
-          try: () => this.dispatch(req),
-          catch: (cause) => new DaemonDispatchFailure({ cause }),
-        });
-      const dispatch = Effect.currentSpan.pipe(
-        Effect.matchEffect({
-          onFailure: dispatchWithoutParent,
-          onSuccess: (parent) =>
-            Effect.tryPromise({
-              try: () => runWithDevToolsParentSpan(parent, () => this.dispatch(req)),
-              catch: (cause) => new DaemonDispatchFailure({ cause }),
-            }),
-        }),
-      );
-      response = await Effect.runPromise(
-        this.telemetry.provide(
-          withSafeDevToolsSpan(
-            this.telemetry.diagnostics,
-            DevToolsSpanName.DaemonRequest,
-            { operation: DevToolsOperation.DaemonRequest, action: telemetryAction(req.action) },
-            dispatch,
-            () => "dispatch",
-            (response) =>
-              response.ok ? { outcome: "success" } : { outcome: "failure", error_kind: "response" },
-          ),
-        ),
-      );
-    } catch (error: unknown) {
-      const cause = error instanceof DaemonDispatchFailure ? error.cause : error;
-      response = errorResponse(
-        req.id,
-        cause instanceof Error ? cause.message : "Unknown error",
-      );
-    }
+    const response = await this.executeRequest(req);
 
     const serialized = serializeResponse(response);
     if (req.action === "shutdown") {
-      socket.end(serialized, () => { void this.shutdown(); });
+      socket.end(serialized, () => {
+        void this.shutdown();
+      });
     } else {
       socket.write(serialized);
     }
-  }
-
-  private async dispatch(req: DaemonRequest): Promise<DaemonResponse> {
-    const deps: HandlerDeps = {
-      getBackend: (p) => this.getBackend(p),
-      getWorkspaceSymbolBackends: () => this.getWorkspaceSymbolBackends(),
-      backends: this.backends,
-      fileCache: this.fileCache,
-      getIdleMs: () => Date.now() - this.previousActivity,
-    };
-
-    // Shutdown is handled inline — not a registered action
-    if (req.action === "shutdown") {
-      return okResponse(req.id, {
-        action: "status",
-        state: "initializing",
-        running: false,
-        backend: { name: "unknown", running: false },
-        project: { mode: "unknown" },
-        initialization: { state: "initializing" },
-        semantic: { available: false },
-        projects: [],
-        openFiles: [],
-        watchedFiles: 0,
-        idleMs: 0,
-      });
-    }
-
-    // Try the registry first
-    const action = getAction(req.action);
-    if (action) return action.handler(req, deps);
-
-    return errorResponse(req.id, `Unknown action: ${req.action}`);
   }
 
   // ─── Idle / Shutdown ─────────────────────────────────────────────────────────

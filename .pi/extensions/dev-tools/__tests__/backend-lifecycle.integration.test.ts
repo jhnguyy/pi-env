@@ -1,43 +1,13 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { resolveNodeCommand } from "../../../../src/process/platform";
 import { LspBackend } from "../backend";
 
-const SIMPLE_LSP = String.raw`
-const fs = require("node:fs");
-fs.appendFileSync(process.argv[1], "start\n");
-let buffer = Buffer.alloc(0);
-function send(message) {
-  const body = JSON.stringify(message);
-  process.stdout.write("Content-Length: " + Buffer.byteLength(body) + "\r\n\r\n" + body);
-}
-process.stdin.on("data", (chunk) => {
-  buffer = Buffer.concat([buffer, chunk]);
-  while (true) {
-    const split = buffer.indexOf("\r\n\r\n");
-    if (split < 0) return;
-    const header = buffer.subarray(0, split).toString("ascii");
-    const match = /Content-Length:\s*(\d+)/i.exec(header);
-    if (!match) process.exit(2);
-    const length = Number(match[1]);
-    const end = split + 4 + length;
-    if (buffer.length < end) return;
-    const message = JSON.parse(buffer.subarray(split + 4, end).toString("utf8"));
-    buffer = buffer.subarray(end);
-    if (message.id !== undefined) {
-      if (message.method === "textDocument/hover") {
-        send({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "unsupported hover" } });
-      } else {
-        send({ jsonrpc: "2.0", id: message.id, result: message.method === "initialize" ? { capabilities: {} } : null });
-      }
-    }
-    if (message.method === "exit") process.exit(0);
-  }
-});
-`;
+const fixturePath = fileURLToPath(new URL("./controlled-lsp-fixture.ts", import.meta.url));
 
 function testBackend(countFile: string): LspBackend {
   return new LspBackend({
@@ -46,7 +16,7 @@ function testBackend(countFile: string): LspBackend {
     binaryName: "test-language-server",
     binaryArgs: [],
     launchCommand: resolveNodeCommand(),
-    launchArgs: ["-e", SIMPLE_LSP, countFile],
+    launchArgs: [fixturePath, countFile],
     extensions: new Map([[".ts", "typescript"]]),
     rootMarkers: [],
     capabilities: {},
@@ -56,6 +26,64 @@ function testBackend(countFile: string): LspBackend {
 }
 
 describe("LspBackend lifecycle", () => {
+  it("receives diagnostics over LSP and normalizes cached public diagnostics by URI", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-dev-tools-diagnostics-"));
+    const backend = testBackend(join(root, "starts"));
+    const uri = "file:///test.ts";
+    try {
+      await backend.ensureStarted();
+      await backend.lspRequest("fixture/publishDiagnostics", {
+        uri,
+        diagnostics: [
+          {
+            range: { start: { line: 4, character: 2 } },
+            severity: 1,
+            code: 2339,
+            message: "Property 'x' does not exist on type 'Y'.",
+          },
+          {
+            range: { start: { line: 7, character: 0 } },
+            severity: 2,
+            code: 7017,
+            message: "Element implicitly has an 'any' type.",
+          },
+        ],
+      });
+      expect(backend.getDiagnostics(uri)).toMatchObject([
+        { severity: "error", code: "TS2339", line: 5, character: 3 },
+        { severity: "warning", code: "TS7017", line: 8, character: 1 },
+      ]);
+      expect(backend.getDiagnostics("file:///other.ts")).toEqual([]);
+    } finally {
+      await backend.shutdown();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("truncates published diagnostic messages at 200 characters", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-dev-tools-diagnostics-"));
+    const backend = testBackend(join(root, "starts"));
+    const uri = "file:///test.ts";
+    try {
+      await backend.ensureStarted();
+      await backend.lspRequest("fixture/publishDiagnostics", {
+        uri,
+        diagnostics: [
+          {
+            range: { start: { line: 0, character: 0 } },
+            severity: 1,
+            code: 2322,
+            message: "A".repeat(250),
+          },
+        ],
+      });
+      expect(backend.getDiagnostics(uri)[0].message).toBe("A".repeat(200) + "…");
+    } finally {
+      await backend.shutdown();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("coalesces startup, completes concurrent shutdown calls, and restarts with reset semantic state", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-dev-tools-backend-"));
     const countFile = join(root, "starts");

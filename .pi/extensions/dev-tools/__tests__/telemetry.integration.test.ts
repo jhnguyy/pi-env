@@ -44,19 +44,35 @@ const roots: string[] = [];
 afterEach(() => {
   const failures: unknown[] = [];
   for (const root of roots.splice(0)) {
-    try { rmSync(root, { recursive: true, force: true }); } catch (error) { failures.push(error); }
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch (error) {
+      failures.push(error);
+    }
   }
   if (failures.length) throw new AggregateError(failures, "Telemetry fixture removal failed");
 });
 
-async function withCleanup(run: () => Promise<void>, ...cleanup: (() => Promise<unknown>)[]): Promise<void> {
+async function withCleanup(
+  run: () => Promise<void>,
+  ...cleanup: (() => Promise<unknown>)[]
+): Promise<void> {
   const failures: unknown[] = [];
-  try { await run(); } catch (error) { failures.push(error); }
+  try {
+    await run();
+  } catch (error) {
+    failures.push(error);
+  }
   for (const release of cleanup) {
-    try { await release(); } catch (error) { failures.push(error); }
+    try {
+      await release();
+    } catch (error) {
+      failures.push(error);
+    }
   }
   if (failures.length === 1) throw failures[0];
-  if (failures.length > 1) throw new AggregateError(failures, "Telemetry operation and cleanup failed");
+  if (failures.length > 1)
+    throw new AggregateError(failures, "Telemetry operation and cleanup failed");
 }
 
 function inMemoryExporter(finished: ReadableSpan[]): SpanExporter {
@@ -85,13 +101,15 @@ async function telemetryRuntime(finished: ReadableSpan[]) {
 
 function sendDaemonRequest(
   socketPath: string,
-  request: Parameters<typeof serializeRequest>[0],
+  request: Parameters<typeof serializeRequest>[0] | string,
 ): Promise<ReturnType<typeof parseResponse>> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
     let buffer = "";
     socket.setEncoding("utf8");
-    socket.on("connect", () => socket.write(serializeRequest(request)));
+    socket.on("connect", () =>
+      socket.write(typeof request === "string" ? request : serializeRequest(request)),
+    );
     socket.on("data", (chunk) => {
       buffer += chunk;
       const newline = buffer.indexOf("\n");
@@ -144,13 +162,17 @@ describe("dev-tools tooling telemetry", () => {
       runtime,
     );
 
-    await withCleanup(async () => {
-      await backend.ensureStarted();
-      await backend.lspRequest("textDocument/hover", {
-        textDocument: { uri: `file://${pathSentinel}` },
-        sentinel: paramsSentinel,
-      });
-    }, () => backend.shutdown(), () => Effect.runPromise(runtime.disposeEffect));
+    await withCleanup(
+      async () => {
+        await backend.ensureStarted();
+        await backend.lspRequest("textDocument/hover", {
+          textDocument: { uri: `file://${pathSentinel}` },
+          sentinel: paramsSentinel,
+        });
+      },
+      () => backend.shutdown(),
+      () => Effect.runPromise(runtime.disposeEffect),
+    );
 
     expect(finished.map((span) => span.name)).toEqual(
       expect.arrayContaining([
@@ -180,7 +202,6 @@ describe("dev-tools tooling telemetry", () => {
     writeFileSync(privateFile, "const value = 1;\n");
     const finished: ReadableSpan[] = [];
     const runtime = await telemetryRuntime(finished);
-    const daemon = new LspDaemon(socketPath, pidPath, 60_000, runtime);
     const backend = new LspBackend(
       {
         mode: "lsp",
@@ -197,32 +218,51 @@ describe("dev-tools tooling telemetry", () => {
       } as any,
       runtime,
     );
-    (daemon as any).backends = [backend];
+    const daemon = new LspDaemon(socketPath, pidPath, 60_000, runtime, { backends: [backend] });
 
     const unknownAction = "private-unbounded-action";
-    await withCleanup(async () => {
-      await daemon.start();
-      const response = await sendDaemonRequest(socketPath, {
-        id: 1,
-        action: "hover",
-        path: privateFile,
-        line: 1,
-        character: 1,
-      });
-      expect(response).toMatchObject({ id: 1, ok: false });
-      const unknown = await sendDaemonRequest(socketPath, {
-        id: 2,
-        action: unknownAction,
-      } as any);
-      expect(unknown).toMatchObject({ id: 2, ok: false });
-    }, () => backend.shutdown(), () => daemon.shutdown(), () => Effect.runPromise(runtime.disposeEffect));
+    await withCleanup(
+      async () => {
+        await daemon.start();
+        const response = await sendDaemonRequest(socketPath, {
+          id: 1,
+          action: "hover",
+          path: privateFile,
+          line: 1,
+          character: 1,
+        });
+        expect(response).toMatchObject({ id: 1, ok: false });
+        const unknown = await sendDaemonRequest(socketPath, {
+          id: 2,
+          action: unknownAction,
+        } as any);
+        expect(unknown).toMatchObject({ id: 2, ok: false });
+        expect(
+          await sendDaemonRequest(socketPath, {
+            id: 3,
+            action: "diagnostics",
+            path: join(root, "missing.ts"),
+          }),
+        ).toMatchObject({ id: 3, ok: false, error: expect.stringContaining("File not found") });
+        expect(
+          await sendDaemonRequest(socketPath, {
+            id: 4,
+            action: "status",
+          }),
+        ).toMatchObject({ id: 4, ok: true });
+        expect(await sendDaemonRequest(socketPath, "{invalid json}\n")).toEqual({
+          id: 0,
+          ok: false,
+          error: "Invalid request JSON",
+        });
+      },
+      () => daemon.shutdown(),
+    );
 
     const hoverDaemonSpan = finished.find(
       (span) => span.name === DevToolsSpanName.DaemonRequest && span.attributes.action === "hover",
     );
-    const backendSpan = finished.find(
-      (span) => span.name === DevToolsSpanName.BackendRequest,
-    );
+    const backendSpan = finished.find((span) => span.name === DevToolsSpanName.BackendRequest);
     expect(hoverDaemonSpan?.attributes).toMatchObject({
       operation: "daemon_request",
       action: "hover",
@@ -239,12 +279,19 @@ describe("dev-tools tooling telemetry", () => {
       outcome: "failure",
       error_kind: "response",
     });
-    assertSafeSpans(finished, [
-      root,
-      socketPath,
-      pidPath,
-      privateFile,
-      unknownAction,
-    ]);
+    const requestSpans = finished.filter((span) => span.name === DevToolsSpanName.DaemonRequest);
+    expect(requestSpans).toHaveLength(4);
+    expect(
+      requestSpans.find((span) => span.attributes.action === "diagnostics")?.attributes,
+    ).toMatchObject({
+      outcome: "failure",
+      error_kind: "dispatch",
+    });
+    expect(
+      requestSpans.find((span) => span.attributes.action === "status")?.attributes,
+    ).toMatchObject({
+      outcome: "success",
+    });
+    assertSafeSpans(finished, [root, socketPath, pidPath, privateFile, unknownAction]);
   });
 });
