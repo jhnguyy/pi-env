@@ -55,10 +55,6 @@ Trace export is off by default. It requires both `PI_ENV_ANALYZE_OTEL_ENABLED=tr
 
 See [themes](themes.md) for Pi selection, terminal installation, and Slack reference strings.
 
-## Tmux agent status
-
-See [agent status in tmux](tmux-agent-status.md) for tab indicators, configuration, and recovery limits.
-
 ## Workflow evidence
 
 Run the focused workflow for the behavior under investigation:
