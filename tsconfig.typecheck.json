@@ -7,10 +7,22 @@
         "name": "@effect/language-service",
         "allowedUnstableApis": [
           "@effect/opentelemetry/NodeSdk#layer",
-          "@effect/vitest#it",
-          "@effect/vitest#live",
           "effect/PartitionedSemaphore#makeUnsafe",
           "effect/PartitionedSemaphore#withPermits"
+        ],
+        "overrides": [
+          {
+            "include": ["**/*.test.ts", ".pi/**/*.test.ts"],
+            "options": {
+              "allowedUnstableApis": [
+                "@effect/opentelemetry/NodeSdk#layer",
+                "@effect/vitest#it",
+                "@effect/vitest#live",
+                "effect/PartitionedSemaphore#makeUnsafe",
+                "effect/PartitionedSemaphore#withPermits"
+              ]
+            }
+          }
         ]
       }
     ]
