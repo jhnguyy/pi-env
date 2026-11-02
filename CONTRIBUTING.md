@@ -1,76 +1,56 @@
 # Contributing
 
-Before contributing, read and follow [the `code-contribution` skill](.agents/skills/code-contribution/SKILL.md). It owns the portable contribution method used for all repository work. This file defines pi-env-specific requirements.
+Start with [README](README.md) for setup modes and the [code-contribution skill](.agents/skills/code-contribution/SKILL.md) for the contribution workflow. This page adds pi-env's development requirements.
 
-Solo project — these requirements keep `git log --graph` readable and give the work-tracker extension a stable contract to enforce.
+## Prepare a checkout
 
-## Branch and PR convention
+Use Node compatible with [`package.json#engines`](package.json) and Nub on `PATH`. Check the [prerequisites](docs/prerequisites.md) and follow the [setup guidance](docs/setup.md) for Nix-managed or portable environments.
 
-```
-feat/<name>       new extension, tool, or capability
-fix/<name>        bug fix
-refactor/<name>   behavior-preserving structural change
-chore/<name>      config, docs, cleanup
-```
-
-- `main` is stable. Repository changes go through pull requests.
-- Every pull request uses a dedicated branch and worktree, even solo.
-- PRs are squash-merged into `main`.
-- Delete branches after merge.
-- Tag milestones on `main`: `v<major>.<minor>.0`
-
-## Documentation changes
-
-Follow `docs/conventions/documentation.md` for documentation placement, README scope, navigation, cross-links, prose, and comments.
-
-## Runtime requirements
-
-Nix owns provisioning and uses Pi's upstream package. Nub owns repository dependency install and script orchestration, and supplies the single portable fallback. `package.json#engines.node` declares compatibility, not an exact patch pin. Flake evaluation checks Node, Nub, and Pi development-package consistency.
-
-Before assuming a toolchain problem is a code problem, verify whether the host can execute Nub, whether Node satisfies `package.json#engines.node`, and whether Nix is local (`nix run` can realize store paths) or externally managed (`--nix-managed`, no local store writes). If a fix depends on one of those assumptions, update README/setup docs with the expectation.
-
-## Extension development
-
-Extension implementation conventions live in [`docs/conventions/extensions.md`](docs/conventions/extensions.md). Use that page for runtime shape, lifecycle manifest, tool output, and cross-bundle singleton rules.
-
-Source-owned contracts:
-
-- active extensions: [`package.json`](package.json)
-- lifecycle manifest: [`scripts/extension-manifest.mjs`](scripts/extension-manifest.mjs)
-- scripts: [`package.json#scripts`](package.json)
-
-Arguments to `nub run` are forwarded directly. Do not insert `--` before a Vitest file filter. TypeScript checking remains repository-wide for soundness.
-
-## Testing and review
-
-Follow [`docs/conventions/testing.md`](docs/conventions/testing.md) for E2E-first testing and evidence requirements. Catching tests are ephemeral and may not be committed.
-
-Canonical standard and safe verification phases live in [`scripts/verification-phases.mjs`](scripts/verification-phases.mjs). Test projects live in [`vitest.config.ts`](vitest.config.ts). Run the safe verification portfolio before integration when the full workspace contract is required.
-
-Run the dev-tools real-workspace canary with retained evidence:
-
-```bash
-PI_ENV_CANARY_ARTIFACT_DIR="$HOME/canary-evidence" nub run verify:phase real-workspace-semantic-canary
-```
-
-Retain that directory for review. The [canary](.pi/extensions/dev-tools/__tests__/real-workspace-canary.e2e.test.ts) owns the artifact format and default storage location.
-
-Run the session-manager E2E in Docker to isolate tmux from the host. See [session identity and display names](docs/session-manager.md) for the behavioral contract:
-
-```bash
-nub run test:e2e:session-manager:docker
-```
-
-The [bake targets](docker-bake.hcl) own build options, caching, and evidence export.
-
-## Worktree requirements
-
-Keep the primary working tree on `main`. Perform all branch work in a dedicated worktree outside the primary working tree. Concurrent sessions, editors, and the LSP daemon share each working tree, index, and checkout.
-
-After creating a worktree, run:
+Keep dependency links and generated bundles local to each checkout. Installation runs [hydration](scripts/hydrate.mjs), which prepares bundles and the Effect language service and restarts the LSP daemon. For an additional worktree, initialize those artifacts:
 
 ```bash
 nub run --no-check worktree:init
 ```
 
-Each worktree requires its own dependency links and extension build artifacts. Do not share `node_modules` or extension `dist` directories between worktrees.
+## Develop
+
+Follow the [extension conventions](docs/conventions/extensions.md) for package registration, runtime boundaries, and shared services. Pi loads generated bundles, so build changes before exercising them in a Pi session:
+
+```bash
+nub run build
+```
+
+Reload or restart that session afterward. For activated Nix artifacts, follow [host integration](docs/setup.md#declarative-host-integration) instead of assuming a checkout build replaces them.
+
+Keep tests and setup experiments isolated from personal homes, agent directories, settings, and sessions. Use the [dependency-update skill](.agents/skills/dependency-update/SKILL.md) when changing dependencies and the [documentation conventions](docs/conventions/documentation.md) when changing documentation.
+
+## Verification
+
+Inspect the change-scoped plan, then run it:
+
+```bash
+nub run verify --list
+nub run verify
+```
+
+Use `--base <ref>` to choose the comparison and `--checks-only` to omit tests. The commit hook runs checks only; native lint and Analyze still take the heavyweight lock.
+
+Local verification selects related unit tests. An integration-only edit may select no runnable unit tests, and generated artifacts or dynamic inputs can escape import-based selection. Choose qualification for the affected contracts:
+
+| Evidence                           | Command                                   |
+| ---------------------------------- | ----------------------------------------- |
+| Focused units                      | `nub run test:unit <file>`                |
+| Focused integration                | `nub run test:integration <file>`         |
+| Setup shell workflows              | `nub run test:setup`                      |
+| Regular native SDK and LSP E2Es    | `nub run test:workflows`                  |
+| Real-workspace canary              | `nub run test:canary`                     |
+| Isolated session-manager/tmux E2Es | `nub run test:e2e:session-manager:docker` |
+| Broader CI integration pipeline    | `nub run verify:full`                     |
+
+Run broad qualification only in an environment with adequate capacity. Supervision and serial execution do not guarantee aggregate memory containment. CI runs `verify:full`; select the canary and Docker qualification separately when relevant.
+
+[Testing conventions](docs/conventions/testing.md) cover organization, fixtures, and qualification boundaries. [`package.json#scripts`](package.json) owns executable commands.
+
+## Submit a change
+
+Use the [pull request template](.github/pull_request_template.md) to explain the behavioral outcome, relevant design choices, and validation. Distinguish checks that passed from qualification still pending, and retain useful failure evidence. Passing source tests does not establish that a built extension or activated host environment loaded the change.

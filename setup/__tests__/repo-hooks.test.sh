@@ -120,7 +120,7 @@ SH
   output=$(PATH="$tmp/bin:$PATH" NUB_LOG="$tmp/nub.log" \
     git -C "$repo" -c user.name=HookTest -c user.email=hook@example.invalid \
     commit -qm initial 2>&1) || fail "primary commit failed: $output"
-  assert_file_contains "$tmp/nub.log" "$repo: run verify:pre-commit"
+  assert_file_contains "$tmp/nub.log" "$repo: run verify --checks-only"
 
   git -C "$repo" worktree add -q -b test-linked "$linked"
   printf 'linked\n' > "$linked/linked.txt"
@@ -132,7 +132,7 @@ SH
     commit -qm linked 2>&1) || status=$?
   [ "$status" -ne 0 ] || fail 'linked worktree hook failure did not block commit'
   assert_eq "$(git -C "$linked" rev-parse HEAD)" "$before" 'linked worktree HEAD unchanged'
-  assert_file_contains "$tmp/nub.log" "$linked: run verify:pre-commit"
+  assert_file_contains "$tmp/nub.log" "$linked: run verify --checks-only"
   printf 'Primary commit succeeded; linked worktree commit was blocked (Git exit %s).\n' "$status" > "$tmp/result.txt"
   printf 'Reproduce: bash setup/__tests__/repo-hooks.test.sh\nExpected: Git runs the tracked hook in each worktree and blocks a failed commit.\nActual: see result.txt and nub.log.\n' > "$tmp/README"
   echo "Git hook invocation evidence: $tmp"

@@ -72,7 +72,7 @@ describe("real workspace semantic canary", () => {
   let artifactPath: string;
   const evidence: Record<string, unknown> = {
     scenario: "registered dev-tools definition lookup and real-workspace restart",
-    repeat: "nub run verify:phase real-workspace-semantic-canary",
+    repeat: "nub run test:canary",
     expected: {
       symbol: "registerPublicTool",
       destination: relative(repoRoot, sharedApiFile),

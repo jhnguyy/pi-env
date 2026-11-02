@@ -17,9 +17,10 @@ const integrationTestRoots = [
 
 export default defineConfig({
   test: {
-    project: ["unit", "integration"],
-    pool: "threads",
-    maxWorkers: 4,
+    project: ["unit"],
+    pool: "forks",
+    // Global inputs require explicit full verification, not an implicit local suite expansion.
+    forceRerunTriggers: [],
     testTimeout: 30_000,
     env: { TMPDIR: realpathSync(tmpdir()) },
     exclude: ["**/node_modules/**", "**/dist/**"],
@@ -49,15 +50,21 @@ export default defineConfig({
         extends: true,
         test: {
           name: "e2e",
-          maxWorkers: 1,
           include: [".pi/extensions/**/__tests__/e2e.test.ts"],
+          exclude: [".pi/extensions/session-manager/**"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "session-manager-e2e",
+          include: [".pi/extensions/session-manager/__tests__/e2e.test.ts"],
         },
       },
       {
         extends: true,
         test: {
           name: "real-workspace-canary",
-          maxWorkers: 1,
           include: [".pi/extensions/dev-tools/__tests__/real-workspace-canary.e2e.test.ts"],
         },
       },

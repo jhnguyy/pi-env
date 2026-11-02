@@ -1,31 +1,25 @@
-# Testing conventions
+# Testing
 
-1. **Prefer E2E tests as the sole behavioral test layer.** Verify complex features through the workflow people use and check the final result. Add isolated tests only for failures that E2E cannot exercise reliably.
-2. **Finish with verifiable, repeatable evidence.** Each E2E run leaves an artifact with its inputs, expected result, actual result, and instructions to reproduce and check it. When CI runs the check, the CI log or uploaded artifact is the reference location. Preserve useful evidence on failure. Exclude secrets.
-3. **Write isolated tests before production code.** First explain the E2E gap. List the component's failure modes and expected outcomes, then write failing tests before implementing it. For existing code, reproduce the failure before changing it. Derive expectations from requirements, not from the implementation you just wrote.
+Use the [testing-practices skill](../../.agents/skills/testing-practices/SKILL.md) for the portable method: prove the target unit's functional promises through useful input/output seams and rely on established collaborator contracts. The conventions here apply that method to pi-env's suites, fixtures, and runtime boundaries. [Contribution guidance](../../CONTRIBUTING.md#verification) owns commands, build sequencing, and execution precautions.
 
-Follow the [`testing-practices` skill](../../.agents/skills/testing-practices/SKILL.md) for test doubles and for test retention and removal, including safety coverage and temporary catching tests. For TypeScript workflows that use Effect, follow [Effect guardrails](effect-guardrails.md#tests) for test execution, time, layers, and cleanup.
+## Choose the suite and runtime
 
-## Test structure and review
+Keep tests with their owning area under `__tests__`. The [Vitest configuration](../../vitest.config.ts) defines runnable roots and project selection: integration suites use `*.integration.test.ts` or `*.integration.test.mjs`, while E2E and real-workspace canary scenarios follow their configured filenames. Setup shell tests run separately using their [shared helpers](../../setup/__tests__/README.md).
 
-E2E-first selects the workflow boundary. It does not require one large test. Split independent outcomes into named scenarios with shared setup where appropriate. Scenarios must not depend on the order of earlier assertions or responses.
+Place expensive native SDK, real LSP, Docker, and platform qualification in explicitly selected suites. Review import and startup costs when adding or reworking coverage; a unit label alone does not establish inexpensive execution. Choose the canary when the promise depends on the real workspace and Docker when it depends on session-manager's tmux environment.
 
-Use parameterized cases when each row keeps setup and expected outcomes explicit. Split cases when parameters select different setup workflows or expectation logic.
+For native loading, use matching checkout dependencies and built artifacts, then exercise the rebuilt extension in a reloaded or restarted Pi session. Source imports establish a different claim from loaded bundles; [extension runtime conventions](extensions.md#runtime-shape) describe that boundary. A deterministic inference provider can accompany real SDK sessions and tools to establish local integration, leaving hosted-provider compatibility as a separate qualification.
 
-Use a subprocess when the contract or isolation requires a separate process. Keep its launcher thin. Put substantial test programs in normal, type-checked source files rather than command strings. Reuse fixtures for a common lifecycle, not to build a general test framework.
+## Build an isolated fixture
 
-Assert observable results at the chosen boundary. For model-facing tools, check the content the model receives. Metadata or a truncation notice alone does not prove that useful output survives. Keep test names consistent with what assertions establish. Distinguish compile-time restrictions from runtime behavior.
+Use [Effect test guidance](effect-guardrails.md#tests) for Effect-native tests, injected services, test clocks, scopes, and interruption. Plain TypeScript and compatibility adapters can use regular Vitest tests. Keep substantial executable fixture programs in typed source files so repository checks can inspect them; source snippets an analyzer parses as input are data rather than executable fixture programs.
 
-Use unique temporary directories and register cleanup immediately. When the test runner owns teardown, separate allocation from asynchronous startup. Keep allocation failure-safe. Assign the fixture before starting it so registered teardown owns resources after failed startup or restart attempts.
+Isolate the user state a setup or native-session fixture can reach: homes, agent directories, settings, sessions, repositories, sockets, and shared services as applicable. A temporary cwd leaves personal Pi state exposed, so set an isolated `PI_CODING_AGENT_DIR` for processes that would otherwise discover it. Validate setup in that isolated state rather than resetting personal settings or activating a live host profile. Account for artifact preparation and LSP daemon restart before using dependency installation in a fixture or experiment.
 
-Attempt every cleanup step even when an earlier step fails. Preserve operation failures and all cleanup failures instead of replacing them.
+## Establish the result at its consumer
 
-Tests with explicit inputs must not depend on personal settings unless settings integration is the contract under test.
+Pi tools expose model-facing `content`, structured `details`, and UI rendering as different results. A test of the tool's answer establishes its required content, including useful information promised to survive bounded output. A routing or translation test instead establishes its adapter's decisions; formatting cases can rely on the engine's contract rather than requalifying its execution.
 
-Give each behavior one owning workflow. Extend that workflow instead of repeating its setup and assertions in a feature-specific test. Check idempotency by rerunning an operation and comparing persisted state, not by testing each implementation step.
+Likewise, durability across reload is established through a fresh reader or reloaded session, not merely an append call or in-memory result. For setup or migration idempotency, rerun against the state produced by the first run and check that the promised result remains unchanged.
 
-Share fixture lifecycle and evidence handling when multiple workflows need the same contract. Name each fixture for the resources or responsibility it owns. Keep scenario actions and expected outcomes explicit.
-
-Use `*.integration.test.ts` or `*.integration.test.mjs` for workflows that require real process or storage lifecycles. [`vitest.config.ts`](../../vitest.config.ts) owns project selection and timeout defaults. Keep readiness and completion event-driven. Use explicit tighter watchdogs when the scenario needs them, and distinguish watchdog activation from the expected outcome.
-
-E2E-first does not replace type, static policy, packaging, or install checks. Use [the canonical verification portfolio](../../scripts/verification-phases.mjs) and follow [the contribution requirements](../../CONTRIBUTING.md).
+Keep real-adapter evidence where a promise depends on native cancellation, process termination, persistence, transport compatibility, or shared resource ownership. Focused tests relying on the same established contract can reuse that evidence while concentrating on their own target's behavior.

@@ -42,7 +42,7 @@ describe("native tool workflows", () => {
     const evidence: Record<string, unknown> = {
       revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim(),
       dirty: execFileSync("git", ["status", "--porcelain"], { cwd: repo, encoding: "utf8" }).trim().length > 0,
-      repeat: "nub run build && nub run verify:phase native-tool-discovery",
+      repeat: "nub run build && nub run test:workflows",
       input: {
         defaultTools: ["+codemode", "+tool_search"],
         query: "web fetch",
@@ -300,7 +300,7 @@ it("runs the named session introspection scenarios in an isolated HOME", () => {
   const evidence = {
     revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim(),
     bundleHash: createHash("sha256").update(readFileSync(join(repo, ".pi/extensions/introspection/dist/index.js"))).digest("hex"),
-    repeat: "nub run build && nub run verify:phase native-tool-discovery",
+    repeat: "nub run build && nub run test:workflows",
     input: "native persistent Pi parent/child sessions, built-in skill reads and /skill expansion, controlled command failures and ctx.executeTool composition; synthetic legacy, missing-record, and adversarial histories in fixtures/search-workflow.ts",
     retainedInputs: { sessions: "sessions/", skills: "skills/", originalHome: home },
     retentionErrors: [] as string[],

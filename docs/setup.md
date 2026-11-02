@@ -20,11 +20,15 @@ See [the philosophy](../.pi/agent/APPEND_SYSTEM.md), [guidance installation](../
 
 `PI_CODING_AGENT_DIR` selects user state; `PI_AGENT_DIR` is a legacy alias. Conflicting selections are rejected. See [directory resolution](../setup/agent-dir.sh).
 
-[Nix bindings](../nix/outputs.nix) provide the local Nix runtime. The [runtime adapter](../setup/runtime.mjs) owns CLI installation and session launching. [Hydration](../scripts/hydrate.mjs) owns dependency-install preparation.
+The [runtime adapter](../setup/runtime.mjs) owns CLI installation and session launching. [Hydration](../scripts/hydrate.mjs) prepares dependency-install artifacts. In Nix-backed setups, the [package outputs](../nix/outputs.nix) distinguish a tools-only environment from a toolchain that also supplies Pi. Keeping those outputs separate lets infrastructure provision tools without taking ownership of the application's revision.
+
+### Declarative host integration
+
+The exported [Home Manager module](../nix/home-manager.nix) can provision Pi and terminal integration from a locked flake input. When it does, editing a working checkout does not replace those activated artifacts. Update the consuming input and activate its generation when those are the intended changes. Builder access, binary-cache trust, and host activation belong to that consuming infrastructure, not portable setup; use isolated state rather than a live profile to validate setup changes.
 
 ### Externally managed tools with checkout-owned Pi
 
-An external provisioner can supply Node, Nub, and command-line tools through [`packages.<system>.tools`](nix.md#packages-and-ownership). Pi then comes from the checkout's Nub-installed dependencies, not the Nix Pi package.
+An external provisioner can supply Node, Nub, and command-line tools through `packages.<system>.tools`. Pi then comes from the checkout's Nub-installed dependencies, not the Nix Pi package.
 
 For a container that exposes Node at the stable path `/bin/node`, run setup from the writable checkout:
 
@@ -39,15 +43,17 @@ The provisioner must make `/bin/node` executable and put Nub and the other tools
 
 Leave `PI_PACKAGE_DIR` and `PI_ENV_PI_EXECUTABLE` unset during setup and subsequent sessions. Do not enable `PI_ENV_CLI_MANAGED_BY_NIX`: setup must write the user-local Pi wrapper. The provisioner must put `${PI_BIN_DIR:-$HOME/.local/bin}` before other Pi executables on `PATH`. `--nix-managed` leaves shell profiles and terminal configuration to the provisioner. See [runtime integration](#runtime-integration) for setup implementation owners.
 
-After updating the application checkout, rerun the same setup command. Reuse the tools package while it satisfies the checkout's [runtime requirements](../CONTRIBUTING.md#runtime-requirements). The consumer owns source revision selection, persistent state, setup sequencing, and session restarts. Existing sessions do not reload the updated runtime automatically.
+After updating the application checkout, rerun the same setup command. Reuse the tools package while it satisfies the checkout's [runtime requirements](../package.json). The consumer owns source revision selection, persistent state, setup sequencing, and session restarts. Existing sessions do not reload the updated runtime automatically.
+
+## Analysis diagnostics
+
+Analyze keeps a bounded local NDJSON journal under `$XDG_STATE_HOME/pi-env/analyze`, or `~/.local/state/pi-env/analyze` when that variable is absent. It provides diagnostic context for worker failures. Set `PI_ENV_ANALYZE_JOURNAL_DIR` to choose another location or `PI_ENV_ANALYZE_JOURNAL_ENABLED=false` to disable it. Preserve relevant failure evidence before later runs rotate it, and review journals before sharing them.
+
+Trace export is off by default. It requires both `PI_ENV_ANALYZE_OTEL_ENABLED=true` and `PI_ENV_ANALYZE_OTEL_ENDPOINT` pointing to the intended OTLP collector. The endpoint is not emitted as telemetry.
 
 ## Gruvbox themes
 
 See [themes](themes.md) for Pi selection, terminal installation, and Slack reference strings.
-
-## Tmux agent status
-
-See [agent status in tmux](tmux-agent-status.md) for tab indicators, configuration, and recovery limits.
 
 ## Workflow evidence
 
@@ -57,4 +63,4 @@ Run the focused workflow for the behavior under investigation:
 - Guidance updates: `bash setup/__tests__/append-system.test.sh`
 - Ghostty: `bash setup/__tests__/ghostty-config.test.sh`
 
-Each prints a retained evidence directory. See [setup testing](../setup/__tests__/README.md) and [verification requirements](../CONTRIBUTING.md#testing-and-review) for broader checks.
+Each prints a retained evidence directory. See [setup testing](../setup/__tests__/README.md) and [verification guidance](../CONTRIBUTING.md#verification) for broader checks.

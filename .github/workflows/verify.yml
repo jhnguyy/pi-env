@@ -52,16 +52,20 @@ jobs:
         shell: bash
         run: nub install --frozen-lockfile
 
-      # The image build runs the full portfolio against its baked toolchain, including
+      - name: Verify changed-file policy
+        shell: bash
+        run: nub run verify --checks-only
+
+      # The image build runs verify:full against its baked toolchain, including
       # tmux 3.8. This job covers what only a stock runner shows: Nub provisioning,
       # portable setup, and installation with the host's own tools.
       - name: Verify portable setup
         shell: bash
-        run: nub run verify:phase setup-tests
+        run: nub run test:setup
 
       - name: Verify build and install readiness
         shell: bash
-        run: nub run verify:phase build && nub run verify:phase install-readiness
+        run: nub run build && nub run verify:install
 
       - name: Verify safe Analyze canary
         shell: bash
