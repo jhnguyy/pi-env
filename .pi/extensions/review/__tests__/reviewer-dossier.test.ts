@@ -244,13 +244,13 @@ describe("reviewer dossier admission contract", () => {
   });
 
   it("keeps the bounded raw-finding dossier without transcript-driven duplicate inflation", async () => {
-    const long = `x${"\n".repeat(19_998)}`;
+    const sentinel = 'finding "quoted"\nnext line\\tail';
     const findings = Array.from({ length: 2 }, () => ({
       severity: "medium",
       impact: "medium",
-      problem: long,
-      consequence: long,
-      suggestedFix: long,
+      problem: sentinel,
+      consequence: sentinel,
+      suggestedFix: sentinel,
     }));
     const f = await fixture(
       Object.fromEntries(
@@ -267,6 +267,27 @@ describe("reviewer dossier admission contract", () => {
     const serialized = serializeReviewerDossierContext(dossier);
     expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(MaxReviewerDossierBytes);
     expect(serialized).not.toContain('"text"');
+    const context = JSON.parse(serialized) as ReturnType<typeof reviewerDossierContext>;
+    const escapedSentinel = JSON.stringify(sentinel).slice(1, -1);
+    expect(context.succeeded.map((item) => item.role)).toEqual(
+      ReviewerNodes.map((node) => node.role),
+    );
+    for (const item of context.succeeded) {
+      expect(item.rawFindings).toHaveLength(2);
+      expect(item.rawFindings.map((raw) => raw.index)).toEqual([0, 1]);
+      expect(item.rawFindings.map((raw) => raw.role)).toEqual([item.role, item.role]);
+      for (const raw of item.rawFindings)
+        expect(raw.finding).toMatchObject({
+          problem: sentinel,
+          consequence: sentinel,
+          suggestedFix: sentinel,
+        });
+      expect(JSON.stringify(item).split(escapedSentinel).length - 1).toBe(6);
+    }
+    const raw = context.succeeded.flatMap((item) => item.rawFindings);
+    expect(raw).toHaveLength(ReviewerNodes.length * 2);
+    expect(new Set(raw.map((item) => item.id)).size).toBe(ReviewerNodes.length * 2);
+    expect(serialized.split(escapedSentinel).length - 1).toBe(ReviewerNodes.length * 6);
   });
 
   it("applies the tool limit after JSON escaping", () => {

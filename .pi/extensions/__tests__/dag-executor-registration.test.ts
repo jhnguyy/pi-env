@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { DagExecutorKind } from "../../../src/dag/index.js";
 import {
   lookupRegisteredDagExecutor,
@@ -20,6 +20,7 @@ describe("session-generation DAG executor registration", () => {
       key: "domain/materialize-v1",
       executor,
     });
+    onTestFinished(() => unregisterDagExecutor(active));
     expect(
       lookupRegisteredDagExecutor(
         "parent",
@@ -39,6 +40,7 @@ describe("session-generation DAG executor registration", () => {
       key: "domain/materialize-v1",
       executor,
     });
+    onTestFinished(() => unregisterDagExecutor(active));
     expect(() =>
       registerDagExecutor({
         parentSessionId: "parent",
@@ -67,6 +69,7 @@ describe("session-generation DAG executor registration", () => {
       key: "domain/materialize-v1",
       executor,
     });
+    onTestFinished(() => unregisterDagExecutor(stale));
     const replacementExecutor = () => Effect.succeed({ replacement: true });
     const replacement = registerDagExecutor({
       parentSessionId: "parent",
@@ -75,6 +78,7 @@ describe("session-generation DAG executor registration", () => {
       key: "domain/materialize-v1",
       executor: replacementExecutor,
     });
+    onTestFinished(() => unregisterDagExecutor(replacement));
     removeDagExecutorsForSessionGeneration("parent", "old");
     unregisterDagExecutor(stale);
     expect(

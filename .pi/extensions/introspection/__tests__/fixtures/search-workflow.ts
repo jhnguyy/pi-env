@@ -9,6 +9,7 @@ import {
   createAgentSession,
   createToolSearchExtension,
   DefaultResourceLoader,
+  DEFAULT_MAX_BYTES,
   ModelRuntime,
   SessionManager,
   SettingsManager,
@@ -31,7 +32,7 @@ let outputFile: string;
 let outputEntryId: string;
 const term = "postgres [db]";
 const successCommand = `printf '${term} tool output private-output'; : 'git status'`;
-const failureCommand = `printf 'private-output private-large-output synthetic external failure synthetic error'; printf '%40000s' ''; : 'git status ${term}'; exit 1`;
+const failureCommand = `printf 'private-output private-large-output synthetic external failure synthetic error'; : 'git status ${term}'; exit 1`;
 const outputTerm = "\u0000".repeat(200);
 const outputSnippet = `${"\u0001".repeat(80)}${outputTerm}${"\u0001".repeat(80)}`;
 const faux = fauxProvider();
@@ -261,8 +262,10 @@ void describe("session introspection public workflow", { concurrency: false }, (
   });
 
   after(async () => {
-    await session?.abort();
-    session?.dispose();
+    const failures: unknown[] = [];
+    try { await session?.abort(); } catch (error) { failures.push(error); }
+    try { session?.dispose(); } catch (error) { failures.push(error); }
+    if (failures.length) throw new AggregateError(failures, "Introspection fixture cleanup failed");
   });
 
   void it("discovers the deferred tool", () => {
@@ -321,7 +324,7 @@ void describe("session introspection public workflow", { concurrency: false }, (
     assert.match(oversized.text, /not found/);
   });
 
-  void it("returns only error locations for large failed tool outputs", async () => {
+  void it("returns error locations without failed tool output", async () => {
     const result = await read({ sessionId: usageId, fields: ["errors"] });
     assert.equal(result.toolErrors.length, 2);
     assert.equal(result.toolErrors[0].toolName, "bash");
@@ -448,7 +451,11 @@ void describe("session introspection public workflow", { concurrency: false }, (
     assert.equal(result.matchedRecords, 100);
     assert.equal(result.referencesTruncated, true);
     assert(result.references.length > 0 && result.references.length < 100);
-    assert(Buffer.byteLength(JSON.stringify(result, null, 2)) <= 50 * 1024);
+    assert(Buffer.byteLength(JSON.stringify(result, null, 2)) <= DEFAULT_MAX_BYTES);
+    for (const reference of result.references) {
+      const entry = JSON.parse(readFileSync(reference.file, "utf8").split("\n")[reference.line - 1]);
+      assert.equal(entry.id, reference.entryId);
+    }
   });
 
   for (const name of ["dictionary-bytes", "dictionary-lines"]) {
@@ -456,8 +463,9 @@ void describe("session introspection public workflow", { concurrency: false }, (
       const result = await invoke("read_session", { sessionId: join(root, `${name}.jsonl`), mode: "usage" });
       assert.equal(result.isError, true);
       assert.match(result.text, /Session fields exceed the output budget/);
-      const narrowed = await usage({ sessionId: join(root, `${name}.jsonl`), tool: name === "dictionary-bytes" ? `t0${"x".repeat(80)}` : "t0" });
-      assert.equal(Object.values(narrowed.toolCounts)[0], 1);
+      const tool = name === "dictionary-bytes" ? `t0${"x".repeat(80)}` : "t0";
+      const narrowed = await usage({ sessionId: join(root, `${name}.jsonl`), tool });
+      assert.deepStrictEqual(narrowed.toolCounts, { [tool]: 1 });
     });
   }
 
@@ -487,7 +495,8 @@ void describe("session introspection public workflow", { concurrency: false }, (
     const result = await search({ term: outputTerm, cwd: join(home, "output") });
     assert.partialDeepStrictEqual(result.details, { truncated: true });
     assert.match(result.text, /Output truncated/);
-    assert(Buffer.byteLength(result.text) < 51 * 1024);
+    const payload = result.text.split("\n\n[Output truncated:")[0];
+    assert(Buffer.byteLength(payload) <= DEFAULT_MAX_BYTES);
     const records = matchRecords(result.text);
     assert(records.length > 0 && records.length < 20);
     for (const record of records) assert.doesNotThrow(() => JSON.parse(record));

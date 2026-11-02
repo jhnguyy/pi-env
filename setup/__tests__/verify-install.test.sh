@@ -40,6 +40,16 @@ run_verify() {
   (cd "$TMP_DIR" && "$NODE_RUN" scripts/verify-install.mjs 2>&1)
 }
 
+expect_verify_failure() {
+  local output status=0
+  output="$(run_verify)" || status=$?
+  if [ "$status" -eq 0 ]; then
+    printf 'FAIL: install verification reported success for an invalid fixture:\n%s\n' "$output" >&2
+    return 1
+  fi
+  printf '%s\n' "$output"
+}
+
 write_repo '{ "name": "@test/active", "type": "module", "private": true, "pi": { "extensions": ["./dist/index.js"] } }'
 run_verify >/dev/null
 mkdir -p "$TMP_DIR/node_modules/@effect/language-service"
@@ -54,7 +64,7 @@ const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
 pkg.devDependencies = { '@effect/language-service': '1.0.0' };
 fs.writeFileSync(path, JSON.stringify(pkg));
 JS
-output="$(run_verify || true)"
+output="$(expect_verify_failure)"
 if grep -q 'Effect TypeScript patch check failed: fixture TypeScript is not patched' <<<"$output"; then
   echo 'ok: unpatched Effect TypeScript installation is rejected'
 else
@@ -62,7 +72,7 @@ else
   exit 1
 fi
 write_repo '{ "name": "@test/active", "type": "module", "private": true, "pi": { "extensions": [] } }'
-output="$(run_verify || true)"
+output="$(expect_verify_failure)"
 if grep -q 'active: package.json pi.extensions must include ./dist/index.js' <<<"$output"; then
   echo 'ok: active extension manifest export is enforced'
 else
@@ -78,7 +88,7 @@ const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
 pkg.pi.extensions.push('./.pi/extensions/active');
 fs.writeFileSync(path, JSON.stringify(pkg));
 JS
-output="$(run_verify || true)"
+output="$(expect_verify_failure)"
 if grep -q 'duplicate active extension path: .pi/extensions/active' <<<"$output"; then
   echo 'ok: duplicate extension registrations are rejected'
 else
@@ -87,7 +97,7 @@ else
 fi
 
 write_repo '{ "name": "@test/active", "type": "module", "private": true, "pi": { "extensions": ["./dist/index.js"] } }' '{ "missing": [{ "entry": "daemon.ts", "outfile": "dist/daemon.js" }] }'
-output="$(run_verify || true)"
+output="$(expect_verify_failure)"
 if grep -q 'sidecar config references inactive extension: missing' <<<"$output"; then
   echo 'ok: inactive sidecar references are rejected'
 else
@@ -114,7 +124,7 @@ pkg.workspaces.push('.pi/extensions/playwright-client', '.pi/extensions/work-tra
 pkg.pi.extensions.push('.pi/extensions/playwright-client', '.pi/extensions/work-tracker');
 fs.writeFileSync(path, JSON.stringify(pkg));
 JS
-output="$(run_verify || true)"
+output="$(expect_verify_failure)"
 if grep -q 'playwright-client: extension must stay disabled by default' <<<"$output" && \
   grep -q 'work-tracker: extension must stay disabled by default' <<<"$output"; then
   echo 'ok: default-disabled extension registration is rejected'
@@ -139,7 +149,7 @@ const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
 pkg.workspaces.push('.pi/extensions/workspace-only');
 fs.writeFileSync(path, JSON.stringify(pkg));
 JS
-output="$(run_verify || true)"
+output="$(expect_verify_failure)"
 if grep -q 'workspace extension is not registered in package pi.extensions: .pi/extensions/workspace-only' <<<"$output"; then
   echo 'ok: workspace/root extension drift is rejected'
 else
@@ -159,7 +169,7 @@ pkg.allowScripts = { '@trusted/build-tool': true, 'missing-build-tool': true, 'i
 pkg.patchedDependencies = { 'protobufjs@7.6.4': 'patches/protobufjs@7.6.4.patch' };
 fs.writeFileSync(path, JSON.stringify(pkg));
 JS
-output="$(run_verify || true)"
+output="$(expect_verify_failure)"
 if grep -q 'package allowScripts package is not present in nub.lock: missing-build-tool' <<<"$output" && \
   grep -q 'package allowScripts entry must be boolean: invalid-build-tool' <<<"$output" && \
   grep -q 'package patchedDependencies patch file is missing: patches/protobufjs@7.6.4.patch' <<<"$output" && \

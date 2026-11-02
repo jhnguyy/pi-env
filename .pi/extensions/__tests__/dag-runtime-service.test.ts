@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished } from "vitest";
 import {
   DagRuntimeServiceEvent,
   listenForDagRuntimeService as subscribeToDagRuntimeService,
@@ -43,7 +43,15 @@ function listenForDagRuntimeService(...args: Parameters<typeof subscribeToDagRun
   return stop;
 }
 afterEach(() => {
-  for (const stop of subscriptions.splice(0)) stop();
+  const failures: unknown[] = [];
+  for (const stop of subscriptions.splice(0)) {
+    try {
+      stop();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length) throw new AggregateError(failures, "DAG runtime subscriptions failed to stop.");
 });
 
 describe("DAG runtime service registration", () => {
@@ -94,6 +102,7 @@ describe("DAG runtime service registration", () => {
       sessionGeneration: "stable",
       service,
     });
+    onTestFinished(() => unregisterDagRuntimeService(events, stable));
     expect(() =>
       registerDagRuntimeService(throwingEvents, {
         parentSessionId: "replacement",
@@ -125,6 +134,7 @@ describe("DAG runtime service registration", () => {
       sessionGeneration: "previous",
       service,
     });
+    onTestFinished(() => unregisterDagRuntimeService(replacementEvents, previous));
     rejectRegistration = true;
     expect(() =>
       registerDagRuntimeService(replacementEvents, {
@@ -147,6 +157,7 @@ describe("DAG runtime service registration", () => {
       sessionGeneration: "generation",
       service,
     });
+    onTestFinished(() => unregisterDagRuntimeService(events, registration));
     const removedA: DagRuntimeServiceRegistration[] = [];
     const removedB: DagRuntimeServiceRegistration[] = [];
     listenForDagRuntimeService(
@@ -179,6 +190,7 @@ describe("DAG runtime service registration", () => {
       sessionGeneration: "generation-a",
       service,
     });
+    onTestFinished(() => unregisterDagRuntimeService(events, first));
 
     const late: DagRuntimeServiceRegistration[] = [];
     const removed: DagRuntimeServiceRegistration[] = [];
@@ -194,6 +206,7 @@ describe("DAG runtime service registration", () => {
       sessionGeneration: "generation-b",
       service,
     });
+    onTestFinished(() => unregisterDagRuntimeService(events, replacement));
     unregisterDagRuntimeService(events, first);
     events.events.emit(DagRuntimeServiceEvent.Unregister, first);
     expect(removed).toEqual([]);

@@ -374,7 +374,9 @@ describe("review extension pull request surface", () => {
       },
       pullRequest: {
         title: "T",
-        body: "important body line\n".repeat(10_000),
+        body: "important body line\n".repeat(
+          Math.ceil(DEFAULT_MAX_BYTES / Buffer.byteLength("important body line\n", "utf8")),
+        ),
         state: "OPEN",
         author: { login: "author" },
         baseRefName: "main",
@@ -546,6 +548,11 @@ describe("review extension pull request surface", () => {
   it("does not restore an interrupted preparation into a replacement session", async () => {
     tempRoot();
     const state = { ...sampleState("stale-preparation", []), plan: undefined, result: undefined };
+    const replacement = {
+      ...sampleState("replacement-preparation", []),
+      plan: undefined,
+      result: undefined,
+    };
     mkdirSync(state.snapshot.cache!.repoDir, { recursive: true });
     mkdirSync(state.snapshot.cache!.worktree, { recursive: true });
     const pi = extensionPi();
@@ -555,7 +562,11 @@ describe("review extension pull request surface", () => {
     });
     let releaseCleanup!: () => void;
     pi.exec = async (_cmd: string, args: string[]) => {
-      if (args[0] === "worktree" && args[1] === "remove") {
+      if (
+        args[0] === "worktree" &&
+        args[1] === "remove" &&
+        args[3] === state.snapshot.cache!.worktree
+      ) {
         markStarted();
         return new Promise((resolve) => {
           releaseCleanup = () => resolve({ code: 0, stdout: "", stderr: "" });
@@ -568,16 +579,24 @@ describe("review extension pull request surface", () => {
     } as any);
     await started;
     pi.handlers.session_tree({}, {
-      sessionManager: { getBranch: () => [], getSessionId: () => "session-b" },
+      sessionManager: { getBranch: () => [custom(replacement)], getSessionId: () => "session-b" },
     } as any);
     releaseCleanup();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(pi.appended).toHaveLength(0);
+    // Both preparations share the repository cleanup permit. The replacement's
+    // persisted result observes a completed reconciliation after that handoff.
+    await vi.waitFor(() => {
+      expect(pi.appended).toHaveLength(1);
+      expect(pi.appended[0][1]).toMatchObject({
+        reviewId: replacement.snapshot.id,
+        state: { preparation: { status: "failed", code: "preparation_interrupted" } },
+      });
+    });
     const notes: string[] = [];
     await pi.command("pr list", {
       ui: { notify: (message: string) => notes.push(message) },
     } as any);
-    expect(notes.at(-1)).toBe("No active PR reviews.");
+    expect(notes.at(-1)).toContain(replacement.snapshot.id);
+    expect(notes.at(-1)).not.toContain(state.snapshot.id);
   });
 
   it("cleans an unaccepted running review after process loss", async () => {
@@ -683,6 +702,13 @@ describe("review extension pull request surface", () => {
     const pi = extensionPi();
     let resolveFirst!: (value: any) => void;
     let firstCalled = false;
+    const newReconstruct = vi.fn(() =>
+      Effect.succeed({
+        state: { nodes: [{ nodeId: "review-correctness", status: "interrupted" }] },
+        terminalOutcome: "interrupted",
+        recoveredFromProcessLoss: true,
+      } as any),
+    );
     const firstResult = new Promise<any>((resolve) => {
       resolveFirst = resolve;
     });
@@ -711,21 +737,24 @@ describe("review extension pull request surface", () => {
       sessionGeneration: "new-generation",
       service: {
         submit: () => Effect.die("submit must not run"),
-        reconstruct: () =>
-          Effect.succeed({
-            state: { nodes: [{ nodeId: "review-correctness", status: "interrupted" }] },
-            terminalOutcome: "interrupted",
-            recoveredFromProcessLoss: true,
-          } as any),
+        reconstruct: newReconstruct,
       },
     });
     resolveFirst({
-      state: { nodes: [{ nodeId: "review-correctness", status: "interrupted" }] },
-      terminalOutcome: "interrupted",
-      recoveredFromProcessLoss: true,
+      state: {
+        nodes: [{ nodeId: "review-security", status: "failed", error: { message: "stale result" } }],
+      },
+      terminalOutcome: "failed",
+      recoveredFromProcessLoss: false,
     });
     await vi.waitFor(() => expect(pi.appended).toHaveLength(1));
-    expect(pi.appended[0][1].state.dag.status).toBe("interrupted");
+    expect(newReconstruct).toHaveBeenCalledTimes(1);
+    expect(newReconstruct).toHaveBeenCalledWith("run");
+    expect(pi.appended[0][1].state.dag).toMatchObject({
+      status: "interrupted",
+      recoveredFromProcessLoss: true,
+      failedNodes: [],
+    });
   });
 
   it("refuses cleanup while the review DAG is active", async () => {

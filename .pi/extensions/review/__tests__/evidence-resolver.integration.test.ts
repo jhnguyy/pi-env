@@ -13,7 +13,9 @@ import {
 } from "../../../../src/dag/index.js";
 import { sha256 } from "../core";
 import {
+  ReviewEvidenceChunkOutputs,
   ReviewEvidenceCoverageOutput,
+  ReviewEvidenceDossierMaxBytes,
   ReviewEvidenceOutputs,
   ReviewEvidenceResolverKey,
   reviewEvidenceResolverExecutor,
@@ -154,7 +156,32 @@ describe("pull request evidence resolver", () => {
       chunks: 1,
       omissions: [],
     });
-    expect(JSON.parse(coverage.text).digest).toMatch(/^[0-9a-f]{64}$/u);
+    const chunks = await Promise.all(
+      ReviewEvidenceChunkOutputs.map(async (outputName) => {
+        const chunk = await Effect.runPromise(
+          materializeDagTextArtifact(f.dagArtifacts, outputs[outputName], {
+            runId: "review-run",
+            producerNodeId: "evidence-resolver",
+            outputName,
+          }),
+        );
+        return chunk.text;
+      }),
+    );
+    expect(chunks[0]).toBe(
+      [
+        "=== Evidence 1: file a.ts:1-2 ===",
+        "Purpose: source",
+        "export const a = 1;",
+        "export const b = 2;",
+        "",
+        "=== Evidence 2: diff a.ts:1-7 ===",
+        "Purpose: patch",
+        f.diff.trimEnd(),
+      ].join("\n"),
+    );
+    expect(chunks.slice(1)).toEqual(["", "", ""]);
+    expect(JSON.parse(coverage.text).digest).toBe(sha256(chunks.join("")));
   });
 
   it("records exact changed hunks that the evidence index does not cover", async () => {
@@ -182,6 +209,7 @@ describe("pull request evidence resolver", () => {
   it.each([
     {
       name: "reversed range",
+      code: "invalid-plan",
       prepare: (f: ReturnType<typeof fixture>) => ({
         fixture: f,
         plan: plan([
@@ -191,6 +219,7 @@ describe("pull request evidence resolver", () => {
     },
     {
       name: "partial diff hunk",
+      code: "invalid-range",
       prepare: (f: ReturnType<typeof fixture>) => ({
         fixture: f,
         plan: plan([
@@ -200,6 +229,7 @@ describe("pull request evidence resolver", () => {
     },
     {
       name: "missing file",
+      code: "missing-file",
       prepare: (f: ReturnType<typeof fixture>) => ({
         fixture: f,
         changedPaths: ["missing.ts"],
@@ -219,6 +249,7 @@ describe("pull request evidence resolver", () => {
     },
     {
       name: "traversal",
+      code: "containment",
       prepare: (f: ReturnType<typeof fixture>) => ({
         fixture: f,
         changedPaths: ["../outside.ts"],
@@ -238,6 +269,7 @@ describe("pull request evidence resolver", () => {
     },
     {
       name: "unplanned path",
+      code: "invalid-plan",
       prepare: (f: ReturnType<typeof fixture>) => ({
         fixture: f,
         plan: plan([
@@ -253,6 +285,7 @@ describe("pull request evidence resolver", () => {
     },
     {
       name: "snapshot mismatch",
+      code: "snapshot-mismatch",
       prepare: (f: ReturnType<typeof fixture>) => ({
         fixture: f,
         diffHash: "0".repeat(64),
@@ -261,9 +294,12 @@ describe("pull request evidence resolver", () => {
         ]),
       }),
     },
-  ])("rejects $name without returning evidence references", async ({ prepare }) => {
+  ])("rejects $name without returning evidence references", async ({ prepare, code }) => {
     const f = fixture();
-    await expect(execute(prepare(f))).rejects.toBeDefined();
+    await expect(execute(prepare(f))).rejects.toMatchObject({
+      _tag: "ReviewEvidenceResolutionFailure",
+      code,
+    });
   });
 
   it("indexes a rename diff by its destination path", async () => {
@@ -271,16 +307,24 @@ describe("pull request evidence resolver", () => {
     f.diff =
       "diff --git a/a.ts b/b.ts\nsimilarity index 80%\nrename from a.ts\nrename to b.ts\n--- a/a.ts\n+++ b/b.ts\n@@ -1 +1 @@\n-export const a = 1;\n+export const a = 2;\n";
     writeFileSync(f.diffPath, f.diff);
-    await expect(
-      execute({
-        fixture: f,
-        changedPaths: ["b.ts"],
-        plan: plan(
-          [{ kind: "diff", path: "b.ts", startLine: 1, endLine: 9, purpose: "rename" }],
-          "b.ts",
-        ),
+    const outputs = await execute({
+      fixture: f,
+      changedPaths: ["b.ts"],
+      plan: plan(
+        [{ kind: "diff", path: "b.ts", startLine: 1, endLine: 9, purpose: "rename" }],
+        "b.ts",
+      ),
+    });
+    const patch = await Effect.runPromise(
+      materializeDagTextArtifact(f.dagArtifacts, outputs[ReviewEvidenceChunkOutputs[0]], {
+        runId: "review-run",
+        producerNodeId: "evidence-resolver",
+        outputName: ReviewEvidenceChunkOutputs[0],
       }),
-    ).resolves.toBeDefined();
+    );
+    expect(patch.text).toBe(
+      `=== Evidence 1: diff b.ts:1-9 ===\nPurpose: rename\n${f.diff.trimEnd()}`,
+    );
   });
 
   it("rejects a changed worktree after snapshot preparation", async () => {
@@ -300,7 +344,7 @@ describe("pull request evidence resolver", () => {
     const f = fixture();
     writeFileSync(
       path.join(f.worktree, "a.ts"),
-      Array.from({ length: 1_000 }, () => "x".repeat(900)).join("\n"),
+      "x".repeat(ReviewEvidenceDossierMaxBytes + 1),
     );
     execFileSync("git", ["add", "a.ts"], { cwd: f.worktree });
     execFileSync("git", ["commit", "-qm", "large source"], { cwd: f.worktree });
@@ -312,7 +356,7 @@ describe("pull request evidence resolver", () => {
       execute({
         fixture: f,
         plan: plan([
-          { kind: "file", path: "a.ts", startLine: 1, endLine: 1_000, purpose: "source" },
+          { kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "source" },
         ]),
       }),
     ).rejects.toMatchObject({ code: "producer-overflow" });

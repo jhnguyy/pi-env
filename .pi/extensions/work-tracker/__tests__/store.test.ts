@@ -22,8 +22,7 @@ describe("TodoStore", () => {
 
   it("add() sets addedAt timestamp", () => {
     const item = store.add("task");
-    expect(item.addedAt).toBeTruthy();
-    expect(() => new Date(item.addedAt)).not.toThrow();
+    expect(Number.isFinite(Date.parse(item.addedAt))).toBe(true);
   });
 
   // ─── complete ─────────────────────────────────────────────────────
@@ -33,7 +32,9 @@ describe("TodoStore", () => {
     const result = store.complete(1);
     expect(result).not.toBeNull();
     expect(result!.done).toBe(true);
-    expect(result!.completedAt).toBeTruthy();
+    expect(Number.isFinite(Date.parse(result!.completedAt!))).toBe(true);
+    expect(store.list()).toEqual([result]);
+    expect(store.open()).toEqual([]);
   });
 
   it("complete(text) matches by partial text, case-insensitive", () => {

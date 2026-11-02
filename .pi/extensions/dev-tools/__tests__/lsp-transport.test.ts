@@ -5,13 +5,6 @@ describe("LspTransport", () => {
   // ─── serializeMessage ─────────────────────────────────────────────────────
 
   describe("serializeMessage", () => {
-    it("includes Content-Length header", () => {
-      const msg: LspMessage = { jsonrpc: "2.0", id: 1, method: "initialize", params: {} };
-      const buf = serializeMessage(msg);
-      const str = buf.toString();
-      expect(str).toMatch(/Content-Length: \d+\r\n\r\n/);
-    });
-
     it("Content-Length matches body byte length", () => {
       const msg: LspMessage = { jsonrpc: "2.0", id: 2, method: "textDocument/hover", params: { position: { line: 4, character: 10 } } };
       const buf = serializeMessage(msg);

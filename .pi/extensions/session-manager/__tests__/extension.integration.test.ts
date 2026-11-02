@@ -99,6 +99,12 @@ describe("session-manager extension", () => {
   it("composes the current editor and closes before its Ctrl+D callback", async () => {
     const f = await createExtensionFixture();
     f.native.session.file = join(f.root, "session-a.jsonl");
+    const order: string[] = [];
+    const originalCtrlD = f.editor.onCtrlD;
+    f.editor.onCtrlD = () => {
+      order.push("callback");
+      originalCtrlD();
+    };
     let rejectUpdate = false;
     f.register({
       catalog: {
@@ -107,7 +113,9 @@ describe("session-manager extension", () => {
         update: (path, transform) =>
           rejectUpdate
             ? Effect.fail(new ManifestCommitFailure({ path, cause: new Error("write failed") }))
-            : f.catalog.update(path, transform),
+            : f.catalog.update(path, transform).pipe(Effect.tap((manifest) => Effect.sync(() => {
+              if (manifest.sessions[0]?.desiredState === "closed") order.push("closed");
+            }))),
       },
     });
     const previousFactory = f.native.editorFactory;
@@ -128,6 +136,7 @@ describe("session-manager extension", () => {
     rejectUpdate = false;
     composed.onCtrlD();
     await f.ctrlDCompleted;
+    expect(order).toEqual(["closed", "callback"]);
     expect(f.native.ctrlDCalls).toBe(1);
     expect(f.native.shutdownCalls).toBe(0);
     expect((await f.readManifest())?.sessions[0]).toMatchObject({

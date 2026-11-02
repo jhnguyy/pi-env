@@ -19,13 +19,26 @@ interface CanonicalizationResult {
 const hasBody = (node: ts.Node): node is BodyFunction =>
   ts.isFunctionLike(node) && "body" in node && node.body !== undefined;
 
+// Deep expression trees must reach the analysis caps without exhausting the JS stack.
+function* walkNodes(root: ts.Node): Generator<ts.Node> {
+  const pending = [root];
+  while (pending.length > 0) {
+    const node = pending.pop()!;
+    yield node;
+    const start = pending.length;
+    ts.forEachChild(node, (child) => { pending.push(child); });
+    // Preserve TypeScript's source-order depth-first traversal.
+    for (let left = start, right = pending.length - 1; left < right; left++, right--) {
+      [pending[left], pending[right]] = [pending[right], pending[left]];
+    }
+  }
+}
+
 function functions(file: ts.SourceFile): BodyFunction[] {
   const output: BodyFunction[] = [];
-  const visit = (node: ts.Node): void => {
+  for (const node of walkNodes(file)) {
     if (hasBody(node)) output.push(node);
-    ts.forEachChild(node, visit);
-  };
-  visit(file);
+  }
   return output;
 }
 
@@ -51,14 +64,12 @@ function inlineTestCallback(node: ts.CallExpression): BodyFunction | undefined {
 }
 function testCallbacks(file: ts.SourceFile): BodyFunction[] {
   const output: BodyFunction[] = [];
-  const visit = (node: ts.Node): void => {
+  for (const node of walkNodes(file)) {
     if (ts.isCallExpression(node)) {
       const callback = inlineTestCallback(node);
       if (callback !== undefined) output.push(callback);
     }
-    ts.forEachChild(node, visit);
-  };
-  visit(file);
+  }
   return output;
 }
 
@@ -109,22 +120,19 @@ function canonicalizeWithCap(node: ts.Node, caps: DuplicateCanonicalCaps = DUPLI
     parts.push(value);
     tokenCount++;
   };
-  const visit = (child: ts.Node): void => {
-    if (truncated) return;
+  for (const child of walkNodes(node)) {
     nodeCount++;
     if (nodeCount > caps.nodesPerFunction) {
       truncated = true;
-      return;
+      break;
     }
     push(String(child.kind));
-    if (truncated) return;
+    if (truncated) break;
     if (ts.isIdentifier(child)) push("#id");
     else if (ts.isStringLiteral(child) || ts.isNumericLiteral(child)) push("#literal");
     else if (child.getChildCount() === 0) push(child.getText());
-    if (truncated) return;
-    ts.forEachChild(child, visit);
-  };
-  visit(node);
+    if (truncated) break;
+  }
   return { canonical: parts.join("|"), truncated, nodeCount, tokenCount };
 }
 

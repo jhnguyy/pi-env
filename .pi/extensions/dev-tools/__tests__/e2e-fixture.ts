@@ -37,8 +37,14 @@ export function createLspDaemonFixture<Project>(
   let daemon: LspDaemon | undefined;
 
   const closeClients = () => {
-    for (const client of clients) client.close();
-    clients.clear();
+    const failures: unknown[] = [];
+    for (const client of clients) {
+      try {
+        client.close();
+        clients.delete(client);
+      } catch (error) { failures.push(error); }
+    }
+    if (failures.length) throw new AggregateError(failures, "LSP clients failed to close");
   };
   const start = async () => {
     daemon = new LspDaemon(
@@ -81,12 +87,16 @@ export function createLspDaemonFixture<Project>(
       },
     });
     clients.add(client);
+    const failures: unknown[] = [];
+    let result: T | undefined;
+    try { result = await run(client); } catch (error) { failures.push(error); }
     try {
-      return await run(client);
-    } finally {
       client.close();
       clients.delete(client);
-    }
+    } catch (error) { failures.push(error); }
+    if (failures.length > 1) throw new AggregateError(failures, "LSP client operation and cleanup failed");
+    if (failures.length === 1) throw failures[0];
+    return result as T;
   };
 
   try {
@@ -171,8 +181,4 @@ export function createTypeScriptLspFixture(): TypeScriptLspFixture {
     return { typesFile, mainFile, effectFile, writeFile };
   });
   return { ...fixture, ...project };
-}
-
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

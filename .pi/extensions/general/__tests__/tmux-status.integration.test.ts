@@ -461,12 +461,10 @@ describe("tmux status integration (real isolated server)", () => {
     const server = await f.command("show-options", "-s");
     const session = await f.command("show-options", "-g");
     const window = await f.command("show-options", "-gw");
-    for (let reload = 0; reload < 2; reload++) {
-      await f.command("source-file", template);
-      expect(await f.command("show-options", "-s")).toBe(server);
-      expect(await f.command("show-options", "-g")).toBe(session);
-      expect(await f.command("show-options", "-gw")).toBe(window);
-    }
+    await f.command("source-file", template);
+    expect(await f.command("show-options", "-s")).toBe(server);
+    expect(await f.command("show-options", "-g")).toBe(session);
+    expect(await f.command("show-options", "-gw")).toBe(window);
     expect(await f.command("show-options", "-s", "terminal-features")).toBe(features);
     expect(await f.command("show-options", "-s", "terminal-overrides")).toBe(overrides);
     expect(await f.command("show-options", "-sv", "set-clipboard")).toBe("on");

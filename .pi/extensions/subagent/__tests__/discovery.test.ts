@@ -4,31 +4,25 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { fauxProvider } from "@earendil-works/pi-ai";
 import { ModelRegistry, ModelRuntime, resolveModelScopeWithDiagnostics, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import initSubagent from "../index";
-function createHarness() {
-  const tools = new Map<string, any>();
-  const handlers = new Map<string, any>();
-  initSubagent({
-    getAllTools: () => [], appendEntry: () => {}, registerCommand: () => {},
-    registerTool: (tool: any) => tools.set(tool.name, tool),
-    on: (name: string, handler: any) => handlers.set(name, handler),
-    events: { emit: () => {}, on: () => {} },
-  } as any);
-  return { tools, handlers };
-}
+import { createSubagentHarness } from "./harness";
+import { testCleanup } from "./cleanup";
 
 
 it("advertises the native scoped roster with descriptive tags, or every available model without a scope", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-subagent-roster-"));
+  const cleanup = testCleanup();
+  cleanup(() => rmSync(root, { recursive: true, force: true }));
+  cleanup(() => vi.unstubAllEnvs());
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
   mkdirSync(agentDir);
   mkdirSync(join(cwd, ".pi"), { recursive: true });
   vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
   vi.stubEnv("OTEL_SDK_DISABLED", "true");
-  const harness = createHarness();
+  const harness = createSubagentHarness();
   const ctx: any = { cwd, sessionManager: SessionManager.create(cwd, join(root, "sessions")) };
-  try {
+  cleanup(() => harness.handlers.get("session_shutdown")!({ type: "session_shutdown" }, ctx));
+  {
     writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ enabledModels: ["roster/quick"] }));
     writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({
       modelAnnotations: { "roster/quick": ["preferred", "experimental"], "roster/deep": ["heavy", "reviewer"],
@@ -62,9 +56,5 @@ it("advertises the native scoped roster with descriptive tags, or every availabl
     expect(unscoped).toContain("roster/plain");
     expect(unscoped).not.toContain("roster/unavailable");
     expect(unscoped).not.toContain("[local]");
-  } finally {
-    await harness.handlers.get("session_shutdown")!({ type: "session_shutdown" }, ctx);
-    vi.unstubAllEnvs();
-    rmSync(root, { recursive: true, force: true });
   }
 });

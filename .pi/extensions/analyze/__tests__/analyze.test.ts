@@ -40,6 +40,8 @@ describe("analyze tool", () => {
     expect(runner).toHaveBeenCalledWith(expect.objectContaining({ cwd: worktree, scope: ScopeMode.Diff, ref: "main" }), expect.any(AbortSignal));
     expect(output.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("Summary: 0 errors, 2 warnings") });
     expect(output.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("1 additional findings omitted") });
+    expect(output.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("warning\tduplicates\ta.ts:1:1\tfirst") });
+    expect(output.content[0]).not.toMatchObject({ text: expect.stringContaining("b.ts:2:1") });
     expect(output.details).toMatchObject({ summary: result.summary, findings: [result.findings[0]], omittedFindings: 1 });
   });
 
@@ -57,7 +59,7 @@ describe("analyze tool", () => {
     expect(output.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("checks must explicitly") });
   });
 
-  it("stops before filesystem or analyzer work when cancelled", async () => {
+  it("rejects pre-cancelled execution without invoking the runner", async () => {
     const controller = new AbortController();
     const runner = vi.fn(async () => result);
     controller.abort();

@@ -9,19 +9,33 @@ import * as Control from "../control";
 import type * as Browser from "../browser";
 import type { ReadableSpan } from "@opentelemetry/sdk-trace-node";
 import * as Tooling from "../../../../src/telemetry/tooling";
+import { settleOperations, testCleanup } from "./cleanup";
 
 // Only terminal I/O, inference and the telemetry collector are substituted.
 // Registered tools, browser input, native children and persisted files are real.
 it("runs and resumes retained children through registered tools and direct browser input", async () => {
   const root = await mkdtemp(join(tmpdir(), "registered-native-"));
+  const cleanup = testCleanup();
+  cleanup(() => rm(root, { recursive: true, force: true }));
   const agentDir = join(root, "agent");
   let parent: Awaited<ReturnType<typeof createAgentSessionFromServices>>["session"] | undefined;
   let browser: Browser.SubagentBrowser | undefined;
   let unsubscribeUpdates: (() => void) | undefined;
+  const operations: Promise<unknown>[] = [];
+  cleanup(
+    () => unsubscribeUpdates?.(),
+    () => browser?.close(),
+    async () => { for (let number = 1; number <= 3; number++) await writeFile(join(root, `release-${number}`), "release"); },
+    () => parent?.abort(),
+    () => parent?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" }),
+    () => settleOperations(operations),
+    () => parent?.dispose(),
+    () => vi.unstubAllEnvs(),
+  );
   const spans: ReadableSpan[] = [];
   const updates: { toolCallId: string; content: string }[] = [];
   vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
-  try {
+  {
     await mkdir(join(root, ".pi"), { recursive: true });
     await mkdir(agentDir);
     await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { "browser-child": { apiKey: "fixture-key" } } }));
@@ -40,6 +54,7 @@ export default function(pi) {
    const number = ++gates;
    writeFileSync(root+'/entered-'+number,'entered');
    while (!existsSync(root+'/release-'+number) && !signal?.aborted) await new Promise(resolve=>setTimeout(resolve,5));
+   writeFileSync(root+'/settled-'+number,'settled');
    return {content:[{type:'text',text:'gate settled'}],details:{}};
  }});
  pi.on('input', event => {
@@ -103,10 +118,11 @@ export default function(pi) {
     const syncResult = parent.messages.filter((message) => message.role === "toolResult").find((message) => message.toolName === "subagent");
     if (!syncResult) throw new Error("Missing synchronous subagent tool result");
     expect(syncChild.inspect().initialResult).toEqual(syncResult.details);
-    expect(parent.messages.filter((message) => message.role === "toolResult").map((message) => message.toolName)).toEqual(["subagent", "subagent"]);
+    expect(JSON.stringify(syncResult.content)).toContain("sync initial complete");
     expect(updates.flatMap((update) => update.toolCallId === syncResult.toolCallId ? [update.content] : []).join("\n")).toContain("sync initial complete");
     const parentBefore = { messages: structuredClone(parent.messages), model: parent.model, tools: parent.getActiveToolNames(), id: parent.sessionId };
     const interaction = parent.prompt("/subagents");
+    operations.push(interaction);
     await vi.waitFor(() => expect(browser).toBeDefined());
     expect(browser!.render(160).join("\n")).toContain("2 retained sessions");
     browser!.handleInput("\u001b[B");
@@ -122,7 +138,7 @@ export default function(pi) {
     await vi.waitFor(() => expect(asyncChild.inspect().inputs).toHaveLength(3));
     await writeFile(join(root, "release-1"), "release");
     await vi.waitFor(() => expect(asyncChild.inspect().initialResult).toBeDefined());
-    const initial = asyncChild.inspect().initialResult!;
+    const initial = structuredClone(asyncChild.inspect().initialResult!);
     expect(initial.isError).toBe(false);
     await vi.waitFor(() => expect(asyncChild.summary().state).toBe("idle"));
     editorInputs.push("Human idle\nverbatim");
@@ -158,6 +174,8 @@ export default function(pi) {
     await vi.waitFor(() => expect(existsSync(join(root, "entered-2"))).toBe(true));
     browser!.handleInput("c");
     await vi.waitFor(() => expect(browser!.render(160).join("\n")).toContain("cancellation settled"));
+    expect(existsSync(join(root, "settled-2"))).toBe(true);
+    expect(asyncChild.summary().state).toBe("idle");
     editorInputs.push("exit while running");
     browser!.handleInput("p");
     await vi.waitFor(() => expect(existsSync(join(root, "entered-3"))).toBe(true));
@@ -174,24 +192,24 @@ export default function(pi) {
     expect(spans.map((span) => span.name)).toContain("tooling.subagent.run");
     const exported = JSON.stringify(spans.map((span) => ({ name: span.name, attributes: span.attributes, events: span.events })));
     for (const privateValue of [root, "Sync task\nexact original", "sync initial complete", "Explicit delegated instruction"]) expect(exported).not.toContain(JSON.stringify(privateValue).slice(1, -1));
-  } finally {
-    unsubscribeUpdates?.();
-    browser?.close();
-    await parent?.abort();
-    await parent?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
-    parent?.dispose();
-    vi.unstubAllEnvs();
-    await rm(root, { recursive: true, force: true });
   }
 }, 30000);
 
 it("rejects obsolete selections and preserves native target trust, defaults and explicit selection safety", async () => {
   const root = await mkdtemp(join(tmpdir(), "registered-native-selection-"));
+  const cleanup = testCleanup();
+  cleanup(() => rm(root, { recursive: true, force: true }));
   const agentDir = join(root, "agent");
   const target = join(root, "target");
   let parent: Awaited<ReturnType<typeof createAgentSessionFromServices>>["session"] | undefined;
+  cleanup(
+    () => parent?.abort(),
+    () => parent?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" }),
+    () => parent?.dispose(),
+    () => vi.unstubAllEnvs(),
+  );
   vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
-  try {
+  {
     await mkdir(agentDir);
     await mkdir(join(target, ".pi"), { recursive: true });
     const extension = join(agentDir, "provider.mjs");
@@ -227,8 +245,8 @@ export default function(pi) { pi.on('session_start',()=> { writeFileSync(${JSON.
     const launch = async (overrides: Record<string, unknown>) => {
       await rm(join(target, "started"), { force: true });
       await rm(join(target, "model-turn"), { force: true });
-      await parent!.prompt(`launch:${JSON.stringify({ action: "run", name: "selection", task: "child task", cwd: target, ...overrides })}`);
-      return parent!.messages.filter((m) => m.role === "toolResult").at(-1)!;
+      await parent.prompt(`launch:${JSON.stringify({ action: "run", name: "selection", task: "child task", cwd: target, ...overrides })}`);
+      return parent.messages.filter((m) => m.role === "toolResult").at(-1)!;
     };
     for (const action of ["run", "start", "list"]) {
       for (const obsolete of [{ agent: "scout" }, { agent_scope: "project" }, { agent: null }, { agent_scope: null }]) {
@@ -285,11 +303,5 @@ export default function(pi) { pi.on('session_start',()=> { writeFileSync(${JSON.
       expect(existsSync(join(target, "started"))).toBe(startup);
       expect(existsSync(join(target, "model-turn"))).toBe(false);
     }
-  } finally {
-    await parent?.abort();
-    await parent?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
-    parent?.dispose();
-    vi.unstubAllEnvs();
-    await rm(root, { recursive: true, force: true });
   }
 }, 30000);

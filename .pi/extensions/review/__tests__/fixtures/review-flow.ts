@@ -406,7 +406,7 @@ export async function runRealReviewFlow(
             ]
           : [],
       });
-      if (submitted.isError) throw new Error("Valid semantic consolidation was rejected");
+      if (submitted.isError) throw new Error("Valid provenance accounting was rejected");
       return submitted.content
         .filter((item) => item.type === "text")
         .map((item) => item.text)

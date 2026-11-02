@@ -11,7 +11,10 @@ describe("todo tool", () => {
     });
 
     expect(result.content[0].text).toBe("Added 2 tasks: ids 1, 2.");
-    expect(result.content[0].text).not.toContain("verbose");
+    expect(store.open().map(({ id, text }) => ({ id, text }))).toEqual([
+      { id: 1, text: "first verbose task" },
+      { id: 2, text: "second verbose task" },
+    ]);
     expect(result.details).toEqual({ ids: [1, 2] });
   });
 

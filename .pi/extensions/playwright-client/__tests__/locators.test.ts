@@ -10,7 +10,7 @@ describe("browser locator helpers", () => {
     expect(hasLocatorParams({ selector: "button.primary" })).toBe(true);
   });
 
-  it("prefers accessible role locators and formats the target", () => {
+  it("selects an accessible role locator and formats its target", () => {
     const roleLocator = fakeLocator();
     const page = fakePage({ getByRole: vi.fn(() => roleLocator) });
 

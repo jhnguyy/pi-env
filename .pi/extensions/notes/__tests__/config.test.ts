@@ -40,7 +40,7 @@ describe("notes settings", () => {
     }),
   );
 
-  it.effect("lets trusted project settings select the active vault", () =>
+  it.effect("project settings override the global vault", () =>
     Effect.gen(function* () {
       const settings = yield* loadNotesSettingsEffect(
         "/repo",

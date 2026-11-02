@@ -2,6 +2,7 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { noopToolingDiagnostics } from "../../../../src/telemetry/tooling";
+import { testCleanup } from "./cleanup";
 import {
   SubagentSessionRuntime,
   type SubagentSessionRuntimeDependencies,
@@ -54,7 +55,12 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
       on: () => {},
       events: { emit: () => {}, on: () => {} },
     };
-    return new SubagentSessionRuntime(pi as any, { telemetryRuntimeFactory });
+    const runtime = new SubagentSessionRuntime(pi as any, { telemetryRuntimeFactory });
+    testCleanup()(
+      () => { runtimeState.blocked = false; runtimeState.release?.(); },
+      () => runtime.shutdownSession(),
+    );
+    return runtime;
   }
 
   function sessionContext() {

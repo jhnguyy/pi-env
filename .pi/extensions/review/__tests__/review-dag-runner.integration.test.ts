@@ -445,7 +445,7 @@ describe("DAG-backed pull request review runner", () => {
     });
   });
 
-  it("cancels the shared run when the caller signal aborts", async () => {
+  it("saves cancelled review state for a pre-aborted caller signal", async () => {
     const f = fixture();
     const saved: ReviewState[] = [];
     let cancelled = false;

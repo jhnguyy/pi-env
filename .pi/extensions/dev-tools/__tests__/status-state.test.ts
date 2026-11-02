@@ -1,7 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { LspBackend } from "../backend";
 import type { LspBackendConfig } from "../backend-configs";
 import { handleStatus } from "../handlers";
@@ -42,14 +39,7 @@ function status(snapshot: any, projectRoots: string[] = []) {
 }
 
 describe("status state model", () => {
-  let tmpDir: string | undefined;
-
-  afterEach(() => {
-    if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
-    tmpDir = undefined;
-  });
-
-  it("transitions idle backend snapshot to initializing before the first semantic result", () => {
+  it("maps an initializing snapshot to initializing status", () => {
     expect(status({
       name: "typescript",
       running: false,
@@ -64,10 +54,7 @@ describe("status state model", () => {
     });
   });
 
-  it("transitions successful empty semantic result to ready", () => {
-    tmpDir = mkdtempSync(join(tmpdir(), "status-project-"));
-    writeFileSync(join(tmpDir, "tsconfig.json"), "{}", "utf8");
-
+  it("maps an available snapshot with zero items to ready status", () => {
     expect(status({
       name: "typescript",
       running: true,
@@ -75,16 +62,16 @@ describe("status state model", () => {
       semanticAvailable: true,
       lastSemanticRequest: { method: "textDocument/references", itemCount: 0 },
       projectMode: "configured",
-      projectRoot: tmpDir,
-      tsconfigPath: join(tmpDir, "tsconfig.json"),
-    }, [tmpDir])).toMatchObject({
+      projectRoot: "/repo",
+      tsconfigPath: "/repo/tsconfig.json",
+    }, ["/repo"])).toMatchObject({
       state: "ready",
-      project: { mode: "configured", root: tmpDir, tsconfigPath: join(tmpDir, "tsconfig.json") },
+      project: { mode: "configured", root: "/repo", tsconfigPath: "/repo/tsconfig.json" },
       semantic: { available: true, lastRequest: { itemCount: 0 } },
     });
   });
 
-  it("transitions semantic request failure to degraded while the process remains live", () => {
+  it("maps a running snapshot with a semantic failure to degraded status", () => {
     expect(status({
       name: "typescript",
       running: true,
@@ -125,7 +112,7 @@ describe("status state model", () => {
     });
   });
 
-  it("transitions recovery after a later successful semantic request back to ready", () => {
+  it("maps an available snapshot with a hover result to ready status", () => {
     expect(status({
       name: "typescript",
       running: true,
@@ -178,7 +165,7 @@ describe("status state model", () => {
     });
   });
 
-  it("transitions startup failure to failed without using semantic failure", () => {
+  it("maps a startup-failure snapshot to failed status without semantic failure", () => {
     expect(status({
       name: "typescript",
       running: false,

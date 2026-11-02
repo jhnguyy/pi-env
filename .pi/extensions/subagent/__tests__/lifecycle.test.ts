@@ -1,31 +1,23 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
-import initSubagent from "../index";
-function createHarness() {
-  const tools = new Map<string, any>();
-  const handlers = new Map<string, any>();
-  initSubagent({
-    getAllTools: () => [], appendEntry: () => {}, registerCommand: () => {},
-    registerTool: (tool: any) => tools.set(tool.name, tool),
-    on: (name: string, handler: any) => handlers.set(name, handler),
-    events: { emit: () => {}, on: () => {} },
-  } as any);
-  return { tools, handlers };
-}
+import { createSubagentHarness } from "./harness";
+import { settleOperations, testCleanup } from "./cleanup";
 import { SubagentJobManager } from "../jobs";
 
-const temporaryDirectories: string[] = [];
-
-afterEach(() => {
-  vi.restoreAllMocks();
-  for (const directory of temporaryDirectories.splice(0)) {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
+function fixture() {
+  const directory = mkdtempSync(join(tmpdir(), "pi-subagent-lifecycle-"));
+  const cleanup = testCleanup();
+  cleanup(() => rmSync(directory, { recursive: true, force: true }));
+  cleanup(() => vi.restoreAllMocks());
+  const harness = createSubagentHarness();
+  const ctx = sessionContext(directory);
+  cleanup(() => harness.handlers.get("session_shutdown")!({ type: "session_shutdown" }, ctx));
+  return { harness, ctx, cleanup };
+}
 
 function sessionContext(cwd: string) {
   return {
@@ -40,13 +32,10 @@ function sessionContext(cwd: string) {
 
 describe("subagent extension session lifecycle", () => {
   it("does not let a stale session_start reactivate after a newer shutdown", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "pi-subagent-lifecycle-"));
-    temporaryDirectories.push(directory);
-    const harness = createHarness();
+    const { harness, ctx, cleanup } = fixture();
     const startSession = harness.handlers.get("session_start")!;
     const shutdownSession = harness.handlers.get("session_shutdown")!;
     const subagent = harness.tools.get("subagent");
-    const ctx = sessionContext(directory);
     await startSession({ type: "session_start" }, ctx);
 
     let release!: () => void;
@@ -62,12 +51,16 @@ describe("subagent extension session lifecycle", () => {
       },
     );
 
+    const operations: Promise<unknown>[] = [];
+    cleanup(() => release(), () => settleOperations(operations), () => oldManager && originalShutdown.call(oldManager));
     const staleStart = startSession({ type: "session_start" }, ctx);
+    operations.push(staleStart);
     await Promise.resolve();
     let shutdownSettled = false;
     const shutdown = shutdownSession({ type: "session_shutdown" }, ctx).then(() => {
       shutdownSettled = true;
     });
+    operations.push(shutdown);
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(shutdownSettled).toBe(false);
     release();
@@ -83,17 +76,13 @@ describe("subagent extension session lifecycle", () => {
     expect(result.details).toMatchObject({ status: "inactive", name: "after", task: "x" });
     const list = await subagent.execute("list", { action: "list" }, undefined, undefined, ctx);
     expect(list.content[0]?.text).toBe("No subagent jobs.");
-    if (oldManager) await originalShutdown.call(oldManager);
   });
 
   it("rejects async starts during/after shutdown and creates jobs only after session_start", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "pi-subagent-lifecycle-"));
-    temporaryDirectories.push(directory);
-    const harness = createHarness();
+    const { harness, ctx } = fixture();
     const startSession = harness.handlers.get("session_start")!;
     const shutdownSession = harness.handlers.get("session_shutdown")!;
     const subagent = harness.tools.get("subagent");
-    const ctx = sessionContext(directory);
 
     const beforeStart = await subagent.execute(
       "before",
