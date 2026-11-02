@@ -9,21 +9,25 @@ description: Design functional tests at meaningful responsibility boundaries, se
 
 Locate the target repository and read its `README.md`, `CONTRIBUTING.md`, applicable agent instructions, and linked testing guidance when present. Discover local conventions from that project rather than resolving repository policy relative to this skill.
 
-Inspect relevant source, existing tests, test configuration, and scripts to understand the affected contracts and available checks. Follow the project's execution, isolation, capacity, privacy, and evidence-retention requirements.
-
 ## Choose the responsibility to prove
 
 Begin with what the target unit promises: given its inputs and permitted collaborator outcomes, what outputs, state changes, effects, and failures should follow? Resolve unclear readiness, completion, cancellation, or recovery semantics in the production contract before choosing assertions.
 
-Discover useful units through software design. An internal function or module can own a legitimate responsibility with independently testable expectations. Choose seams that make inputs, failures, and ownership controllable; public CLI access is not a prerequisite for a unit test.
+Discover useful units through design. An internal function or module can own a legitimate responsibility with independently testable expectations. Choose seams that make inputs, failures, and ownership controllable; public CLI access is not a prerequisite for a unit test.
 
-Apply the same standard recursively. Upstream and downstream units establish their own responsibilities. Rely on established collaborator contracts and focus the target's tests on its own decisions, translations, composition, and failure handling.
+Rely on established collaborator contracts and focus the target's tests on its own decisions, translations, composition, and failure handling.
 
 Retain targeted integration evidence when compatibility, an interaction, or shared lifecycle behavior is itself the responsibility being tested.
 
 ## Derive independent expectations
 
-Derive expected results from requirements and caller needs, using hand-worked examples, invariants, or an independent reference where useful. Exercise behavior enabled by configuration and declarations rather than merely checking that the implementation contains its own choices.
+Derive expected results from requirements and caller needs, using hand-worked examples, invariants, or an independent reference where useful. Each test should distinguish a plausible violation of the target's promise from a correct implementation.
+
+Reject tautological assertions and implementation-locking tests: checks whose expectations merely repeat production configuration, constants, internal structure, or the same calculation used by the implementation. They detect edits rather than broken behavior and turn one design choice into two things to maintain.
+
+Treat configuration as an input to behavior. Prove the routing, permissions, selection, or other outcome it enables instead of asserting that the configuration equals a copied object. Likewise, observe a unit's promised result rather than pinning its private helper sequence when that sequence is not part of the contract.
+
+A behavior-preserving refactor should leave the test valid. When it would require rewriting an expectation, move the assertion to the promised outcome or remove the check if it protects no independent requirement.
 
 Cover meaningful success, input distinctions, and failure stages. Distinguish failures before an effect from failures after it may have occurred when that changes safe retry or recovery.
 
