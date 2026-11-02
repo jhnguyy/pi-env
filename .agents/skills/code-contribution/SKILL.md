@@ -1,6 +1,6 @@
 ---
 name: code-contribution
-description: Deliver atomic repository changes through scope definition, design, worktree isolation, implementation, validation, and publication. Use before modifying a repository or performing branch, commit, push, pull-request, or merge work.
+description: Deliver atomic repository changes through separate design and implementation agents, worktree isolation, integrated verification, and publication. Use before modifying a repository or performing branch, commit, push, pull-request, or merge work.
 ---
 
 # Code Contribution
@@ -12,6 +12,22 @@ Locate the target repository root and task worktree before running repository co
 Define one verifiable outcome that includes the required code, tests, migrations, and obsolete-path removal. Record assumptions that could change the solution, risk, or verification. Keep independently useful changes separate and preserve unrelated behavior.
 
 Perform repository changes in a dedicated worktree, inspecting Git state before you create or resume it. Keep the base worktree unchanged on the base branch, and avoid worktrees another session may own. Preserve local work and stop if safe synchronization requires a decision that repository policy does not resolve.
+
+## Separate design from implementation
+
+Code changes require a design agent and a different implementation agent. This includes tests, build logic, and configuration that controls behavior, regardless of file extension. Simple documentation-only edits may remain single-agent; mixed changes follow the code workflow. The coordinator owns scope, sequencing, design acceptance, integration, and final verification. Use the [orchestration skill](../orchestration/SKILL.md) for delegation mechanics.
+
+The designer investigates existing owners, callers, and contracts and applies the [planning](../planning/SKILL.md) and [testing-practices](../testing-practices/SKILL.md) skills to produce an evidence-grounded design, not production code. Use the ownership and production-contract guidance below to shape the design.
+
+Keep the handoff proportional to the change, covering:
+
+- the intended outcome, scope, and invariants
+- inspected evidence and what it establishes
+- the chosen owner and approach, alternatives, and consequential tradeoffs
+- affected contracts, implementation phases, and proposed verification
+- assumptions, unknowns, and risks, with how and when to resolve them
+
+A small change can use a brief handoff; create a design document only when the decisions warrant one. Distinguish proposed checks from completed evidence. The coordinator resolves or escalates consequential ambiguities before dependent implementation and dispatches the separate implementer only after accepting the handoff. Resolve routine design details within the task's existing authorization.
 
 ## Inspect and choose the owner
 
@@ -37,10 +53,10 @@ Bound work before allocation. Prefer one-pass transformations and reuse values d
 
 ## Implement and validate
 
-1. Define expected outcomes and failure cases before implementation.
-2. Inspect current behavior and use the [testing-practices skill](../testing-practices/SKILL.md) to select evidence while the design can still change.
-3. Implement in verifiable phases against those outcomes.
-4. Verify the affected contracts and interactions, including repository-required checks, before review or merge.
+1. The coordinator gives the separate implementer the accepted design handoff, supporting evidence, and work boundaries.
+2. The implementer validates the handoff against current code and discovers and applies applicable skills and repository practices. Challenge assumptions when the evidence warrants it. Return consequential deviations in scope, ownership, contracts, or verification to the coordinator before affected work proceeds; inexpensive, reversible implementation details remain at the implementer's discretion.
+3. Implement in verifiable phases against the accepted outcomes and failure cases, then return the changes, verification evidence, departures from the design, and remaining gaps.
+4. The coordinator reviews the integrated diff and verifies the combined result against the accepted outcomes and affected contracts, including repository-required checks, before review or merge. Child reports do not substitute for coordinator verification.
 
 ## Commit and publish
 
