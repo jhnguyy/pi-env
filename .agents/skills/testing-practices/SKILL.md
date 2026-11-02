@@ -9,6 +9,8 @@ A functional test establishes what a unit promises while leaving it free to chan
 
 Find the target project's guidance through its `README.md`, `CONTRIBUTING.md`, applicable agent instructions, and linked testing conventions. Discover that guidance in the target repository rather than relative to this skill.
 
+Create unit tests for code changes, not configs or templates. Validate configs and templates with native tooling and manual checks.
+
 ## Define the promise
 
 Discover useful units through design. An internal function or module can own a responsibility with independently testable expectations. Choose seams that make its inputs, collaborator outcomes, and ownership controllable; a functional slice need not enter through the application's public CLI or cross every deployment boundary. Test design can reveal scattered policy, unclear ownership, or lifecycle decisions missing from production. Use that evidence to improve production responsibilities; an abstraction should benefit production callers, not only make collaborators mockable.
@@ -21,7 +23,7 @@ Rely on established collaborator contracts and focus on the target's decisions, 
 
 Requirements and caller needs supply the expected result. Hand-worked examples, invariants, and independent references can make that expectation concrete without reproducing the implementation's calculation. Each test should distinguish a plausible violation of the promise from a correct implementation.
 
-Reject tautological assertions and implementation-locking tests that merely echo production configuration, constants, internal structure, or calculations. They detect edits rather than broken behavior and turn one design choice into two things to maintain. Treat configuration as an input: prove the routing, permissions, selection, or other outcome it enables instead of comparing it with a copied object. Observe a unit's promised result rather than pinning a private helper sequence that is not part of its contract.
+Reject tautological assertions and implementation-locking tests that merely echo production configuration, constants, internal structure, or calculations. They detect edits rather than broken behavior and turn one design choice into two things to maintain. For executable application logic, treat configuration as an input: prove the routing, permissions, selection, or other outcome the logic promises instead of comparing configuration with a copied object. Observe a unit's promised result rather than pinning a private helper sequence that is not part of its contract.
 
 A behavior-preserving refactor should leave the test valid. If it would require rewriting an expectation, move the assertion to the promised outcome or remove the check when it protects no independent requirement.
 
