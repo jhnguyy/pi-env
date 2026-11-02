@@ -6,7 +6,7 @@ description: Assess evidence-backed refactor opportunities, module seams, and te
 
 # Refactor
 
-Assess opportunities without changing code. An assessment is not implementation authorization; use the [code-contribution skill](../code-contribution/SKILL.md) when implementation is requested and the [planning skill](../planning/SKILL.md) for delivery and rollout decisions.
+Assess opportunities without changing code. An assessment is not implementation authorization. Use the [planning skill](../planning/SKILL.md) for delivery and rollout decisions.
 
 ## Establish the design problem
 
