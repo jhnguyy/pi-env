@@ -25,11 +25,13 @@ it("removes allocated resources when project preparation fails", () => {
   expect(existsSync(directory)).toBe(false);
 });
 
-it("leaves failed socket startup resources owned by registered teardown", async () => {
+it("cleans acquired daemon resources after failed socket startup while teardown owns the project", async () => {
   const fixture = createLspDaemonFixture((directory) => directory);
   onTestFinished(() => fixture.cleanup());
   mkdirSync(join(fixture.project, "t.sock"));
   await expect(fixture.start()).rejects.toThrow(/listen .*t\.sock/);
+  expect(existsSync(join(fixture.project, "t.pid"))).toBe(false);
+  expect(existsSync(join(fixture.project, "t.sock"))).toBe(true);
   expect(existsSync(fixture.project)).toBe(true);
   await fixture.cleanup();
   expect(existsSync(fixture.project)).toBe(false);
@@ -60,9 +62,13 @@ it("attempts every client close and retains failed clients for cleanup retry", a
   const firstError = new Error("First close failed");
   const secondError = new Error("Second close failed");
   await fixture.withClient(async (first) => {
-    const firstClose = vi.spyOn(first, "close").mockImplementationOnce(() => { throw firstError; });
+    const firstClose = vi.spyOn(first, "close").mockImplementationOnce(() => {
+      throw firstError;
+    });
     await fixture.withClient(async (second) => {
-      const secondClose = vi.spyOn(second, "close").mockImplementationOnce(() => { throw secondError; });
+      const secondClose = vi.spyOn(second, "close").mockImplementationOnce(() => {
+        throw secondError;
+      });
       await expect(fixture.cleanup()).rejects.toMatchObject({ errors: [firstError, secondError] });
       expect(firstClose).toHaveBeenCalledTimes(1);
       expect(secondClose).toHaveBeenCalledTimes(1);
@@ -80,15 +86,17 @@ it("preserves request and client-close failures together", async () => {
   const operationError = new Error("Request failed");
   const closeError = new Error("Client close failed");
   let closeCalls = 0;
-  await expect(fixture.withClient(async (client) => {
-    const close = client.close.bind(client);
-    vi.spyOn(client, "close").mockImplementation(() => {
-      closeCalls += 1;
-      if (closeCalls === 1) throw closeError;
-      close();
-    });
-    throw operationError;
-  })).rejects.toMatchObject({ errors: [operationError, closeError] });
+  await expect(
+    fixture.withClient(async (client) => {
+      const close = client.close.bind(client);
+      vi.spyOn(client, "close").mockImplementation(() => {
+        closeCalls += 1;
+        if (closeCalls === 1) throw closeError;
+        close();
+      });
+      throw operationError;
+    }),
+  ).rejects.toMatchObject({ errors: [operationError, closeError] });
   await fixture.cleanup();
   expect(closeCalls).toBe(2);
   expect(existsSync(fixture.project)).toBe(false);
@@ -106,12 +114,23 @@ it("refuses to spawn a replacement for an unavailable fixture-owned daemon", asy
 });
 
 it("leaves a failed daemon replacement's project owned by registered teardown", async () => {
-  const fixture = createLspDaemonFixture((directory) => directory);
+  let pidPath = "";
+  let sabotage = true;
+  const fixture = createLspDaemonFixture((directory) => directory, {
+    telemetry: {
+      ...noopToolingTelemetryRuntime,
+      disposeEffect: Effect.sync(() => {
+        // Fail replacement acquisition, not the old daemon's artifact release.
+        if (sabotage) {
+          sabotage = false;
+          mkdirSync(pidPath);
+        }
+      }),
+    },
+  });
   onTestFinished(() => fixture.cleanup());
   await fixture.start();
-  const pidPath = join(fixture.project, "t.pid");
-  rmSync(pidPath);
-  mkdirSync(pidPath);
+  pidPath = join(fixture.project, "t.pid");
   await expect(fixture.restartDaemon()).rejects.toMatchObject({ code: "EISDIR" });
   expect(existsSync(fixture.project)).toBe(true);
   await fixture.cleanup();
@@ -121,14 +140,22 @@ it("leaves a failed daemon replacement's project owned by registered teardown", 
 it("preserves a restart failure and reports shutdown and removal failures together", async () => {
   const shutdownError = new Error("Telemetry disposal failed");
   const removalError = new Error("Directory removal failed");
-  let failDisposal = false;
+  let pidPath = "";
+  let disposals = 0;
   let failRemoval = true;
   // Telemetry integration checks own the normal disposal contract. The socket
   // lifecycle remains real even when disposal and directory removal fail.
   const fixture = createLspDaemonFixture((directory) => directory, {
     telemetry: {
       ...noopToolingTelemetryRuntime,
-      disposeEffect: Effect.suspend(() => (failDisposal ? Effect.die(shutdownError) : Effect.void)),
+      disposeEffect: Effect.suspend(() => {
+        disposals++;
+        return disposals === 1
+          ? Effect.sync(() => {
+              mkdirSync(pidPath);
+            })
+          : Effect.die(shutdownError);
+      }),
     },
     removeDirectory: (directory, options) => {
       if (failRemoval) throw removalError;
@@ -146,11 +173,10 @@ it("preserves a restart failure and reports shutdown and removal failures togeth
     }
   });
   await fixture.start();
-  const pidPath = join(fixture.project, "t.pid");
-  rmSync(pidPath);
-  mkdirSync(pidPath);
-  await expect(fixture.restartDaemon()).rejects.toMatchObject({ code: "EISDIR" });
-  failDisposal = true;
+  pidPath = join(fixture.project, "t.pid");
+  await expect(fixture.restartDaemon()).rejects.toMatchObject({
+    errors: [expect.objectContaining({ code: "EISDIR" }), shutdownError],
+  });
   await expect(fixture.cleanup()).rejects.toMatchObject({ errors: [shutdownError, removalError] });
   failRemoval = false;
   // The cached shutdown failure must not prevent retrying real removal.

@@ -505,11 +505,22 @@ export async function handleRename(
       },
     });
     for (const file of applied.files) deps.fileCache.invalidate(file.absolutePath);
-    await Promise.all(
-      applied.files.map((file) =>
+    // Disk edits are committed. Refresh failure cannot roll them back, and request
+    // completion must still cover every target's backend work.
+    const refreshed = await Promise.allSettled(
+      applied.files.map(async (file) =>
         authorizedBackends.get(file.absolutePath)!.ensureFile(file.absolutePath),
       ),
     );
+    const failures = refreshed.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(
+        failures,
+        `Rename refresh failed: ${failures.map((error) => (error instanceof Error ? error.message : String(error))).join("; ")}`,
+      );
     ctx.backend.recordSemanticResult("textDocument/rename", applied.totalEdits);
     return okResponse(req.id, {
       action: "rename",

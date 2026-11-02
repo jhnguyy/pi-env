@@ -8,7 +8,7 @@ interface Message {
 }
 
 const countFile = process.argv[2];
-if (countFile) appendFileSync(countFile, "start\n");
+if (countFile) appendFileSync(countFile, `${process.pid}\n`);
 let buffer = Buffer.alloc(0);
 function send(message: LspMessage): void {
   const body = JSON.stringify(message);

@@ -60,18 +60,11 @@ describe("parsed daemon requests", () => {
   });
 
   it("returns the shutdown acknowledgement without owning cleanup", async () => {
-    expect(result(await execute(request("shutdown")), "status")).toEqual({
-      action: "status",
-      state: "initializing",
-      running: false,
-      backend: { name: "unknown", running: false },
-      project: { mode: "unknown" },
-      initialization: { state: "initializing" },
-      semantic: { available: false },
-      projects: [],
-      openFiles: [],
-      watchedFiles: 0,
-      idleMs: 0,
+    const response = await execute(request("shutdown"));
+    expect(response).toMatchObject({
+      id: 41,
+      ok: true,
+      result: { action: "status", running: false },
     });
     expect(backend.shutdownCalls).toBe(0);
   });

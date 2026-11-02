@@ -26,7 +26,7 @@ function testBackend(countFile: string): LspBackend {
 }
 
 describe("LspBackend lifecycle", () => {
-  it("receives diagnostics over LSP and normalizes cached public diagnostics by URI", async () => {
+  it("normalizes diagnostics by URI and truncates long published messages", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-dev-tools-diagnostics-"));
     const backend = testBackend(join(root, "starts"));
     const uri = "file:///test.ts";
@@ -47,28 +47,6 @@ describe("LspBackend lifecycle", () => {
             code: 7017,
             message: "Element implicitly has an 'any' type.",
           },
-        ],
-      });
-      expect(backend.getDiagnostics(uri)).toMatchObject([
-        { severity: "error", code: "TS2339", line: 5, character: 3 },
-        { severity: "warning", code: "TS7017", line: 8, character: 1 },
-      ]);
-      expect(backend.getDiagnostics("file:///other.ts")).toEqual([]);
-    } finally {
-      await backend.shutdown();
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("truncates published diagnostic messages at 200 characters", async () => {
-    const root = mkdtempSync(join(tmpdir(), "pi-dev-tools-diagnostics-"));
-    const backend = testBackend(join(root, "starts"));
-    const uri = "file:///test.ts";
-    try {
-      await backend.ensureStarted();
-      await backend.lspRequest("fixture/publishDiagnostics", {
-        uri,
-        diagnostics: [
           {
             range: { start: { line: 0, character: 0 } },
             severity: 1,
@@ -77,7 +55,18 @@ describe("LspBackend lifecycle", () => {
           },
         ],
       });
-      expect(backend.getDiagnostics(uri)[0].message).toBe("A".repeat(200) + "…");
+      expect(backend.getDiagnostics(uri)).toMatchObject([
+        { severity: "error", code: "TS2339", line: 5, character: 3 },
+        { severity: "warning", code: "TS7017", line: 8, character: 1 },
+        {
+          severity: "error",
+          code: "TS2322",
+          line: 1,
+          character: 1,
+          message: "A".repeat(200) + "…",
+        },
+      ]);
+      expect(backend.getDiagnostics("file:///other.ts")).toEqual([]);
     } finally {
       await backend.shutdown();
       rmSync(root, { recursive: true, force: true });
@@ -92,11 +81,16 @@ describe("LspBackend lifecycle", () => {
     try {
       await Promise.all([backend.ensureStarted(), backend.ensureStarted()]);
       expect(backend.isRunning).toBe(true);
-      expect(readFileSync(countFile, "utf8").trim().split("\n")).toHaveLength(1);
+      const firstPids = readFileSync(countFile, "utf8").trim().split("\n").map(Number);
+      expect(firstPids).toHaveLength(1);
+      const [firstPid] = firstPids;
+      expect(firstPid).toBeGreaterThan(0);
+      expect(() => process.kill(firstPid, 0)).not.toThrow();
       backend.recordSemanticResult("textDocument/documentSymbol", 1);
       expect(backend.getStatusSnapshot().semanticAvailable).toBe(true);
 
       await Promise.all([backend.shutdown(), backend.shutdown()]);
+      expect(() => process.kill(firstPid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
       expect(backend.isRunning).toBe(false);
       expect(backend.getStatusSnapshot()).toMatchObject({
         semanticAvailable: false,
@@ -106,7 +100,14 @@ describe("LspBackend lifecycle", () => {
       await Promise.all([backend.ensureStarted(), backend.ensureStarted()]);
       expect(backend.isRunning).toBe(true);
       expect(backend.getStatusSnapshot().semanticAvailable).toBe(false);
-      expect(readFileSync(countFile, "utf8").trim().split("\n")).toHaveLength(2);
+      const pids = readFileSync(countFile, "utf8").trim().split("\n").map(Number);
+      expect(pids).toHaveLength(2);
+      expect(pids[1]).not.toBe(firstPid);
+      expect(() => process.kill(pids[1], 0)).not.toThrow();
+      await backend.shutdown();
+      for (const pid of pids) {
+        expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+      }
     } finally {
       await backend.shutdown();
       rmSync(root, { recursive: true, force: true });
