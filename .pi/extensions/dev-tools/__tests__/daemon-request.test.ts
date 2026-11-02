@@ -84,9 +84,9 @@ describe("parsed daemon requests", () => {
   });
 
   it("returns no errors when the cache is empty", async () => {
-    expect(
-      result(await execute(request("diagnostics", { path: file("clean.ts") })), "diagnostics"),
-    ).toMatchObject({
+    const path = file("clean.ts");
+    expect(result(await execute(request("diagnostics", { path })), "diagnostics")).toMatchObject({
+      path,
       errorCount: 0,
       warnCount: 0,
       items: [],
@@ -101,43 +101,31 @@ describe("parsed daemon requests", () => {
     });
   });
 
-  it("bulk diagnostics aggregate counts and preserve input order", async () => {
-    const a = file("a.ts");
-    const b = file("b.ts");
-    backend.diagnostics.set(pathToFileURL(a).href, [
-      { line: 1, character: 1, severity: "error", code: "TS2322", message: "Bad type." },
-    ]);
-    const response = result(
-      await execute(request("diagnostics", { paths: [b, a] })),
-      "diagnostics",
-    );
-    expect(response.files?.map(({ path, errorCount }) => ({ path, errorCount }))).toEqual([
-      { path: b, errorCount: 0 },
-      { path: a, errorCount: 1 },
-    ]);
-    expect(response).toMatchObject({ errorCount: 1, warnCount: 0 });
-  });
-
-  it("bulk diagnostics deduplicate paths before opening files", async () => {
-    const path = file("duplicate.ts");
-    const response = result(
-      await execute(request("diagnostics", { paths: [path, path, path] })),
-      "diagnostics",
-    );
-    expect(response.files).toHaveLength(1);
-    expect(backend.opened).toEqual([path]);
-  });
-
-  it("bulk diagnostics retain valid results alongside missing-file errors", async () => {
-    const path = file("exists.ts");
+  it("returns ordered mixed bulk diagnostics, deduplicating before open and retaining file errors", async () => {
+    const clean = file("clean.ts");
+    const broken = file("broken.ts");
     const missing = join(root, "missing.ts");
+    backend.diagnostics.set(pathToFileURL(broken).href, [
+      { line: 1, character: 7, severity: "error", code: "TS2322", message: "Bad type." },
+      { line: 2, character: 1, severity: "warning", code: "TS7017", message: "Warning." },
+    ]);
+
     const response = result(
-      await execute(request("diagnostics", { paths: [path, missing] })),
+      await execute(request("diagnostics", { paths: [clean, broken, clean, missing] })),
       "diagnostics",
     );
-    expect(response.files).toHaveLength(1);
-    expect(response.files?.[0].path).toBe(path);
+    expect(response.files).toMatchObject([
+      { path: clean, errorCount: 0, warnCount: 0, items: [] },
+      {
+        path: broken,
+        errorCount: 1,
+        warnCount: 1,
+        items: [{ code: "TS2322" }, { code: "TS7017" }],
+      },
+    ]);
+    expect(response).toMatchObject({ errorCount: 1, warnCount: 1 });
     expect(response.fileErrors).toEqual([`${missing}: File not found: ${missing}`]);
+    expect(backend.opened).toEqual([clean, broken]);
   });
 
   it("returns hover signature and translates one-based positions", async () => {
@@ -305,25 +293,6 @@ describe("parsed daemon requests", () => {
     expect(backend.requests).toEqual([]);
   });
 
-  it("returns workspace symbols for a query", async () => {
-    backend.responses.set("workspace/symbol", [
-      {
-        name: "User",
-        kind: 11,
-        location: { uri: pathToFileURL(join(root, "types.ts")).href, range: range() },
-      },
-    ]);
-    expect(result(await execute(request("symbols", { query: "User" })), "symbols").items).toEqual([
-      {
-        name: "User",
-        kind: "interface",
-        line: 1,
-        relativePath: "types.ts",
-        absolutePath: join(root, "types.ts"),
-      },
-    ]);
-  });
-
   it("rejects symbols without a path or query", async () => {
     expect(await execute(request("symbols"))).toEqual({
       id: 41,
@@ -378,15 +347,32 @@ describe("parsed daemon requests", () => {
     ]);
     backend.responses.set("workspace/symbol", [
       {
-        name: "typescript",
-        kind: 12,
-        location: { uri: pathToFileURL(position().path).href, range: range() },
+        name: "User",
+        kind: 11,
+        location: { uri: pathToFileURL(join(root, "types.ts")).href, range: range(2) },
       },
     ]);
     const response = result(await run(request("symbols", { query: "value" })), "symbols");
-    expect(response.items.map(({ name, relativePath }) => ({ name, relativePath }))).toEqual([
-      { name: "shell", relativePath: "script.sh" },
-      { name: "typescript", relativePath: "source.ts" },
+    expect(response.items).toEqual([
+      {
+        name: "shell",
+        kind: "function",
+        line: 1,
+        relativePath: "script.sh",
+        absolutePath: join(bash.root, "script.sh"),
+      },
+      {
+        name: "User",
+        kind: "interface",
+        line: 3,
+        relativePath: "types.ts",
+        absolutePath: join(root, "types.ts"),
+      },
+    ]);
+    expect(bash.requests).toEqual([{ method: "workspace/symbol", params: { query: "value" } }]);
+    expect(backend.requests.map(({ method }) => method)).toEqual([
+      "textDocument/hover",
+      "workspace/symbol",
     ]);
     expect(duplicate.requests).toEqual([]);
     expect(cold.requests).toEqual([]);

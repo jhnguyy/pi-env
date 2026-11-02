@@ -15,6 +15,15 @@ function responses(socket: Socket, count = 1): Promise<DaemonResponse[]> {
   return new Promise((resolve, reject) => {
     let buffer = "";
     const received: DaemonResponse[] = [];
+    function finish(error?: Error) {
+      socket.off("data", data);
+      socket.off("error", finish);
+      socket.off("close", closed);
+      if (error) reject(error);
+      else resolve(received);
+    }
+    const closed = () =>
+      finish(new Error(`Connection closed after ${received.length}/${count} responses`));
     function data(chunk: string) {
       buffer += chunk;
       let newline: number;
@@ -22,14 +31,11 @@ function responses(socket: Socket, count = 1): Promise<DaemonResponse[]> {
         received.push(parseResponse(buffer.slice(0, newline)));
         buffer = buffer.slice(newline + 1);
       }
-      if (received.length >= count) {
-        socket.off("data", data);
-        socket.off("error", reject);
-        resolve(received);
-      }
+      if (received.length >= count) finish();
     }
     socket.on("data", data);
-    socket.once("error", reject);
+    socket.once("error", finish);
+    socket.once("close", closed);
   });
 }
 
@@ -47,6 +53,7 @@ describe("daemon socket lifecycle", () => {
   let pidPath: string;
   let daemon: LspDaemon;
   let backend: ControlledBackend;
+  let secondBackend: ControlledBackend;
   let disposeCalls: number;
   let releaseCleanup: (() => void) | undefined;
   let expectedShutdownError: unknown;
@@ -59,6 +66,7 @@ describe("daemon socket lifecycle", () => {
     socketPath = join(root, "daemon.sock");
     pidPath = join(root, "daemon.pid");
     backend = new ControlledBackend(root);
+    secondBackend = new ControlledBackend(root, "bash", ".sh");
     disposeCalls = 0;
     releaseCleanup = undefined;
     expectedShutdownError = undefined;
@@ -76,7 +84,7 @@ describe("daemon socket lifecycle", () => {
           if (disposalFailure) throw disposalFailure;
         }),
       },
-      { backends: [backend] },
+      { backends: [backend, secondBackend] },
     );
   });
 
@@ -210,24 +218,6 @@ describe("daemon socket lifecycle", () => {
     expect(ackWrites).toBe(1);
   });
 
-  it("reports protocol background shutdown failure and repeats the public failure", async () => {
-    const failure = new Error("protocol shutdown backend failure");
-    expectedShutdownError = failure;
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    backend.onShutdown = async () => {
-      throw failure;
-    };
-    await daemon.start();
-    const socket = await open();
-    const reply = responses(socket);
-    socket.write(serializeRequest({ id: 1, action: "shutdown" }));
-    expect(await reply).toMatchObject([{ id: 1, ok: true, result: { running: false } }]);
-    await expect(daemon.shutdown()).rejects.toBe(failure);
-    expect(logged).toHaveBeenCalledWith("[dev-tools-daemon] shutdown failed:", failure);
-    await expect(daemon.shutdown()).rejects.toBe(failure);
-    expect(backend.shutdownCalls).toBe(1);
-  });
-
   it("idle shutdown closes admission without rearming while earlier work drains", async () => {
     const timer = setTimeout(() => {}, 60_000);
     let expire!: () => void;
@@ -265,7 +255,33 @@ describe("daemon socket lifecycle", () => {
     expect(disposeCalls).toBe(1);
   });
 
-  it("drains a disconnected rename through every refresh even when one fails", async () => {
+  it("drains a disconnected committed rename before reporting every independent shutdown failure", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const syncFailure = new Error("synchronous backend failure");
+    const asyncFailure = new Error("asynchronous backend failure");
+    const telemetryFailure = new Error("telemetry failure");
+    let asyncSettled = false;
+    let stateAtDisposal: { asyncSettled: boolean; socket: boolean; pid: boolean } | undefined;
+    const cleanup = gate();
+    const cleaning = gate();
+    backend.shutdown = () => {
+      backend.shutdownCalls++;
+      throw syncFailure;
+    };
+    secondBackend.onShutdown = async () => {
+      cleaning.release();
+      await cleanup.promise;
+      asyncSettled = true;
+      throw asyncFailure;
+    };
+    onDispose = async () => {
+      stateAtDisposal = {
+        asyncSettled,
+        socket: existsSync(socketPath),
+        pid: existsSync(pidPath),
+      };
+      throw telemetryFailure;
+    };
     const source = join(root, "source.ts");
     const target = join(root, "target.ts");
     writeFileSync(source, "old");
@@ -288,14 +304,19 @@ describe("daemon socket lifecycle", () => {
     });
     const refresh = gate();
     const entered = gate();
-    releaseCleanup = refresh.release;
+    releaseCleanup = () => {
+      refresh.release();
+      cleanup.release();
+    };
     let opened = false;
     let refreshed = false;
+    const refreshes: string[] = [];
     backend.ensureFile = async (path) => {
       if (!opened) {
         opened = true;
         return pathToUri(path);
       }
+      refreshes.push(path);
       if (path === source) throw new Error("refresh failed after commit");
       entered.release();
       await refresh.promise;
@@ -318,74 +339,35 @@ describe("daemon socket lifecycle", () => {
     const closed = once(socket, "close");
     socket.destroy();
     await closed;
-    const stopping = daemon.shutdown();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(backend.shutdownCalls).toBe(0);
-    expect(disposeCalls).toBe(0);
-    expect(readFileSync(source, "utf8")).toBe("new");
-    expect(readFileSync(target, "utf8")).toBe("new");
-    refresh.release();
-    await stopping;
-    expect(refreshed).toBe(true);
-    expect(backend.shutdownCalls).toBe(1);
-    expect(disposeCalls).toBe(1);
-  });
-
-  it("retains both artifact failures alongside backend and telemetry failures", async () => {
-    const syncFailure = new Error("synchronous backend failure");
-    const asyncFailure = new Error("asynchronous backend failure");
-    const telemetryFailure = new Error("telemetry failure");
-    const second = new ControlledBackend(root, "bash", ".sh");
-    let asyncSettled = false;
-    let stateAtDisposal: { asyncSettled: boolean; socket: boolean; pid: boolean } | undefined;
-    const cleanup = gate();
-    const entered = gate();
-    releaseCleanup = cleanup.release;
-    backend.shutdown = () => {
-      backend.shutdownCalls++;
-      throw syncFailure;
-    };
-    second.onShutdown = async () => {
-      entered.release();
-      await cleanup.promise;
-      asyncSettled = true;
-      throw asyncFailure;
-    };
-    // The daemon owns the injected backends and this telemetry runtime.
-    daemon = new LspDaemon(
-      socketPath,
-      pidPath,
-      60_000,
-      {
-        ...noopToolingTelemetryRuntime,
-        disposeEffect: Effect.sync(() => {
-          disposeCalls++;
-          stateAtDisposal = {
-            asyncSettled,
-            socket: existsSync(socketPath),
-            pid: existsSync(pidPath),
-          };
-          throw telemetryFailure;
-        }),
-      },
-      { backends: [backend, second] },
-    );
-    await daemon.start();
-    const socket = await open();
-    const closed = once(socket, "close");
-    for (const path of [pidPath, socketPath]) {
-      rmSync(path);
-      mkdirSync(path);
-    }
-    const stopping = daemon.shutdown();
-    const outcome = stopping.catch((error: unknown) => {
+    const stopSocket = await open();
+    const stopClosed = once(stopSocket, "close");
+    const reply = responses(stopSocket);
+    stopSocket.write(serializeRequest({ id: 2, action: "shutdown" }));
+    expect(await reply).toMatchObject([{ id: 2, ok: true, result: { running: false } }]);
+    const outcome = daemon.shutdown().catch((error: unknown) => {
       expectedShutdownError = error;
       return error;
     });
     const concurrentOutcome = daemon.shutdown().catch((error: unknown) => error);
-    await entered.promise;
+    expect(backend.shutdownCalls).toBe(0);
+    expect(secondBackend.shutdownCalls).toBe(0);
     expect(disposeCalls).toBe(0);
-    expect(socket.destroyed).toBe(false);
+    expect(readFileSync(source, "utf8")).toBe("new");
+    expect(readFileSync(target, "utf8")).toBe("new");
+    // Only already-owned artifacts fail release; acquisition and rename succeeded.
+    for (const path of [pidPath, socketPath]) {
+      rmSync(path);
+      mkdirSync(path);
+    }
+    refresh.release();
+    await Promise.race([cleaning.promise, outcome]);
+    expect(secondBackend.shutdownCalls).toBe(1);
+    expect(refreshed).toBe(true);
+    expect(refreshes).toEqual([source, target]);
+    expect(disposeCalls).toBe(0);
+    expect(existsSync(socketPath)).toBe(true);
+    expect(existsSync(pidPath)).toBe(true);
+    expect(stopSocket.destroyed).toBe(false);
     cleanup.release();
     const error = await outcome;
     expect(await concurrentOutcome).toBe(error);
@@ -401,9 +383,10 @@ describe("daemon socket lifecycle", () => {
         expect.objectContaining({ code: "EISDIR", path: pidPath }),
       ]),
     );
-    await closed;
+    await stopClosed;
+    expect(logged).toHaveBeenCalledWith("[dev-tools-daemon] shutdown failed:", error);
     expect(backend.shutdownCalls).toBe(1);
-    expect(second.shutdownCalls).toBe(1);
+    expect(secondBackend.shutdownCalls).toBe(1);
     expect(disposeCalls).toBe(1);
     expect(stateAtDisposal).toEqual({
       asyncSettled: true,
@@ -491,10 +474,13 @@ describe("daemon socket lifecycle", () => {
     const concurrentOutcome = daemon.start().catch((error: unknown) => error);
     const outcome = await startup.catch((error: unknown) => error);
     expect(await concurrentOutcome).toBe(outcome);
-    expect(outcome).toMatchObject({
-      errors: [expect.objectContaining({ code: "EISDIR" }), disposalFailure],
-    });
+    expect(outcome).toBeInstanceOf(AggregateError);
+    const [startupFailure, cleanupFailure] = (outcome as AggregateError).errors;
+    expect(startupFailure).toMatchObject({ code: "EISDIR" });
+    expect((outcome as AggregateError).cause).toBe(startupFailure);
+    expect(cleanupFailure).toBe(disposalFailure);
     expectedShutdownError = disposalFailure;
+    await expect(daemon.shutdown()).rejects.toBe(disposalFailure);
     await expect(daemon.shutdown()).rejects.toBe(disposalFailure);
     expect(readFileSync(socketPath, "utf8")).toBe("not acquired");
     expect(existsSync(pidPath)).toBe(true);
