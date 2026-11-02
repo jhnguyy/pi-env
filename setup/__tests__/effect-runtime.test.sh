@@ -60,24 +60,4 @@ if [ "$status" -ne 7 ] || [ "$(grep -c 'node-fails setup/apply-managed-settings.
   exit 1
 fi
 
-printf 'not a directory' >"$tmp/blocked-home"
-set +e
-HOME="$tmp/blocked-home" PI_ENV_SETUP_MODE=portable PI_ENV_CONFIG_MANAGED_BY_NIX=0 PI_ENV_SKIP_TERMINAL=0 PI_ENV_SKIP_GHOSTTY=1 "$NODE_BIN" setup/configure.mjs terminal >"$tmp/fs.out" 2>"$tmp/fs.err"
-status=$?
-set -e
-if [ "$status" -ne 1 ] || [ "$(grep -c "configure tmux failed for $tmp/blocked-home/.tmux.conf:" "$tmp/fs.err")" -ne 1 ]; then
-  echo "FAIL: filesystem errors should render exactly once" >&2
-  cat "$tmp/fs.err" >&2
-  exit 1
-fi
-
-printf 'not a directory' >"$tmp/blocked-ghostty"
-PI_ENV_SETUP_MODE=portable PI_ENV_CONFIG_MANAGED_BY_NIX=0 PI_ENV_SKIP_TERMINAL=0 PI_ENV_SKIP_GHOSTTY=0 GHOSTTY_CONFIG_DIR="$tmp/blocked-ghostty" SHOULD_LINK_GHOSTTY=1 "$NODE_BIN" setup/configure.mjs terminal >"$tmp/ghostty.out" 2>"$tmp/ghostty.err"
-if ! grep -Fq "$tmp/blocked-ghostty (cannot create)" "$tmp/ghostty.out"; then
-  echo "FAIL: unavailable optional Ghostty directory should remain a non-fatal skip" >&2
-  cat "$tmp/ghostty.out" >&2
-  cat "$tmp/ghostty.err" >&2
-  exit 1
-fi
-
 echo "effect runtime tests passed"

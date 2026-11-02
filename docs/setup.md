@@ -59,8 +59,7 @@ See [themes](themes.md) for Pi selection, terminal installation, and Slack refer
 
 Run the focused workflow for the behavior under investigation:
 
-- Settings, reset, and Pi themes: `bash setup/__tests__/settings-reset.test.sh`
+- Settings and reset: `bash setup/__tests__/settings-reset.test.sh`
 - Guidance updates: `bash setup/__tests__/append-system.test.sh`
-- Ghostty: `bash setup/__tests__/ghostty-config.test.sh`
 
 Each prints a retained evidence directory. See [setup testing](../setup/__tests__/README.md) and [verification guidance](../CONTRIBUTING.md#verification) for broader checks.

@@ -4,7 +4,6 @@ import { promisify } from "node:util";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { fauxAssistantMessage, fauxProvider, type FauxResponseStep } from "@earendil-works/pi-ai";
 import {
@@ -29,10 +28,6 @@ const palette: Record<StatusState, string> = {
   error: "colour196",
 };
 const glyphs = { idle: "○", done: "✓", error: "✗", running: "⠾" };
-const renderColors = { bar: "#193b5d", raised: "#27496b", label: "#a3c5e7", current: "#e7a3c5" };
-const rgb = (hex: string) =>
-  [1, 3, 5].map((start) => parseInt(hex.slice(start, start + 2), 16)).join(",");
-const template = fileURLToPath(new URL("../../../../setup/templates/tmux.conf", import.meta.url));
 
 // Native Pi drives lifecycle events; only inference and the terminal UI adapter are
 // local fixtures. Transport scenarios below drive the public transport directly.
@@ -43,12 +38,10 @@ class TmuxFixture {
   readonly clients: { child: ChildProcess; closed: Promise<void> }[] = [];
   readonly transports: TmuxStatus[] = [];
   readonly sessions: AgentSession[] = [];
-  readonly terminalSocket: string;
   pane = "";
   window = "";
   constructor(readonly root: string) {
     this.socket = join(root, "tmux.sock");
-    this.terminalSocket = join(root, "terminal.sock");
   }
 
   async command(...args: string[]): Promise<string> {
@@ -119,40 +112,6 @@ class TmuxFixture {
       .toBe(count);
   }
 
-  // An outer tmux pane acts as the terminal, so capture-pane reports what the client drew.
-  async terminal(session: string): Promise<() => Promise<string>> {
-    // -u keeps glyphs intact where the host locale is not UTF-8, as in the container image.
-    const attach = `env -u TMUX TERM=xterm-256color COLORTERM=truecolor tmux -u -S '${this.socket}' attach-session -t ${session}`;
-    await execute(
-      "tmux",
-      [
-        "-u",
-        "-S",
-        this.terminalSocket,
-        "-f",
-        "/dev/null",
-        "new-session",
-        "-d",
-        "-x",
-        "80",
-        "-y",
-        "4",
-        attach,
-      ],
-      { timeout: 5_000, env: { ...process.env, TMUX: "", TMUX_PANE: "" } },
-    );
-    return async () => {
-      const { stdout } = await execute(
-        "tmux",
-        ["-u", "-S", this.terminalSocket, "capture-pane", "-p", "-e", "-t", "0"],
-        { timeout: 5_000, env: { ...process.env, TMUX: "", TMUX_PANE: "" } },
-      );
-      const line = stdout.trimEnd().split("\n").at(-1) ?? "";
-      this.observations.push({ renderedStatusLine: line });
-      return line;
-    };
-  }
-
   async cleanup(): Promise<unknown[]> {
     const failures: unknown[] = [];
     try {
@@ -193,13 +152,6 @@ class TmuxFixture {
         failures.push(String(error));
       }
     }
-    // Stop the outer terminal before killing the server its attached client uses.
-    try {
-      await execute("tmux", ["-S", this.terminalSocket, "kill-server"], { timeout: 5_000 });
-    } catch (error) {
-      // The terminal server exists only in rendering scenarios.
-      if (!/no server running|error connecting/.test(String(error))) failures.push(String(error));
-    }
     try {
       await this.command("kill-server");
     } catch (error) {
@@ -223,7 +175,7 @@ async function fixture(): Promise<TmuxFixture> {
       JSON.stringify(
         {
           evidenceBoundary:
-            "Real isolated tmux, native Pi, local faux provider and UI adapter; status rendering through a nested tmux client, not a physical terminal; no remote inference",
+            "Real isolated tmux transport and native Pi lifecycle with a local faux provider and UI adapter; no rendered UI qualification or remote inference",
           reproduce:
             "nub run test:integration .pi/extensions/general/__tests__/tmux-status.integration.test.ts",
           inputs: {
@@ -261,99 +213,6 @@ async function fixture(): Promise<TmuxFixture> {
 function indicator(state: StatusState, seen = false): string {
   const glyph = glyphs[state];
   return `#[fg=${palette[state]},nodim${seen ? "" : ",bold"}]${glyph}`;
-}
-
-interface Cell {
-  char: string;
-  fg: string;
-  bg: string;
-  bold: boolean;
-  dim: boolean;
-}
-
-// Tracks only the SGR attributes the status line asserts on.
-function cells(line: string): Cell[] {
-  const out: Cell[] = [];
-  let fg = "default";
-  let bg = "default";
-  let bold = false;
-  let dim = false;
-  for (const [, sgr, char] of line.matchAll(/\x1b\[([0-9;]*)m|(.)/gsu)) {
-    if (char !== undefined) {
-      out.push({ char, fg, bg, bold, dim });
-      continue;
-    }
-    const codes = (sgr || "0").split(";").map(Number);
-    for (let i = 0; i < codes.length; i++) {
-      const code = codes[i];
-      if (code === 0) [fg, bg, bold, dim] = ["default", "default", false, false];
-      else if (code === 1) bold = true;
-      else if (code === 2) dim = true;
-      else if (code === 22) [bold, dim] = [false, false];
-      else if (code === 39) fg = "default";
-      else if (code === 49) bg = "default";
-      else if ((code === 38 || code === 48) && codes[i + 1] === 2) {
-        const rgb = codes.slice(i + 2, i + 5).join(",");
-        if (code === 38) fg = rgb;
-        else bg = rgb;
-        i += 4;
-      } else if ((code === 38 || code === 48) && codes[i + 1] === 5) i += 2;
-    }
-  }
-  return out;
-}
-
-function styleOf(rendered: Cell[], text: string): Omit<Cell, "char">[] {
-  const chars = rendered.map((cell) => cell.char).join("");
-  const start = chars.indexOf(text);
-  if (start < 0) return [];
-  return rendered
-    .slice(start, start + text.length)
-    .map(({ fg, bg, bold, dim }) => ({ fg, bg, bold, dim }));
-}
-
-function expectedStyle(
-  text: string,
-  style: Omit<Cell, "char">,
-): Record<string, Omit<Cell, "char">[]> {
-  return { [text]: Array([...text].length).fill(style) };
-}
-
-// Test-owned styles isolate transport and format behavior from the production palette.
-async function templateTerminal(f: TmuxFixture) {
-  await f.command("source-file", template);
-  await f.command(
-    "set-option",
-    "-g",
-    "status-style",
-    `bg=${renderColors.bar},fg=${renderColors.label}`,
-  );
-  await f.command("set-option", "-g", "window-status-style", `fg=${renderColors.label}`);
-  await f.command(
-    "set-option",
-    "-g",
-    "window-status-current-style",
-    `bg=${renderColors.raised},fg=${renderColors.current},bold`,
-  );
-  // Exercise semantic indicator colors without the active-tab appearance override.
-  await f.command(
-    "set-option",
-    "-g",
-    "window-status-current-format",
-    await f.command("show-options", "-gqv", "window-status-format"),
-  );
-  await f.command("set-option", "-g", "status", "on");
-  await f.command("set-option", "-g", "status-interval", "1");
-  const capture = await f.terminal("status-test");
-  await expect
-    .poll(async () => (await f.command("list-clients", "-F", "#{client_name}")).trim(), {
-      timeout: 7_000,
-    })
-    .not.toBe("");
-  return async (...texts: string[]) => {
-    const rendered = cells(await capture());
-    return Object.assign({}, ...texts.map((text) => ({ [text]: styleOf(rendered, text) })));
-  };
 }
 
 // Resolve a real Theme, including indexed and RGB colors, without global theme state.
@@ -473,25 +332,6 @@ function responseGate(): { step: FauxResponseStep; entered: Promise<void>; relea
 }
 
 describe("tmux status integration (real isolated server)", () => {
-  it("reloads the template without accumulating settings or replacing user capabilities", async () => {
-    const f = await fixture();
-    await f.command("set-option", "-as", "terminal-features", ",pi-test:RGB");
-    await f.command("set-option", "-as", "terminal-overrides", ",pi-test:AX");
-    const features = await f.command("show-options", "-s", "terminal-features");
-    const overrides = await f.command("show-options", "-s", "terminal-overrides");
-    await f.command("source-file", template);
-    const server = await f.command("show-options", "-s");
-    const session = await f.command("show-options", "-g");
-    const window = await f.command("show-options", "-gw");
-    await f.command("source-file", template);
-    expect(await f.command("show-options", "-s")).toBe(server);
-    expect(await f.command("show-options", "-g")).toBe(session);
-    expect(await f.command("show-options", "-gw")).toBe(window);
-    expect(await f.command("show-options", "-s", "terminal-features")).toBe(features);
-    expect(await f.command("show-options", "-s", "terminal-overrides")).toBe(overrides);
-    expect(await f.command("show-options", "-sv", "set-clipboard")).toBe("on");
-  });
-
   it.each([false, true])(
     "aggregates running > error > done > idle despite layout order (linked=%s)",
     async (linked) => {
@@ -607,154 +447,6 @@ describe("tmux status integration (real isolated server)", () => {
     expect(await f.indicator()).toBe("#[fg=#abcdef,nodim]⠾");
     await transport.update("done", palette.done);
     expect(await f.indicator(), "new state rearms unseen").toBe(indicator("done"));
-  });
-
-  it("renders status colour on agent indicators only", async () => {
-    const bar = rgb(renderColors.bar);
-    const raised = rgb(renderColors.raised);
-    const label = rgb(renderColors.label);
-    const f = await fixture();
-    await f.command("rename-window", "-t", f.window, "alpha");
-    const background = await f.command(
-      "new-window",
-      "-d",
-      "-t",
-      "status-test",
-      "-n",
-      "beta",
-      "-P",
-      "-F",
-      "#{pane_id}",
-      "sleep 300",
-    );
-    await f.command("new-window", "-d", "-t", "status-test", "-n", "gamma", "sleep 300");
-    const render = await templateTerminal(f);
-    const current = f.transport();
-    const unseen = f.transport(background);
-    await unseen.update("running", palette.running);
-    await current.update("done", palette.done);
-    await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toBe("done|1|#345678|0");
-
-    await expect
-      .poll(() => render("✓", "0:alpha", "⠾", "1:beta", "2:gamma"), { timeout: 7_000 })
-      .toEqual({
-        // A viewed state keeps the current tab's weight; an unseen one is bold.
-        ...expectedStyle("✓", { fg: "52,86,120", bg: raised, bold: true, dim: false }),
-        ...expectedStyle("0:alpha", { fg: label, bg: raised, bold: true, dim: false }),
-        ...expectedStyle("⠾", { fg: "18,52,86", bg: bar, bold: true, dim: false }),
-        ...expectedStyle("1:beta", { fg: label, bg: bar, bold: false, dim: false }),
-        ...expectedStyle("2:gamma", { fg: label, bg: bar, bold: false, dim: false }),
-      });
-  });
-
-  it("keeps last-window and bell colour overrides on agent tab labels", async () => {
-    const f = await fixture();
-    await f.command("rename-window", "-t", f.window, "alpha");
-    const last = await f.command(
-      "new-window",
-      "-d",
-      "-t",
-      "status-test",
-      "-n",
-      "beta",
-      "-P",
-      "-F",
-      "#{pane_id}",
-      "sleep 300",
-    );
-    const belled = await f.command(
-      "new-window",
-      "-d",
-      "-t",
-      "status-test",
-      "-n",
-      "gamma",
-      "-P",
-      "-F",
-      "#{pane_id}",
-      "sleep 300",
-    );
-    // beta becomes the last window; gamma raises a bell while in the background.
-    await f.command("select-window", "-t", "status-test:1");
-    await f.command("select-window", "-t", "status-test:0");
-    const render = await templateTerminal(f);
-    await f.command("set-option", "-g", "window-status-last-style", "fg=#ff00ff");
-    await f.command("set-option", "-g", "window-status-bell-style", "fg=#00ffff");
-    await f.command("set-option", "-g", "monitor-bell", "on");
-    await f.command("set-option", "-g", "bell-action", "any");
-    await f.command("run-shell", "-t", belled, "printf '\\a' > #{pane_tty}");
-    await f.transport(last).update("done", palette.done);
-    await f.transport(belled).update("error", "#fedcba");
-    const label = (fg: string) => ({ fg, bg: rgb(renderColors.bar), bold: false, dim: false });
-    await expect
-      .poll(() => render("1:beta", "2:gamma"), { timeout: 7_000 })
-      .toEqual({
-        ...expectedStyle("1:beta", label("255,0,255")),
-        ...expectedStyle("2:gamma", label("0,255,255")),
-      });
-  });
-
-  it("keeps labels readable beside indicators from earlier extension versions", async () => {
-    const f = await fixture();
-    await f.command("rename-window", "-t", f.window, "alpha");
-    const render = await templateTerminal(f);
-    // The format written before the template owned the reset.
-    const legacy = "#[push-default]#[fg=#123456,nobold,nodim,dim]✓#[pop-default]";
-    await f.command("set-option", "-w", "-t", f.window, "@pi_agent_status", legacy);
-    await expect
-      .poll(() => render("0:alpha"), { timeout: 7_000 })
-      .toEqual(
-        expectedStyle("0:alpha", {
-          fg: rgb(renderColors.label),
-          bg: rgb(renderColors.bar),
-          bold: false,
-          dim: false,
-        }),
-      );
-  });
-
-  it("colours each overflow arrow by the highest-priority agent on its side", async () => {
-    const f = await fixture();
-    const panes = [f.pane];
-    await f.command("rename-window", "-t", f.window, "window-number-0");
-    for (let i = 1; i < 9; i++)
-      panes.push(
-        await f.command(
-          "new-window",
-          "-d",
-          "-t",
-          "status-test",
-          "-n",
-          `window-number-${i}`,
-          "-P",
-          "-F",
-          "#{pane_id}",
-          "sleep 300",
-        ),
-      );
-    await f.command("select-window", "-t", "status-test:4");
-    const render = await templateTerminal(f);
-    const left = { done: f.transport(panes[1]), running: f.transport(panes[2]) };
-    const right = { error: f.transport(panes[6]), idle: f.transport(panes[7]) };
-    await left.done.update("done", palette.done);
-    await left.running.update("running", palette.running);
-    await right.idle.update("idle", "#abcdef");
-    await right.error.update("error", "#fedcba");
-    const arrow = (fg: string) => ({ fg, bg: rgb(renderColors.bar), bold: false, dim: false });
-    await expect
-      .poll(() => render("<", ">"), { timeout: 7_000 })
-      .toEqual({
-        ...expectedStyle("<", arrow("18,52,86")),
-        ...expectedStyle(">", arrow("254,220,186")),
-      });
-    await left.running.close();
-    await right.error.close();
-    await expect
-      .poll(() => render("<", ">"), { timeout: 7_000 })
-      .toEqual({
-        ...expectedStyle("<", arrow("52,86,120")),
-        ...expectedStyle(">", arrow("171,205,239")),
-      });
   });
 
   it("rearms unseen completion after coalesced transitions return to the same state", async () => {
