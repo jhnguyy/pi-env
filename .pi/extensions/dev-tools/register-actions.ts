@@ -10,6 +10,7 @@
  * 6. Add registerAction() call here
  */
 
+import type { KeybindingHints } from "@earendil-works/pi-coding-agent";
 import { registerAction } from "./action-registry";
 import { actionHandlers } from "./action-handlers";
 import {
@@ -56,6 +57,7 @@ function renderDiagnostics(
   d: DiagnosticsResult,
   opts: { expanded?: boolean },
   theme: RenderTheme,
+  hints?: KeybindingHints,
 ): Text {
   if (opts.expanded) {
     return new Text(JSON.stringify(d, null, 2), 0, 0);
@@ -75,7 +77,7 @@ function renderDiagnostics(
 
   const fileSummary = diagnosticsFileSummary(d);
   if (fileSummary) text += ` ${theme.fg("muted", `scanned ${fileSummary}`)}`;
-  text += ` ${toolExpandHint(theme, "for JSON")}`;
+  text += ` ${toolExpandHint(theme, hints, "for JSON")}`;
 
   return new Text(text, 0, 0);
 }

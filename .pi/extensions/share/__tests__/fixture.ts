@@ -4,24 +4,48 @@ import * as nodeFiles from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { SessionManager, type ExtensionAPI, type ExtensionCommandContext, type RegisteredCommand } from "@earendil-works/pi-coding-agent";
+import {
+  SessionManager,
+  type ExtensionAPI,
+  type ExtensionCommandContext,
+  type RegisteredCommand,
+} from "@earendil-works/pi-coding-agent";
 import { afterEach, expect } from "vitest";
 import share, { type ShareFiles } from "../index";
 
 const run = promisify(execFile);
-const piCli = join(process.cwd(), "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js");
+const piCli = join(
+  process.cwd(),
+  "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js",
+);
 export const roots: string[] = [];
 afterEach(() => {
   const errors: unknown[] = [];
   for (const root of roots.splice(0)) {
-    try { rmSync(root, { recursive: true, force: true }); }
-    catch (error) { errors.push(error); }
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch (error) {
+      errors.push(error);
+    }
   }
   if (errors.length > 0) throw new AggregateError(errors, "Share fixture teardown failed");
 });
 
-export const privateRepository = { id: 123, private: true, permissions: { push: true }, default_branch: "main", has_pages: false };
-export const exampleShare = { type: "file", name: "2026-10-22-example-0123456789ab.html", path: "sessions/2026-10-22-example-0123456789ab.html", sha: "a".repeat(40), html_url: "https://github.com/owner/private-exports/blob/main/sessions/2026-10-22-example-0123456789ab.html" };
+export const privateRepository = {
+  id: 123,
+  private: true,
+  permissions: { push: true },
+  default_branch: "main",
+  has_pages: false,
+};
+export const exampleShare = {
+  type: "file",
+  name: "2026-10-22-example-0123456789ab.html",
+  path: "sessions/2026-10-22-example-0123456789ab.html",
+  sha: "a".repeat(40),
+  html_url:
+    "https://github.com/owner/private-exports/blob/main/sessions/2026-10-22-example-0123456789ab.html",
+};
 
 // GitHub is replaced at its process adapter. Pi exports and local files remain real.
 // github-contract.integration.test.ts corroborates GET DTOs and real gh envelopes (opt-in).
@@ -38,7 +62,11 @@ export function fixture(...repositories: unknown[]) {
   const projectSettings = join(root, "project-settings.json");
   writeFileSync(settings, JSON.stringify({ theme: "dark" }));
   const session = SessionManager.create(root, join(root, "sessions"));
-  session.appendMessage({ role: "user", content: "synthetic private conversation", timestamp: Date.now() });
+  session.appendMessage({
+    role: "user",
+    content: "synthetic private conversation",
+    timestamp: Date.now(),
+  });
   let command: RegisteredCommand | undefined;
   const uploads: Array<Record<string, unknown>> = [];
   const deletions: Array<{ path: string; body: Record<string, unknown> }> = [];
@@ -51,7 +79,10 @@ export function fixture(...repositories: unknown[]) {
     branches: new Set(["main", "shares", "feature/test"]),
     shares: [exampleShare] as unknown[],
     currentShare: exampleShare as unknown,
-    contents: new Map<string, { type: string; name: string; path: string; sha: string; html_url: string }>(),
+    contents: new Map<
+      string,
+      { type: string; name: string; path: string; sha: string; html_url: string }
+    >(),
     rootContents: [] as unknown[],
     uploadResponse: undefined as "malformed" | "lost" | undefined,
     deleteResponse: undefined as "lost" | undefined,
@@ -64,12 +95,21 @@ export function fixture(...repositories: unknown[]) {
   let selected: string | undefined;
   const files: ShareFiles = { ...nodeFiles };
   const api: Partial<ExtensionAPI> = {
-    registerCommand(name: string, value: RegisteredCommand) { expect(name).toBe("share-private"); command = value; },
+    registerCommand(name: string, value: RegisteredCommand) {
+      expect(name).toBe("share-private");
+      command = value;
+    },
     async exec(binary, args, options) {
       if (binary !== "gh") {
         events.push("export");
         const result = await run(process.execPath, [piCli, ...args], { signal: options?.signal });
-        return { code: 0, stdout: result.stdout, stderr: result.stderr, killed: false };
+        return {
+          code: 0,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          killed: false,
+          truncated: false,
+        };
       }
       requests.push(args);
       expect(args).toContain("--hostname");
@@ -101,7 +141,13 @@ export function fixture(...repositories: unknown[]) {
           } else {
             uploads.push(body);
             status = existing ? 200 : 201;
-            const content = { type: "file", name: path.slice("sessions/".length), path, sha: String(uploads.length).padStart(40, "0"), html_url: `https://github.com/owner/private-exports/blob/${String(body["branch"])}/${path}` };
+            const content = {
+              type: "file",
+              name: path.slice("sessions/".length),
+              path,
+              sha: String(uploads.length).padStart(40, "0"),
+              html_url: `https://github.com/owner/private-exports/blob/${String(body["branch"])}/${path}`,
+            };
             github.contents.set(key, content);
             data = { content };
           }
@@ -129,40 +175,111 @@ export function fixture(...repositories: unknown[]) {
         events.push("file");
         const path = route.split("/contents/")[1];
         const branch = new URLSearchParams(endpoint.split("?")[1]).get("ref");
-        data = path === exampleShare.path ? github.currentShare : github.contents.get(`${branch}:${path}`);
-        if (data === undefined) { status = 404; data = { message: "Not Found" }; }
+        data =
+          path === exampleShare.path
+            ? github.currentShare
+            : github.contents.get(`${branch}:${path}`);
+        if (data === undefined) {
+          status = 404;
+          data = { message: "Not Found" };
+        }
       } else {
         events.push("repository");
         const repository = repositories[Math.min(checks++, repositories.length - 1)];
-        data = typeof repository === "object" && repository !== null
-          ? { ...repository, has_pages: github.pages !== undefined || ("has_pages" in repository && repository.has_pages === true) }
-          : repository;
+        data =
+          typeof repository === "object" && repository !== null
+            ? {
+                ...repository,
+                has_pages:
+                  github.pages !== undefined ||
+                  ("has_pages" in repository && repository.has_pages === true),
+              }
+            : repository;
       }
       if (method === "PUT" || method === "DELETE") github.abortOnCommit?.abort();
-      if ((method === "PUT" && github.uploadResponse === "lost") || (method === "DELETE" && github.deleteResponse === "lost")) {
-        return { code: 1, stdout: "", stderr: "synthetic connection reset after commit", killed: false };
+      if (
+        (method === "PUT" && github.uploadResponse === "lost") ||
+        (method === "DELETE" && github.deleteResponse === "lost")
+      ) {
+        return {
+          code: 1,
+          stdout: "",
+          stderr: "synthetic connection reset after commit",
+          killed: false,
+          truncated: false,
+        };
       }
-      const body = method === "PUT" && github.uploadResponse === "malformed" ? "invalid-json" : JSON.stringify(data);
-      const stdout = args.includes("--include") ? `HTTP/2.0 ${status} Synthetic\r\ncontent-type: application/json\r\n\r\n${body}` : body;
-      return { code: status >= 400 ? 1 : 0, stdout, stderr: status >= 400 ? `gh: synthetic error (HTTP ${status})` : "", killed: false };
+      const body =
+        method === "PUT" && github.uploadResponse === "malformed"
+          ? "invalid-json"
+          : JSON.stringify(data);
+      const stdout = args.includes("--include")
+        ? `HTTP/2.0 ${status} Synthetic\r\ncontent-type: application/json\r\n\r\n${body}`
+        : body;
+      return {
+        code: status >= 400 ? 1 : 0,
+        stdout,
+        stderr: status >= 400 ? `gh: synthetic error (HTTP ${status})` : "",
+        killed: false,
+        truncated: false,
+      };
     },
   };
-  share(api as ExtensionAPI, { globalSettingsPath: () => settings, projectSettingsPath: () => projectSettings, readFile: readFileSync }, files);
+  share(
+    api as ExtensionAPI,
+    {
+      globalSettingsPath: () => settings,
+      projectSettingsPath: () => projectSettings,
+      readFile: readFileSync,
+    },
+    files,
+  );
   const ui: Partial<ExtensionCommandContext["ui"]> = {
-    input: async () => { prompts++; return answer; },
-    confirm: async (_title, message) => { events.push("confirm"); confirmations.push(message); return approved; },
+    input: async () => {
+      prompts++;
+      return answer;
+    },
+    confirm: async (_title, message) => {
+      events.push("confirm");
+      confirmations.push(message);
+      return approved;
+    },
     select: async (_title, options) => selected ?? options[0],
-    notify: (text) => { notices.push(text); },
+    notify: (text) => {
+      notices.push(text);
+    },
   };
   const context: Partial<ExtensionCommandContext> = {
-    cwd: root, hasUI: true, sessionManager: session, waitForIdle: async () => {}, ui: ui as ExtensionCommandContext["ui"],
+    cwd: root,
+    hasUI: true,
+    sessionManager: session,
+    waitForIdle: async () => {},
+    ui: ui as ExtensionCommandContext["ui"],
   };
   return {
-    settings, projectSettings, files, session, github, uploads, deletions, requests, events, notices, confirmations,
-    get prompts() { return prompts; },
-    cancel() { answer = undefined; },
-    decline() { approved = false; },
-    select(value: string) { selected = value; },
+    settings,
+    projectSettings,
+    files,
+    session,
+    github,
+    uploads,
+    deletions,
+    requests,
+    events,
+    notices,
+    confirmations,
+    get prompts() {
+      return prompts;
+    },
+    cancel() {
+      answer = undefined;
+    },
+    decline() {
+      approved = false;
+    },
+    select(value: string) {
+      selected = value;
+    },
     invoke: (signal?: AbortSignal, args = "") => {
       context.signal = signal;
       return command!.handler(args, context as ExtensionCommandContext);

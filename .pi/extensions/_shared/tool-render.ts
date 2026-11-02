@@ -1,8 +1,6 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import {
-  keyHint,
-  keyText,
-  rawKeyHint,
+  type KeybindingHints,
   type ToolDefinition,
   type ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
@@ -21,7 +19,7 @@ export interface ToolRenderTheme {
   bold?(text: string): string;
 }
 
-export interface ToolResultRenderContext {
+export interface ToolResultRenderContext extends KeybindingHints {
   readonly isError: boolean;
 }
 
@@ -53,14 +51,13 @@ export class WidthBoundedText implements Component {
   invalidate(): void {}
 }
 
-export function toolExpandKeyHint(description = "to expand"): string {
-  return keyText("app.tools.expand")
-    ? keyHint("app.tools.expand", description)
-    : rawKeyHint("ctrl+o", description);
-}
-
-export function toolExpandHint(theme: ToolRenderTheme, description = "to expand"): string {
-  return `${theme.fg("muted", "(")}${toolExpandKeyHint(description)}${theme.fg("muted", ")")}`;
+export function toolExpandHint(
+  theme: ToolRenderTheme,
+  hints?: KeybindingHints,
+  description = "to expand",
+): string {
+  if (!hints?.keyText("app.tools.expand")) return "";
+  return `${theme.fg("muted", "(")}${hints.keyHint("app.tools.expand", description)}${theme.fg("muted", ")")}`;
 }
 
 export type PublicPiToolDefinition<
@@ -128,6 +125,6 @@ export function renderTextToolResult(
   }
   const summary = shortDescription(text || (failed ? "error" : "complete"), { oneLine: true });
   return new WidthBoundedText(
-    `${header}\n  ${theme.fg(failed ? "error" : "toolOutput", summary)}\n${toolExpandHint(theme)}`,
+    `${header}\n  ${theme.fg(failed ? "error" : "toolOutput", summary)}\n${toolExpandHint(theme, context)}`,
   );
 }

@@ -4,9 +4,29 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Fiber } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import webContextExtension, { WebFetchFailureKind, WebFetchMode, fetchWebText, fetchWebTextEffect, parseWebUrl, type WebFetch, type WebFetchResponse } from "../index";
-import { AnthropicHostedToolName, injectAnthropicHostedWebTools, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "../anthropic-tools";
-import { OpenAISearchContextSize, injectOpenAIHostedWebTools, loadOpenAIWebToolSettings, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "../openai-tools";
+import webContextExtension, {
+  WebFetchFailureKind,
+  WebFetchMode,
+  fetchWebText,
+  fetchWebTextEffect,
+  parseWebUrl,
+  type WebFetch,
+  type WebFetchResponse,
+} from "../index";
+import {
+  AnthropicHostedToolName,
+  injectAnthropicHostedWebTools,
+  loadAnthropicWebToolSettings,
+  shouldInjectAnthropicHostedWebTools,
+  type AnthropicWebToolSettings,
+} from "../anthropic-tools";
+import {
+  OpenAISearchContextSize,
+  injectOpenAIHostedWebTools,
+  loadOpenAIWebToolSettings,
+  shouldInjectOpenAIHostedWebTools,
+  type OpenAIWebToolSettings,
+} from "../openai-tools";
 
 const roots: string[] = [];
 function settingsProject(): string {
@@ -20,7 +40,11 @@ afterEach(() => {
   vi.unstubAllEnvs();
   const failures: unknown[] = [];
   for (const root of roots.splice(0)) {
-    try { rmSync(root, { recursive: true, force: true }); } catch (error) { failures.push(error); }
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch (error) {
+      failures.push(error);
+    }
   }
   if (failures.length) throw new AggregateError(failures, "Web-context fixture cleanup failed");
 });
@@ -32,10 +56,12 @@ const mockTheme = {
 
 function registeredWebFetchTool() {
   const registerTool = vi.fn();
-  webContextExtension({ on: vi.fn(), registerTool, events: { emit: vi.fn(), on: vi.fn() } } as never);
-  return registerTool.mock.calls
-    .map(([tool]) => tool)
-    .find((tool) => tool.name === "web_fetch");
+  webContextExtension({
+    on: vi.fn(),
+    registerTool,
+    events: { emit: vi.fn(), on: vi.fn() },
+  } as never);
+  return registerTool.mock.calls.map(([tool]) => tool).find((tool) => tool.name === "web_fetch");
 }
 
 function componentText(component: unknown): string {
@@ -49,7 +75,12 @@ function webFetchToolResult() {
     body,
     hiddenTail,
     result: {
-      content: [{ type: "text", text: `URL: https://example.com/\nStatus: 200\nContent-Type: text/html\nMode: text\nRaw-Bytes: 8192\nOutput-Bytes: 4096\nTruncated: false\n\n${body}` }],
+      content: [
+        {
+          type: "text",
+          text: `URL: https://example.com/\nStatus: 200\nContent-Type: text/html\nMode: text\nRaw-Bytes: 8192\nOutput-Bytes: 4096\nTruncated: false\n\n${body}`,
+        },
+      ],
       details: {
         text: body,
         url: "https://example.com/",
@@ -68,7 +99,9 @@ describe("web fetch", () => {
   it("shows the requested URL in the compact call", () => {
     const tool = registeredWebFetchTool();
 
-    const call = componentText(tool.renderCall({ url: "https://example.com/docs?q=pi" }, mockTheme));
+    const call = componentText(
+      tool.renderCall({ url: "https://example.com/docs?q=pi" }, mockTheme),
+    );
 
     expect(call).toContain("web_fetch");
     expect(call).toContain("https://example.com/docs?q=pi");
@@ -79,16 +112,37 @@ describe("web fetch", () => {
     const { hiddenTail, result } = webFetchToolResult();
     const beforeRender = structuredClone(result);
 
-    const collapsed = componentText(tool.renderResult(result, { expanded: false }, mockTheme));
+    const collapsed = componentText(
+      tool.renderResult(result, { expanded: false }, mockTheme, {
+        keyText: () => "alt+e",
+        keyHint: (_id: string, description: string) => `alt+e ${description}`,
+      }),
+    );
 
     expect(collapsed).toContain("HTTP 200");
     expect(collapsed).toContain("text/html");
     expect(collapsed).toContain("4.0KB");
     expect(collapsed).toContain("Fetched body");
-    expect(collapsed).toContain("ctrl+o");
+    expect(collapsed).toContain("alt+e to expand");
+    expect(collapsed).not.toContain("ctrl+o");
     expect(collapsed.length).toBeLessThan(1600);
     expect(collapsed).not.toContain(hiddenTail);
     expect(result).toEqual(beforeRender);
+  });
+
+  it("omits hints when the host disables expansion", () => {
+    const tool = registeredWebFetchTool();
+    const { result } = webFetchToolResult();
+    const collapsed = componentText(
+      tool.renderResult(result, { expanded: false }, mockTheme, {
+        keyText: () => "",
+        keyHint: () => {
+          throw new Error("Disabled bindings must not be formatted");
+        },
+      }),
+    );
+    expect(collapsed).toContain("Fetched body");
+    expect(collapsed).not.toMatch(/to expand|ctrl\+o|\(\)/u);
   });
 
   it("reveals the full fetched output when expanded", () => {
@@ -108,11 +162,20 @@ describe("web fetch", () => {
 
   it("extracts compact text from HTML by default", async () => {
     const injectedFetch: WebFetch = async () =>
-      new Response("<html><head><style>.x{}</style><script>noise()</script><title>T</title></head><body><nav>skip</nav><main><h1>Hello</h1><p>Useful <b>text</b>.</p></main></body></html>", {
-        headers: { "content-type": "text/html" },
-      });
+      new Response(
+        "<html><head><style>.x{}</style><script>noise()</script><title>T</title></head><body><nav>skip</nav><main><h1>Hello</h1><p>Useful <b>text</b>.</p></main></body></html>",
+        {
+          headers: { "content-type": "text/html" },
+        },
+      );
 
-    const result = await Effect.runPromise(fetchWebTextEffect("https://example.com", { mode: WebFetchMode.Text }, { fetch: injectedFetch }));
+    const result = await Effect.runPromise(
+      fetchWebTextEffect(
+        "https://example.com",
+        { mode: WebFetchMode.Text },
+        { fetch: injectedFetch },
+      ),
+    );
     expect(result.text).toContain("Hello");
     expect(result.text).toContain("Useful text.");
     expect(result.text).not.toContain("noise");
@@ -120,15 +183,20 @@ describe("web fetch", () => {
   });
 
   it("preserves HTTP status responses without failing", async () => {
-    const injectedFetch: WebFetch = async () => new Response("missing", { status: 404, headers: { "content-type": "text/plain" } });
+    const injectedFetch: WebFetch = async () =>
+      new Response("missing", { status: 404, headers: { "content-type": "text/plain" } });
 
-    const result = await Effect.runPromise(fetchWebTextEffect("https://example.com/missing", {}, { fetch: injectedFetch }));
+    const result = await Effect.runPromise(
+      fetchWebTextEffect("https://example.com/missing", {}, { fetch: injectedFetch }),
+    );
     expect(result.status).toBe(404);
     expect(result.text).toBe("missing");
   });
 
   it("returns typed URL failures through the Effect seam", async () => {
-    const result = await Effect.runPromise(Effect.result(fetchWebTextEffect("file:///tmp/example.html")));
+    const result = await Effect.runPromise(
+      Effect.result(fetchWebTextEffect("file:///tmp/example.html")),
+    );
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
@@ -143,7 +211,9 @@ describe("web fetch", () => {
       throw new TypeError("socket closed");
     };
 
-    const result = await Effect.runPromise(Effect.result(fetchWebTextEffect("https://example.com", {}, { fetch: injectedFetch })));
+    const result = await Effect.runPromise(
+      Effect.result(fetchWebTextEffect("https://example.com", {}, { fetch: injectedFetch })),
+    );
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
       expect(result.failure.kind).toBe(WebFetchFailureKind.Request);
@@ -158,7 +228,9 @@ describe("web fetch", () => {
     };
     const injectedFetch: WebFetch = async () => response;
 
-    await expect(fetchWebText("https://example.com", {}, undefined, { fetch: injectedFetch })).rejects.toMatchObject({
+    await expect(
+      fetchWebText("https://example.com", {}, undefined, { fetch: injectedFetch }),
+    ).rejects.toMatchObject({
       _tag: "WebFetchFailure",
       kind: WebFetchFailureKind.Body,
       message: "Web fetch body read failed: body stream reset",
@@ -178,7 +250,9 @@ describe("web fetch", () => {
         listenerReady();
       });
     };
-    const promise = fetchWebText("https://example.com", {}, controller.signal, { fetch: injectedFetch });
+    const promise = fetchWebText("https://example.com", {}, controller.signal, {
+      fetch: injectedFetch,
+    });
 
     await ready;
     controller.abort(new Error("caller aborted"));
@@ -209,9 +283,10 @@ describe("web fetch", () => {
         getReader: () => {
           bodyStarted();
           return {
-            read: () => new Promise<ReadableStreamReadResult<Uint8Array>>((_resolve, reject) => {
-              rejectRead = reject;
-            }),
+            read: () =>
+              new Promise<ReadableStreamReadResult<Uint8Array>>((_resolve, reject) => {
+                rejectRead = reject;
+              }),
             cancel: (reason?: unknown) => {
               bodyCancelled();
               rejectRead?.(reason);
@@ -223,13 +298,18 @@ describe("web fetch", () => {
       },
     } satisfies WebFetchResponse;
     const injectedFetch: WebFetch = async () => response;
-    const promise = fetchWebText("https://example.com", {}, controller.signal, { fetch: injectedFetch });
+    const promise = fetchWebText("https://example.com", {}, controller.signal, {
+      fetch: injectedFetch,
+    });
     promise.catch(() => undefined);
 
     await started;
     controller.abort(new Error("caller aborted body"));
     await expect(cancelled).resolves.toBeUndefined();
-    await expect(promise).rejects.toMatchObject({ kind: WebFetchFailureKind.Body, message: "Web fetch body read failed: caller aborted body" });
+    await expect(promise).rejects.toMatchObject({
+      kind: WebFetchFailureKind.Body,
+      message: "Web fetch body read failed: caller aborted body",
+    });
   });
 
   it("cancels a response body stream on direct Effect interruption after headers", async () => {
@@ -251,9 +331,10 @@ describe("web fetch", () => {
         getReader: () => {
           bodyStarted();
           return {
-            read: () => new Promise<ReadableStreamReadResult<Uint8Array>>((_resolve, reject) => {
-              rejectRead = reject;
-            }),
+            read: () =>
+              new Promise<ReadableStreamReadResult<Uint8Array>>((_resolve, reject) => {
+                rejectRead = reject;
+              }),
             cancel: (reason?: unknown) => {
               bodyCancelled();
               rejectRead?.(reason);
@@ -265,7 +346,9 @@ describe("web fetch", () => {
       },
     } satisfies WebFetchResponse;
     const injectedFetch: WebFetch = async () => response;
-    const fiber = Effect.runFork(fetchWebTextEffect("https://example.com", {}, { fetch: injectedFetch }));
+    const fiber = Effect.runFork(
+      fetchWebTextEffect("https://example.com", {}, { fetch: injectedFetch }),
+    );
 
     await started;
     await Effect.runPromise(Fiber.interrupt(fiber));
@@ -274,27 +357,52 @@ describe("web fetch", () => {
 });
 
 describe("openai hosted web tools", () => {
-  const settings: OpenAIWebToolSettings = { enabled: true, searchContextSize: OpenAISearchContextSize.Low, externalWebAccess: false };
+  const settings: OpenAIWebToolSettings = {
+    enabled: true,
+    searchContextSize: OpenAISearchContextSize.Low,
+    externalWebAccess: false,
+  };
 
   it("loads typed settings with defaults and env enabled precedence", () => {
     const dir = settingsProject();
     mkdirSync(join(dir, ".pi"));
-    writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ webContext: { openaiHostedTools: { enabled: false, searchContextSize: "high", externalWebAccess: true } } }));
+    writeFileSync(
+      join(dir, ".pi", "settings.json"),
+      JSON.stringify({
+        webContext: {
+          openaiHostedTools: { enabled: false, searchContextSize: "high", externalWebAccess: true },
+        },
+      }),
+    );
 
-    expect(loadOpenAIWebToolSettings(dir, { PI_OPENAI_WEB_TOOLS: "true" })).toEqual({ enabled: true, searchContextSize: "high", externalWebAccess: true });
-    expect(loadOpenAIWebToolSettings(settingsProject(), {})).toEqual({ enabled: true, searchContextSize: "low", externalWebAccess: undefined });
+    expect(loadOpenAIWebToolSettings(dir, { PI_OPENAI_WEB_TOOLS: "true" })).toEqual({
+      enabled: true,
+      searchContextSize: "high",
+      externalWebAccess: true,
+    });
+    expect(loadOpenAIWebToolSettings(settingsProject(), {})).toEqual({
+      enabled: true,
+      searchContextSize: "low",
+      externalWebAccess: undefined,
+    });
   });
 
   it("rejects malformed persisted OpenAI hosted tool fields", () => {
     const dir = settingsProject();
     mkdirSync(join(dir, ".pi"));
-    writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ webContext: { openaiHostedTools: { enabled: "yes" } } }));
+    writeFileSync(
+      join(dir, ".pi", "settings.json"),
+      JSON.stringify({ webContext: { openaiHostedTools: { enabled: "yes" } } }),
+    );
 
     expect(() => loadOpenAIWebToolSettings(dir, { PI_OPENAI_WEB_TOOLS: "true" })).toThrow();
   });
 
   it("injects hosted web_search for GPT-5.5 responses payloads", () => {
-    const payload = injectOpenAIHostedWebTools({ tools: [{ name: "read", input_schema: { type: "object" } }] }, settings) as { tools: Array<Record<string, unknown>> };
+    const payload = injectOpenAIHostedWebTools(
+      { tools: [{ name: "read", input_schema: { type: "object" } }] },
+      settings,
+    ) as { tools: Array<Record<string, unknown>> };
 
     expect(payload.tools).toEqual([
       { name: "read", input_schema: { type: "object" } },
@@ -303,37 +411,96 @@ describe("openai hosted web tools", () => {
   });
 
   it("only enables hosted search for OpenAI GPT-5.5 responses models", () => {
-    expect(shouldInjectOpenAIHostedWebTools({ provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" }, settings)).toBe(true);
-    expect(shouldInjectOpenAIHostedWebTools({ provider: "openai", api: "openai-responses", id: "gpt-5.5" }, settings)).toBe(true);
-    expect(shouldInjectOpenAIHostedWebTools({ provider: "openai", api: "openai-completions", id: "gpt-5.5" }, settings)).toBe(false);
-    expect(shouldInjectOpenAIHostedWebTools({ provider: "github-copilot", api: "openai-responses", id: "gpt-5.5" }, settings)).toBe(false);
-    expect(shouldInjectOpenAIHostedWebTools({ provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.4" }, settings)).toBe(false);
-    expect(shouldInjectOpenAIHostedWebTools({ provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" }, { ...settings, enabled: false })).toBe(false);
+    expect(
+      shouldInjectOpenAIHostedWebTools(
+        { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" },
+        settings,
+      ),
+    ).toBe(true);
+    expect(
+      shouldInjectOpenAIHostedWebTools(
+        { provider: "openai", api: "openai-responses", id: "gpt-5.5" },
+        settings,
+      ),
+    ).toBe(true);
+    expect(
+      shouldInjectOpenAIHostedWebTools(
+        { provider: "openai", api: "openai-completions", id: "gpt-5.5" },
+        settings,
+      ),
+    ).toBe(false);
+    expect(
+      shouldInjectOpenAIHostedWebTools(
+        { provider: "github-copilot", api: "openai-responses", id: "gpt-5.5" },
+        settings,
+      ),
+    ).toBe(false);
+    expect(
+      shouldInjectOpenAIHostedWebTools(
+        { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.4" },
+        settings,
+      ),
+    ).toBe(false);
+    expect(
+      shouldInjectOpenAIHostedWebTools(
+        { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" },
+        { ...settings, enabled: false },
+      ),
+    ).toBe(false);
   });
 });
 
 describe("anthropic hosted web tools", () => {
-  const settings: AnthropicWebToolSettings = { enabled: true, tools: [AnthropicHostedToolName.WebSearch, AnthropicHostedToolName.WebFetch], maxUses: 3 };
+  const settings: AnthropicWebToolSettings = {
+    enabled: true,
+    tools: [AnthropicHostedToolName.WebSearch, AnthropicHostedToolName.WebFetch],
+    maxUses: 3,
+  };
 
   it("loads typed settings with defaults and env enabled precedence", () => {
     const dir = settingsProject();
     mkdirSync(join(dir, ".pi"));
-    writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ webContext: { anthropicHostedTools: { enabled: false, tools: ["web_search", "web_fetch", "web_search"], maxUses: 5 } } }));
+    writeFileSync(
+      join(dir, ".pi", "settings.json"),
+      JSON.stringify({
+        webContext: {
+          anthropicHostedTools: {
+            enabled: false,
+            tools: ["web_search", "web_fetch", "web_search"],
+            maxUses: 5,
+          },
+        },
+      }),
+    );
 
-    expect(loadAnthropicWebToolSettings(dir, { PI_ANTHROPIC_WEB_TOOLS: "true" })).toEqual({ enabled: true, tools: ["web_search", "web_fetch"], maxUses: 5 });
-    expect(loadAnthropicWebToolSettings(settingsProject(), {})).toEqual({ enabled: true, tools: ["web_search"], maxUses: undefined });
+    expect(loadAnthropicWebToolSettings(dir, { PI_ANTHROPIC_WEB_TOOLS: "true" })).toEqual({
+      enabled: true,
+      tools: ["web_search", "web_fetch"],
+      maxUses: 5,
+    });
+    expect(loadAnthropicWebToolSettings(settingsProject(), {})).toEqual({
+      enabled: true,
+      tools: ["web_search"],
+      maxUses: undefined,
+    });
   });
 
   it("rejects malformed persisted Anthropic hosted tool fields", () => {
     const dir = settingsProject();
     mkdirSync(join(dir, ".pi"));
-    writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ webContext: { anthropicHostedTools: { tools: ["bad"] } } }));
+    writeFileSync(
+      join(dir, ".pi", "settings.json"),
+      JSON.stringify({ webContext: { anthropicHostedTools: { tools: ["bad"] } } }),
+    );
 
     expect(() => loadAnthropicWebToolSettings(dir, {})).toThrow();
   });
 
   it("injects hosted search/fetch tools without replacing existing tools", () => {
-    const payload = injectAnthropicHostedWebTools({ tools: [{ name: "read", input_schema: { type: "object" } }] }, settings) as { tools: Array<Record<string, unknown>> };
+    const payload = injectAnthropicHostedWebTools(
+      { tools: [{ name: "read", input_schema: { type: "object" } }] },
+      settings,
+    ) as { tools: Array<Record<string, unknown>> };
 
     expect(payload.tools).toEqual([
       { name: "read", input_schema: { type: "object" } },
@@ -343,7 +510,10 @@ describe("anthropic hosted web tools", () => {
   });
 
   it("does not duplicate hosted tools", () => {
-    const payload = injectAnthropicHostedWebTools({ tools: [{ type: "web_search_20250305", name: "web_search" }] }, settings) as { tools: Array<Record<string, unknown>> };
+    const payload = injectAnthropicHostedWebTools(
+      { tools: [{ type: "web_search_20250305", name: "web_search" }] },
+      settings,
+    ) as { tools: Array<Record<string, unknown>> };
 
     expect(payload.tools).toEqual([
       { type: "web_search_20250305", name: "web_search" },
@@ -352,8 +522,23 @@ describe("anthropic hosted web tools", () => {
   });
 
   it("only enables hosted tools for direct Anthropic models", () => {
-    expect(shouldInjectAnthropicHostedWebTools({ provider: "anthropic", api: "anthropic-messages" }, settings)).toBe(true);
-    expect(shouldInjectAnthropicHostedWebTools({ provider: "github-copilot", api: "anthropic-messages" }, settings)).toBe(false);
-    expect(shouldInjectAnthropicHostedWebTools({ provider: "anthropic", api: "anthropic-messages" }, { ...settings, enabled: false })).toBe(false);
+    expect(
+      shouldInjectAnthropicHostedWebTools(
+        { provider: "anthropic", api: "anthropic-messages" },
+        settings,
+      ),
+    ).toBe(true);
+    expect(
+      shouldInjectAnthropicHostedWebTools(
+        { provider: "github-copilot", api: "anthropic-messages" },
+        settings,
+      ),
+    ).toBe(false);
+    expect(
+      shouldInjectAnthropicHostedWebTools(
+        { provider: "anthropic", api: "anthropic-messages" },
+        { ...settings, enabled: false },
+      ),
+    ).toBe(false);
   });
 });

@@ -96,6 +96,13 @@ function fixture() {
 }
 
 describe("review snapshot Git integration", () => {
+  it("returns complete exec results and rejects output limits instead of returning partial Git output", async () => {
+    const result = await managedGitExec("git", ["--version"]);
+    expect(result).toMatchObject({ code: 0, killed: false, truncated: false, stderr: "" });
+    expect(result.stdout).toMatch(/^git version /u);
+    await expect(managedGitExec("git", ["--version"], { maxBuffer: 1 })).rejects.toBeDefined();
+  });
+
   it.skipIf(process.platform === "win32")(
     "terminates the complete command process group on cancellation",
     async () => {
@@ -223,6 +230,7 @@ describe("review snapshot Git integration", () => {
           stdout: "",
           stderr: "fixture fetch failure",
           killed: false,
+          truncated: false,
         });
       }
       return f.localExec(command, args, options);
@@ -339,7 +347,13 @@ describe("review snapshot Git integration", () => {
     let pathMissingAtPrune = false;
     const failingRemove: ExtensionAPI["exec"] = async (command, args, options) => {
       if (command === "git" && args[0] === "worktree" && args[1] === "remove")
-        return { code: 1, stdout: "", stderr: "forced removal failure", killed: false };
+        return {
+          code: 1,
+          stdout: "",
+          stderr: "forced removal failure",
+          killed: false,
+          truncated: false,
+        };
       if (command === "git" && args[0] === "worktree" && args[1] === "prune")
         pathMissingAtPrune = !existsSync(snapshot.worktree);
       return f.localExec(command, args, options);

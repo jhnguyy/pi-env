@@ -130,6 +130,7 @@ export const managedGitExec: Exec = async (command, args, options = {}) => {
   const effect = runProcess(command, args, {
     cwd: options.cwd,
     timeoutMs: options.timeout,
+    maxBuffer: options.maxBuffer,
   });
   const result = options.signal
     ? await Effect.runPromise(effect, { signal: options.signal })
@@ -139,6 +140,8 @@ export const managedGitExec: Exec = async (command, args, options = {}) => {
     stdout: result.stdout,
     stderr: result.stderr,
     killed: false,
+    // The process owner rejects output-limit failures instead of returning partial output.
+    truncated: false,
   };
 };
 

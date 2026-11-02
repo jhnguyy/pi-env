@@ -44,7 +44,7 @@ describe("shared compact tool rendering", () => {
       { content: [{ type: "text", text: "denied" }], details: undefined },
       { expanded: false, isPartial: false },
       theme,
-      { isError: true },
+      { isError: true, keyText: () => "", keyHint: () => "" },
     );
     if (!("text" in rendered) || typeof rendered.text !== "string") {
       throw new TypeError("Expected a rendered text component");

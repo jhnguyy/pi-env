@@ -71,6 +71,7 @@ export function reviewRepo(headPath = "head.txt", headContent = "head\n") {
         }),
         stderr: "",
         killed: false,
+        truncated: false,
       });
     return localExec(command, args, options);
   };

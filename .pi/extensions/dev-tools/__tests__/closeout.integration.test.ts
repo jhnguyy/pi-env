@@ -4,13 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  closeoutPullRequest,
-  parseCloseoutArgs,
-  type CloseoutRequest,
-} from "../closeout";
+import { closeoutPullRequest, parseCloseoutArgs, type CloseoutRequest } from "../closeout";
 
-const ok = (stdout = ""): ExecResult => ({ stdout, stderr: "", code: 0, killed: false });
+const ok = (stdout = ""): ExecResult => ({
+  stdout,
+  stderr: "",
+  code: 0,
+  killed: false,
+  truncated: false,
+});
 const fixtureRoots: string[] = [];
 
 afterEach(() => {
@@ -94,9 +96,20 @@ function createExec(
 
     const actualArgs = args[0] === "fetch" ? ["fetch", "--prune", "origin"] : args;
     return new Promise<ExecResult>((resolve) => {
-      execFile("git", actualArgs, { cwd: options?.cwd, signal: options?.signal }, (error, stdout, stderr) => {
-        resolve({ stdout, stderr, code: error ? Number(error.code) || 1 : 0, killed: error?.killed ?? false });
-      });
+      execFile(
+        "git",
+        actualArgs,
+        { cwd: options?.cwd, signal: options?.signal },
+        (error, stdout, stderr) => {
+          resolve({
+            stdout,
+            stderr,
+            code: error ? Number(error.code) || 1 : 0,
+            killed: error?.killed ?? false,
+            truncated: error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+          });
+        },
+      );
     });
   };
 
@@ -226,7 +239,9 @@ describe("/closeout command", () => {
     registerDevTools({
       exec,
       registerCommand() {},
-      registerTool(tool) { tools.push(tool); },
+      registerTool(tool) {
+        tools.push(tool);
+      },
     });
     const tool = tools.find((tool) => tool.name === "closeout");
     const controller = new AbortController();
@@ -317,14 +332,21 @@ describe("/closeout command", () => {
     writeFileSync(indexLock, "another Git process owns this lock\n");
     const real = createExec(fixture);
     let merged!: () => void;
-    const mergeAttempted = new Promise<void>((resolve) => { merged = resolve; });
+    const mergeAttempted = new Promise<void>((resolve) => {
+      merged = resolve;
+    });
     const exec: ExtensionAPI["exec"] = async (command, args, options) => {
       const result = await real.exec(command, args, options);
       if (command === "git" && args[0] === "merge") merged();
       return result;
     };
     const controller = new AbortController();
-    const pending = closeoutPullRequest(exec, "/home/agent", request(fixture.repo), controller.signal);
+    const pending = closeoutPullRequest(
+      exec,
+      "/home/agent",
+      request(fixture.repo),
+      controller.signal,
+    );
     const rejected = expect(pending).rejects.toThrow();
     await mergeAttempted;
     controller.abort();
@@ -334,17 +356,27 @@ describe("/closeout command", () => {
     expect(existsSync(join(fixture.repo, ".git", "pi-closeout.lock"))).toBe(false);
     expect(existsSync(fixture.featureWorktree)).toBe(true);
     rmSync(indexLock);
-    expect((await closeoutPullRequest(real.exec, "/home/agent", request(fixture.repo))).deletedBranch).toBe(true);
+    expect(
+      (await closeoutPullRequest(real.exec, "/home/agent", request(fixture.repo))).deletedBranch,
+    ).toBe(true);
   });
 
   it("does not retry unrelated merge failures and releases the closeout lock", async () => {
     const fixture = createCloseoutFixture();
     const { exec, calls } = createExec(fixture, {}, ({ command, args }) =>
       command === "git" && args[0] === "merge"
-        ? { stdout: "", stderr: "fatal: unrelated merge failure", code: 1, killed: false }
+        ? {
+            stdout: "",
+            stderr: "fatal: unrelated merge failure",
+            code: 1,
+            killed: false,
+            truncated: false,
+          }
         : undefined,
     );
-    await expect(closeoutPullRequest(exec, "/home/agent", request(fixture.repo))).rejects.toThrow("unrelated merge failure");
+    await expect(closeoutPullRequest(exec, "/home/agent", request(fixture.repo))).rejects.toThrow(
+      "unrelated merge failure",
+    );
     expect(calls.filter(({ args }) => args[0] === "merge")).toHaveLength(1);
     expect(existsSync(join(fixture.repo, ".git", "pi-closeout.lock"))).toBe(false);
     expect(existsSync(fixture.featureWorktree)).toBe(true);
@@ -372,11 +404,17 @@ describe("/closeout command", () => {
     });
 
     let atMerge!: () => void;
-    const firstAtMerge = new Promise<void>((resolve) => { atMerge = resolve; });
+    const firstAtMerge = new Promise<void>((resolve) => {
+      atMerge = resolve;
+    });
     let resumeMerge!: () => void;
-    const mergeAllowed = new Promise<void>((resolve) => { resumeMerge = resolve; });
+    const mergeAllowed = new Promise<void>((resolve) => {
+      resumeMerge = resolve;
+    });
     let secondFoundRepository!: () => void;
-    const secondReady = new Promise<void>((resolve) => { secondFoundRepository = resolve; });
+    const secondReady = new Promise<void>((resolve) => {
+      secondFoundRepository = resolve;
+    });
     let firstFinished = false;
     let overlappingWorkflow = false;
     const firstExec: ExtensionAPI["exec"] = async (command, args, options) => {
@@ -392,10 +430,18 @@ describe("/closeout command", () => {
       if (args.includes("--git-common-dir")) secondFoundRepository();
       return result;
     };
-    const firstPending = closeoutPullRequest(firstExec, "/home/agent", request(fixture.repo))
-      .finally(() => { firstFinished = true; });
+    const firstPending = closeoutPullRequest(
+      firstExec,
+      "/home/agent",
+      request(fixture.repo),
+    ).finally(() => {
+      firstFinished = true;
+    });
     await firstAtMerge;
-    const secondPending = closeoutPullRequest(secondExec, "/home/agent", { pr: "43", repoPath: fixture.unrelatedWorktree });
+    const secondPending = closeoutPullRequest(secondExec, "/home/agent", {
+      pr: "43",
+      repoPath: fixture.unrelatedWorktree,
+    });
     await secondReady;
     resumeMerge();
     const results = await Promise.allSettled([firstPending, secondPending]);
@@ -446,15 +492,16 @@ describe("/closeout command", () => {
   );
 
   it("rejects a PR that is not merged before running git", async () => {
-    const { exec, calls } = createExec({ headOid: "b".repeat(40), mergeOid: "a".repeat(40) }, {
-      state: "OPEN",
-      mergedAt: null,
-      mergeCommit: null,
-    });
-
-    await expect(closeoutPullRequest(exec, "/repo", { pr: "42" })).rejects.toThrow(
-      "is not merged",
+    const { exec, calls } = createExec(
+      { headOid: "b".repeat(40), mergeOid: "a".repeat(40) },
+      {
+        state: "OPEN",
+        mergedAt: null,
+        mergeCommit: null,
+      },
     );
+
+    await expect(closeoutPullRequest(exec, "/repo", { pr: "42" })).rejects.toThrow("is not merged");
     expect(calls.filter(({ command }) => command === "git")).toEqual([]);
   });
 
@@ -488,7 +535,7 @@ describe("/closeout command", () => {
     const fixture = createCloseoutFixture();
     const { exec, calls } = createExec(fixture, {}, ({ command, args }) =>
       command === "git" && args[0] === "fetch"
-        ? { stdout: "", stderr: "fetch failed", code: 1, killed: false }
+        ? { stdout: "", stderr: "fetch failed", code: 1, killed: false, truncated: false }
         : undefined,
     );
 

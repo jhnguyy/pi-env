@@ -1,5 +1,4 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 import type { OverlayHandle } from "@earendil-works/pi-tui";
@@ -39,14 +38,14 @@ export type SubagentAction = (typeof SubagentAction)[keyof typeof SubagentAction
 
 const SUBAGENT_PARAMETERS = Type.Object(
   {
-    action: StringEnum(Object.values(SubagentAction) as [SubagentAction, ...SubagentAction[]], {
+    action: Type.Enum(Object.values(SubagentAction), {
+      type: "string",
       description:
         "run waits for the initial answer. start returns a background job ID. list shows retained jobs. usage totals child usage.",
     }),
     name: Type.Optional(
       Type.String({
-        description:
-          "Child-session label. Required for run/start.",
+        description: "Child-session label. Required for run/start.",
       }),
     ),
     task: Type.Optional(Type.String({ description: "Task to delegate. Required for run/start." })),
@@ -57,14 +56,12 @@ const SUBAGENT_PARAMETERS = Type.Object(
     ),
     model: Type.Optional(
       Type.String({
-        description:
-          "provider/model-id for run/start. Omit for the child default.",
+        description: "provider/model-id for run/start. Omit for the child default.",
       }),
     ),
     system_prompt: Type.Optional(
       Type.String({
-        description:
-          "Additional child instructions. Native context still loads.",
+        description: "Additional child instructions. Native context still loads.",
       }),
     ),
     cwd: Type.Optional(
@@ -126,7 +123,10 @@ function getJobRenderDetails(job: Jobs.SubagentJob): Types.SubagentJobRenderDeta
   };
 }
 
-function inputOutcomeFeedback(outcome: ChildTypes.NativeInputOutcome, mode: ChildTypes.NativeInputMode): string {
+function inputOutcomeFeedback(
+  outcome: ChildTypes.NativeInputOutcome,
+  mode: ChildTypes.NativeInputMode,
+): string {
   switch (outcome) {
     case ChildTypes.NativeInputOutcome.Queued:
       return `${mode === ChildTypes.NativeInputMode.Steer ? "Steering" : "Follow-up"} queued for native processing.`;
@@ -137,7 +137,10 @@ function inputOutcomeFeedback(outcome: ChildTypes.NativeInputOutcome, mode: Chil
   }
 }
 
-export default function (pi: ExtensionAPI, dependencies: SessionRuntime.SubagentSessionRuntimeDependencies = {}) {
+export default function (
+  pi: ExtensionAPI,
+  dependencies: SessionRuntime.SubagentSessionRuntimeDependencies = {},
+) {
   if (ChildContext.getChildContext()) return;
   const runtime = new SessionRuntime.SubagentSessionRuntime(pi, dependencies);
   const reportedJobUsage = new Set<string>();
@@ -163,42 +166,61 @@ export default function (pi: ExtensionAPI, dependencies: SessionRuntime.Subagent
       let handle: OverlayHandle | undefined;
       let composing = false;
       try {
-        await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
-          let component: Browser.SubagentBrowser;
-          component = new Browser.SubagentBrowser(runtime, tui, theme, () => done(), async (id, mode) => {
-            if (composing || browser.current !== component) return;
-            const child = runtime.inspectChild(id);
-            if (!child) throw new Error("Child session is no longer retained.");
-            const key = `${id}:${mode}`;
-            const name = Transcript.plainChildText(child.name).replace(/\s+/g, " ").trim();
-            composing = true;
-            let text: string | undefined;
-            // Native editor dialogs occupy the parent editor container. Hide this overlay
-            // while the dialog owns focus; the parent's editor object and draft stay intact.
-            handle?.setHidden(true);
-            try {
-              text = await ctx.ui.editor(`Human → ${name} · ${mode}`, drafts.get(key));
-            } finally {
-              composing = false;
-              if (browser.current === component) handle?.setHidden(false);
-            }
-            if (text === undefined || browser.current !== component) return;
-            drafts.set(key, text);
-            component.showStatus(`${name}: submitting ${mode}.`);
-            const submitted = text;
-            void Promise.resolve().then(() => runtime.inputChild(id, submitted, mode)).then(({ outcome }) => {
-              if (drafts.get(key) === submitted) drafts.delete(key);
-              const feedback = inputOutcomeFeedback(outcome, mode);
-              component.showStatus(`${name}: ${feedback}`);
-            }, (error) => component.showStatus(`${name}: ${error instanceof Error ? error.message : String(error)} Draft retained; open the same input mode to retry.`));
-          });
-          browser.current = component;
-          return component;
-        }, {
-          overlay: true,
-          overlayOptions: { width: "90%", maxHeight: "80%" },
-          onHandle: (overlay) => { handle = overlay; },
-        });
+        await ctx.ui.custom<void>(
+          (tui, theme, _keybindings, done) => {
+            let component: Browser.SubagentBrowser;
+            component = new Browser.SubagentBrowser(
+              runtime,
+              tui,
+              theme,
+              () => done(),
+              async (id, mode) => {
+                if (composing || browser.current !== component) return;
+                const child = runtime.inspectChild(id);
+                if (!child) throw new Error("Child session is no longer retained.");
+                const key = `${id}:${mode}`;
+                const name = Transcript.plainChildText(child.name).replace(/\s+/g, " ").trim();
+                composing = true;
+                let text: string | undefined;
+                // Native editor dialogs occupy the parent editor container. Hide this overlay
+                // while the dialog owns focus; the parent's editor object and draft stay intact.
+                handle?.setHidden(true);
+                try {
+                  text = await ctx.ui.editor(`Human → ${name} · ${mode}`, drafts.get(key));
+                } finally {
+                  composing = false;
+                  if (browser.current === component) handle?.setHidden(false);
+                }
+                if (text === undefined || browser.current !== component) return;
+                drafts.set(key, text);
+                component.showStatus(`${name}: submitting ${mode}.`);
+                const submitted = text;
+                void Promise.resolve()
+                  .then(() => runtime.inputChild(id, submitted, mode))
+                  .then(
+                    ({ outcome }) => {
+                      if (drafts.get(key) === submitted) drafts.delete(key);
+                      const feedback = inputOutcomeFeedback(outcome, mode);
+                      component.showStatus(`${name}: ${feedback}`);
+                    },
+                    (error) =>
+                      component.showStatus(
+                        `${name}: ${error instanceof Error ? error.message : String(error)} Draft retained; open the same input mode to retry.`,
+                      ),
+                  );
+              },
+            );
+            browser.current = component;
+            return component;
+          },
+          {
+            overlay: true,
+            overlayOptions: { width: "90%", maxHeight: "80%" },
+            onHandle: (overlay) => {
+              handle = overlay;
+            },
+          },
+        );
       } finally {
         disposeBrowser();
       }
@@ -275,7 +297,9 @@ export default function (pi: ExtensionAPI, dependencies: SessionRuntime.Subagent
       execute: async (toolCallId, params, signal, onUpdate, ctx) => {
         // Direct extension callers must not silently discard obsolete instructions.
         if (Object.hasOwn(params, "agent") || Object.hasOwn(params, "agent_scope")) {
-          throw new Error("Named agent definitions are no longer supported. Use explicit model, tools, and system_prompt overrides.");
+          throw new Error(
+            "Named agent definitions are no longer supported. Use explicit model, tools, and system_prompt overrides.",
+          );
         }
         if (params.action === SubagentAction.Run) {
           const result = await runtime.execute(
@@ -319,11 +343,10 @@ export default function (pi: ExtensionAPI, dependencies: SessionRuntime.Subagent
     const settings = AgentSettings.readOptionalAgentSettings(undefined, ctx.cwd);
     const modelAnnotations = settings?.modelAnnotations ?? {};
     const scoped = ctx.scopedModels.length > 0;
-    const models = scoped ? ctx.scopedModels.map((entry) => entry.model) : ctx.modelRegistry.getAvailable();
-    const description = Discovery.buildDynamicDescription(
-      models,
-      modelAnnotations,
-    );
+    const models = scoped
+      ? ctx.scopedModels.map((entry) => entry.model)
+      : ctx.modelRegistry.getAvailable();
+    const description = Discovery.buildDynamicDescription(models, modelAnnotations);
     registerSubagentTool(description);
   });
 }

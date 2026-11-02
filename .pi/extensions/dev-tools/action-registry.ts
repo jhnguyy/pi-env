@@ -10,16 +10,31 @@
  * No more switch statements in formatters.ts, renderers.ts, or daemon.ts dispatch.
  */
 
-import type { DaemonRequest, DaemonResponse, LspAction, LspResult, PublicLspAction } from "./protocol";
+import type {
+  DaemonRequest,
+  DaemonResponse,
+  LspAction,
+  LspResult,
+  PublicLspAction,
+} from "./protocol";
 import type { HandlerDeps } from "./handlers";
+import type { KeybindingHints } from "@earendil-works/pi-coding-agent";
 import type { RenderTheme } from "./render-contracts";
 import type { Text } from "@earendil-works/pi-tui";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type ActionHandler = (req: DaemonRequest, deps: HandlerDeps) => Promise<DaemonResponse> | DaemonResponse;
+export type ActionHandler = (
+  req: DaemonRequest,
+  deps: HandlerDeps,
+) => Promise<DaemonResponse> | DaemonResponse;
 export type ResultFormatter = (result: any) => string;
-export type ResultRenderer = (result: any, opts: { expanded?: boolean }, theme: RenderTheme) => Text;
+export type ResultRenderer = (
+  result: any,
+  opts: { expanded?: boolean },
+  theme: RenderTheme,
+  hints?: KeybindingHints,
+) => Text;
 
 interface ActionEntry {
   handler: ActionHandler;
@@ -31,10 +46,7 @@ interface ActionEntry {
 
 const registry = new Map<PublicLspAction, ActionEntry>();
 
-export function registerAction(
-  action: PublicLspAction,
-  entry: ActionEntry,
-): void {
+export function registerAction(action: PublicLspAction, entry: ActionEntry): void {
   registry.set(action, entry);
 }
 

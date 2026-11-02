@@ -34,6 +34,10 @@ Register each model-facing Pi tool through `.pi/extensions/_shared/tool-render.t
 
 Use the shared short-description helper for compact prose. Its default limit is 70 content characters plus `...`. Keep the source text unchanged for expanded output. Apply ANSI-safe viewport truncation at the component render boundary.
 
+Thread the host's injected `KeybindingHints` through renderer helpers: tool renderers receive them in `context`, and message/entry renderers in `options`. Do not import global `keyHint`/`keyText` or substitute a default key: a bundled package copy may not share the host's bindings. Omit expansion hints when `keyText("app.tools.expand")` is empty.
+
+For inline custom dialogs that wait for an answer, follow upstream [custom screens and overlays](https://pi.dev/docs/tui#use-custom-screens-and-overlays) and set `blocked`. Overlays ignore that option; the `/subagents` overlay does not need it.
+
 ## Settings boundary
 
 Use `.pi/extensions/_shared/settings.ts` as the single settings boundary. It owns path resolution, file IO, JSON/root validation, missing-file semantics, shallow overlay precedence, and Effect Schema decode.
@@ -66,6 +70,10 @@ registerContractTool(pi, {
   },
 });
 ```
+
+Import schema builders and types from `typebox` in library and bundled code. Pi's extension loader maps `@earendil-works/pi-ai` to a compatibility entry that also supplies TypeBox, but ordinary Node imports do not use that mapping. Use native `Type.Enum(values, { type: "string", ...annotations })` for string enums to preserve literal inference and a provider-compatible flat enum. Do not depend on loader-only exports or private compatibility paths.
+
+Pi validates tool arguments as JSON Schema, not through TypeBox-specific refinements, codecs, or format registries. Keep non-JSON-Schema constraints at execution boundaries. See upstream [tool parameter schemas and TypeBox](https://pi.dev/docs/extensions#tool-parameter-schemas-and-typebox) for coercion and validation semantics.
 
 Declare `parameters` as one top-level object. Some provider adapters, including Pi's Anthropic adapter, send only top-level `properties` and `required`, so a top-level union reaches the model as an empty object. Check per-action combinations at execution, as the [notes contract](../../.pi/extensions/notes/contract.ts) does.
 

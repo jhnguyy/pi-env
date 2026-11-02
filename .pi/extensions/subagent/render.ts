@@ -6,7 +6,7 @@
  */
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import { type KeybindingHints, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 
 import * as Types from "./types";
@@ -148,6 +148,7 @@ function renderCollapsedSubagentResult(
   usage: string,
   tools: string,
   theme: any,
+  hints?: KeybindingHints,
 ): Text {
   // The call renderer already shows the truncated task; full output belongs in the expanded view.
   let text = `${icon} ${theme.fg("toolTitle", theme.bold("subagent"))}`;
@@ -162,7 +163,7 @@ function renderCollapsedSubagentResult(
   if (usage) stats.push(usage);
   if (details.sessionName) stats.push(details.sessionName);
   if (stats.length > 0) text += `\n${theme.fg("dim", stats.join(" · "))}`;
-  text += `\n${ToolRender.toolExpandHint(theme)}`;
+  text += `\n${ToolRender.toolExpandHint(theme, hints)}`;
   return new Text(text, 0, 0);
 }
 
@@ -170,7 +171,7 @@ export function renderSubagentResult(
   result: AgentToolResult<Types.SubagentDetails>,
   { expanded }: { expanded: boolean },
   theme: any,
-  _ctx?: unknown,
+  context?: KeybindingHints,
 ) {
   const details = result.details as Types.SubagentDetails | undefined;
   if (!details) {
@@ -183,10 +184,10 @@ export function renderSubagentResult(
   const tools = toolCallSummary(details);
   return expanded
     ? renderExpandedSubagentResult(details, icon, usage, tools, theme)
-    : renderCollapsedSubagentResult(details, icon, usage, tools, theme);
+    : renderCollapsedSubagentResult(details, icon, usage, tools, theme, context);
 }
 
-interface ToolRenderContext {
+interface ToolRenderContext extends KeybindingHints {
   args?: SubagentCallArgs;
 }
 
@@ -265,6 +266,7 @@ export function renderSubagentJobResult(
   result: AgentToolResult<Types.SubagentJobRenderDetails>,
   { expanded }: { expanded: boolean },
   theme: any,
+  context?: KeybindingHints,
 ) {
   const details = result.details ?? {};
   const status = details.status;
@@ -282,7 +284,7 @@ export function renderSubagentJobResult(
     let text = header;
     if (details.task) text += `\n${theme.fg("toolOutput", formatPromptPreview(details.task))}`;
     if (statParts.length > 0) text += `\n${theme.fg("dim", statParts.join(" · "))}`;
-    text += `\n${ToolRender.toolExpandHint(theme)}`;
+    text += `\n${ToolRender.toolExpandHint(theme, context)}`;
     return new Text(text, 0, 0);
   }
 
@@ -328,7 +330,7 @@ export function renderSubagentToolResult(
     return renderSubagentStartResult(result, options, theme);
   }
   if (JOB_ACTIONS.has(action)) {
-    return renderSubagentJobResult(result, { expanded: options.expanded ?? false }, theme);
+    return renderSubagentJobResult(result, { expanded: options.expanded ?? false }, theme, context);
   }
   return renderSubagentResult(
     result as AgentToolResult<Types.SubagentDetails>,

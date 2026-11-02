@@ -8,6 +8,7 @@
  * This file provides the top-level renderDevToolsResult + renderDevToolsCall.
  */
 
+import type { KeybindingHints } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { LspResult, LspAction } from "./protocol";
 import { getAction } from "./action-registry";
@@ -21,9 +22,14 @@ export type { RenderTheme } from "./render-contracts";
  * Dispatches to per-action renderers via the action registry.
  */
 export function renderDevToolsResult(
-  result: { isError?: boolean; content: Array<{ type: string; text?: string }>; details?: LspResult | null },
+  result: {
+    isError?: boolean;
+    content: Array<{ type: string; text?: string }>;
+    details?: LspResult | null;
+  },
   opts: { expanded?: boolean },
   theme: RenderTheme,
+  hints?: KeybindingHints,
 ): Text {
   if (result.isError) {
     const msg = result.content[0]?.text ?? "error";
@@ -36,7 +42,7 @@ export function renderDevToolsResult(
   }
 
   const entry = getAction(details.action);
-  if (entry) return entry.renderer(details, opts, theme);
+  if (entry) return entry.renderer(details, opts, theme, hints);
 
   // Fallback for unknown action types
   return new Text(result.content[0]?.text ?? "", 0, 0);
@@ -48,7 +54,14 @@ export function renderDevToolsResult(
  * Render a dev-tools tool call for human TUI display.
  */
 export function renderDevToolsCall(
-  args: { action: string; path?: string | string[]; line?: number; character?: number; query?: string; newName?: string },
+  args: {
+    action: string;
+    path?: string | string[];
+    line?: number;
+    character?: number;
+    query?: string;
+    newName?: string;
+  },
   theme: RenderTheme,
 ): Text {
   let text = theme.fg("toolTitle", theme.bold("dev-tools"));
@@ -56,11 +69,14 @@ export function renderDevToolsCall(
 
   if (args.path) {
     const pathStr = Array.isArray(args.path)
-      ? args.path.length === 1 ? args.path[0] : `[${args.path.length} files]`
+      ? args.path.length === 1
+        ? args.path[0]
+        : `[${args.path.length} files]`
       : args.path;
-    const short = Array.isArray(args.path) && args.path.length !== 1
-      ? pathStr
-      : pathStr.split("/").slice(-2).join("/");
+    const short =
+      Array.isArray(args.path) && args.path.length !== 1
+        ? pathStr
+        : pathStr.split("/").slice(-2).join("/");
     text += " " + theme.fg("muted", short);
   }
 

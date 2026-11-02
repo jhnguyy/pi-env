@@ -5,9 +5,8 @@
  * hierarchy, and symbols. Diagnostics are useful before commit or review.
  */
 
-import type { Static } from "typebox";
+import { Type, type Static } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { StringEnum } from "@earendil-works/pi-ai";
 import "./register-actions"; // side-effect: populate action formatters/renderers for this bundle
 import { LspClient } from "./client";
 import { formatResult } from "./formatters";
@@ -17,19 +16,13 @@ import { txt } from "../_shared/result";
 import { registerPublicTool } from "../_shared/tool-render";
 import { formatError } from "../_shared/errors";
 import * as Request from "./request";
-import {
-  createDevToolsParameterSchema,
-  DEV_TOOLS_TOOL_DESCRIPTIONS,
-} from "./action-contract";
+import { createDevToolsParameterSchema, DEV_TOOLS_TOOL_DESCRIPTIONS } from "./action-contract";
 import { registerCleanupCommand } from "./cleanup";
 import { registerCloseout } from "./closeout";
 
 // ─── Extension ────────────────────────────────────────────────────────────────
 
-type DevToolsRegistrationApi = Pick<
-  ExtensionAPI,
-  "exec" | "registerCommand" | "registerTool"
->;
+type DevToolsRegistrationApi = Pick<ExtensionAPI, "exec" | "registerCommand" | "registerTool">;
 
 export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspClient()) {
   registerCleanupCommand(pi);
@@ -47,7 +40,10 @@ export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspCl
     "Diagnostics supports bulk checks: pass multiple paths to check all files in one call.";
 
   const toolParameters = createDevToolsParameterSchema(
-    StringEnum(Request.DEV_TOOLS_ACTIONS, { description: DEV_TOOLS_TOOL_DESCRIPTIONS.action }),
+    Type.Enum(Request.DEV_TOOLS_ACTIONS, {
+      type: "string",
+      description: DEV_TOOLS_TOOL_DESCRIPTIONS.action,
+    }),
   );
 
   type DevToolsToolParameters = typeof toolParameters;
@@ -86,8 +82,8 @@ export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspCl
     renderCall(args, theme, _ctx) {
       return renderDevToolsCall(args, theme);
     },
-    renderResult(result, opts, theme, _ctx) {
-      return renderDevToolsResult(result, opts, theme);
+    renderResult(result, opts, theme, context) {
+      return renderDevToolsResult(result, opts, theme, context);
     },
   });
 }

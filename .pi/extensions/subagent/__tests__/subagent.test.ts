@@ -112,7 +112,11 @@ describe("subagent extension", () => {
         },
       };
 
-      const context = { args: { action: "result", job_id: "job-1" } };
+      const context = {
+        args: { action: "result", job_id: "job-1" },
+        keyText: () => "",
+        keyHint: () => "",
+      };
       const collapsed = extractText(registeredTool.renderResult(result, {}, mockTheme, context));
       expect(collapsed).toContain("completed");
       expect(collapsed).toContain("6 tool calls");
