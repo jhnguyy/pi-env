@@ -21,7 +21,7 @@
  */
 
 import { createServer, type Socket, type Server } from "node:net";
-import { writeFileSync } from "node:fs";
+import { unlinkSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { Effect, Result } from "effect";
@@ -33,7 +33,7 @@ import type { HandlerBackend } from "./handlers";
 import { createDaemonRequestExecutor } from "./daemon-request";
 import { parseRequest, serializeResponse, errorResponse, SOCKET_PATH, PID_PATH } from "./protocol";
 import type { DaemonRequest, DaemonResponse } from "./protocol";
-import { removeStaleArtifact, removeStaleArtifacts } from "./socket-artifacts";
+import { removeStaleArtifact } from "./socket-artifacts";
 import {
   createToolingTelemetryRuntime,
   noopToolingTelemetryRuntime,
@@ -62,14 +62,25 @@ export interface LspDaemonDeps {
   readonly backends: readonly ManagedBackend[];
 }
 
+interface OwnedResources {
+  listener: Server | null;
+  pidPath: string | null;
+  socketPath: string | null;
+}
+
 // ─── LspDaemon ───────────────────────────────────────────────────────────────
 
 export class LspDaemon {
   private readonly backends: readonly ManagedBackend[];
   private readonly executeRequest: (req: DaemonRequest) => Promise<DaemonResponse>;
-  private server: Server | null = null;
-  private sockets = new Set<Socket>();
+  private readonly connections = new Map<Socket, { endAfterDrain: boolean }>();
   private fileCache = new FileCache();
+  private phase: "closed" | "accepting" | "stopping" = "closed";
+  private acquisition: Promise<void> | null = null;
+  private startup: Promise<void> | null = null;
+  private stopping: Promise<void> | null = null;
+  private readonly owned: OwnedResources = { listener: null, pidPath: null, socketPath: null };
+  private readonly tasks = new Set<Promise<void>>();
 
   /** Timestamp of the activity *before* the current request. Used for accurate idle reporting. */
   private previousActivity = Date.now();
@@ -95,29 +106,120 @@ export class LspDaemon {
 
   // ─── Startup ────────────────────────────────────────────────────────────────
 
-  async start(): Promise<void> {
-    writeFileSync(this.pidPath, String(process.pid), "utf8");
-
-    removeStaleArtifact(this.socketPath);
-
-    await this.startServer();
-    this.resetIdleTimer();
+  start(): Promise<void> {
+    if (this.stopping) {
+      return Promise.reject(new Error("Daemon is stopping or stopped"));
+    }
+    if (!this.startup) {
+      // Install both caches before acquisition runs or can call back into this owner.
+      this.acquisition = Promise.resolve().then(() => this.acquire());
+      this.startup = this.acquisition
+        .then(() => {
+          if (this.stopping) throw new Error("Daemon startup stopped");
+          this.phase = "accepting";
+          this.resetIdleTimer();
+        })
+        .catch((startupFailure: unknown) =>
+          this.shutdown().then(
+            () => {
+              throw startupFailure;
+            },
+            (cleanupFailure: unknown) => {
+              throw new AggregateError(
+                [startupFailure, cleanupFailure],
+                "Daemon startup and cleanup failed",
+                { cause: startupFailure },
+              );
+            },
+          ),
+        );
+      void this.startup.catch(() => {});
+    }
+    return this.startup;
   }
 
-  private startServer(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.server = createServer((socket) => this.handleConnection(socket));
-      this.server.on("error", reject);
-      this.server.listen(this.socketPath, () => resolve());
+  private async acquire(): Promise<void> {
+    if (this.stopping) throw new Error("Daemon startup stopped");
+    writeFileSync(this.pidPath, String(process.pid), "utf8");
+    this.owned.pidPath = this.pidPath;
+    removeStaleArtifact(this.socketPath);
+    const listener = createServer((socket) => this.handleConnection(socket));
+    this.owned.listener = listener;
+    await new Promise<void>((resolve, reject) => {
+      listener.once("error", reject);
+      listener.listen(this.socketPath, () => {
+        this.owned.socketPath = this.socketPath;
+        listener.off("error", reject);
+        listener.on("error", (error) => {
+          this.reportBackgroundError("listener failed", error);
+          this.superviseShutdown();
+        });
+        resolve();
+      });
     });
+  }
+
+  private async release(): Promise<void> {
+    const server = this.owned.listener;
+    const errors: unknown[] = [];
+    const attempt = async (release: () => void | Promise<void>) => {
+      try {
+        await release();
+      } catch (error) {
+        errors.push(error);
+      }
+    };
+    await Promise.all(this.tasks);
+    for (const [socket, connection] of this.connections) {
+      if (connection.endAfterDrain)
+        await attempt(() => {
+          if (!socket.destroyed) socket.end();
+        });
+    }
+    const settled = await Promise.allSettled(
+      this.backends.map((backend) => Promise.resolve().then(() => backend.shutdown())),
+    );
+    for (const result of settled) if (result.status === "rejected") errors.push(result.reason);
+    for (const socket of this.connections.keys())
+      await attempt(() => {
+        socket.destroy();
+      });
+    this.connections.clear();
+    // Observe close immediately without blocking independent releases on live connections.
+    const listenerClosed = server?.listening
+      ? attempt(
+          () =>
+            new Promise<void>((resolve, reject) => {
+              server.close((error) => (error ? reject(error) : resolve()));
+            }),
+        )
+      : Promise.resolve();
+    for (const path of [this.owned.socketPath, this.owned.pidPath]) {
+      if (path)
+        await attempt(() => {
+          try {
+            unlinkSync(path);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          }
+        });
+    }
+    await attempt(() => Effect.runPromise(this.telemetry.disposeEffect));
+    await listenerClosed;
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, "Daemon cleanup failed");
   }
 
   // ─── Connection handling ─────────────────────────────────────────────────────
 
   private handleConnection(socket: Socket): void {
+    if (this.phase !== "accepting") {
+      socket.destroy();
+      return;
+    }
     let buf = "";
-    this.sockets.add(socket);
-    socket.once("close", () => this.sockets.delete(socket));
+    this.connections.set(socket, { endAfterDrain: false });
+    socket.once("close", () => this.connections.delete(socket));
     socket.setEncoding("utf8");
 
     socket.on("data", (chunk: string) => {
@@ -130,62 +232,98 @@ export class LspDaemon {
       const lines = buf.split("\n");
       buf = lines.pop() ?? "";
       for (const line of lines) {
-        if (line.trim()) void this.handleRequest(socket, line);
+        if (line.trim()) this.handleRequest(socket, line);
       }
     });
 
     socket.on("error", () => socket.destroy());
   }
 
-  private async handleRequest(socket: Socket, line: string): Promise<void> {
-    this.previousActivity = this.lastActivity;
-    this.lastActivity = Date.now();
-    this.resetIdleTimer();
-
+  private handleRequest(socket: Socket, line: string): void {
     let req: DaemonRequest;
     try {
       req = parseRequest(line);
     } catch {
-      socket.write(serializeResponse(errorResponse(0, "Invalid request JSON")));
+      this.writeResponse(socket, errorResponse(0, "Invalid request JSON"));
       return;
     }
-
-    const response = await this.executeRequest(req);
-
-    const serialized = serializeResponse(response);
-    if (req.action === "shutdown") {
-      socket.end(serialized, () => {
-        void this.shutdown();
-      });
-    } else {
-      socket.write(serialized);
+    if (
+      typeof req !== "object" ||
+      req === null ||
+      Array.isArray(req) ||
+      typeof req.action !== "string" ||
+      !req.action.trim() ||
+      typeof req.id !== "number" ||
+      !Number.isFinite(req.id)
+    ) {
+      this.writeResponse(socket, errorResponse(0, "Invalid request envelope"));
+      return;
     }
+    if (this.phase !== "accepting") {
+      this.writeResponse(socket, errorResponse(req.id, "Daemon is stopping"));
+      return;
+    }
+    this.previousActivity = this.lastActivity;
+    this.lastActivity = Date.now();
+    this.resetIdleTimer();
+
+    // Admission and task registration precede shutdown, including later frames in this chunk.
+    const task = Promise.resolve()
+      .then(async () => {
+        const response = await this.executeRequest(req);
+        this.writeResponse(socket, response);
+      })
+      .catch((error: unknown) => this.reportBackgroundError("request failed", error));
+    this.tasks.add(task);
+    void task.then(() => this.tasks.delete(task));
+    if (req.action === "shutdown") {
+      this.connections.get(socket)!.endAfterDrain = true;
+      this.superviseShutdown();
+    }
+  }
+
+  private writeResponse(socket: Socket, response: DaemonResponse): void {
+    if (!socket.destroyed && !socket.writableEnded) socket.write(serializeResponse(response));
+  }
+
+  private reportBackgroundError(event: string, error: unknown): void {
+    console.error(`[dev-tools-daemon] ${event}:`, error);
+    if (isMain) process.exitCode = 1;
+  }
+
+  private superviseShutdown(): void {
+    void this.shutdown().catch((error: unknown) =>
+      this.reportBackgroundError("shutdown failed", error),
+    );
   }
 
   // ─── Idle / Shutdown ─────────────────────────────────────────────────────────
 
   private resetIdleTimer(): void {
+    if (this.phase !== "accepting") return;
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => void this.shutdown(), this.idleTimeoutMs);
+    this.idleTimer = setTimeout(() => this.superviseShutdown(), this.idleTimeoutMs);
   }
 
-  private shutdownPromise: Promise<void> | null = null;
-
-  async shutdown(): Promise<void> {
-    if (this.shutdownPromise) return this.shutdownPromise;
-    this.shutdownPromise = (async () => {
+  /**
+   * Close admission synchronously, then drain accepted work without cancelling on disconnect.
+   * Acknowledgement and EOF do not confirm resource release; receipt/backpressure never gates cleanup.
+   * Shutdown has no hard deadline: requests, filesystem work, or resource release may stay pending.
+   */
+  shutdown(): Promise<void> {
+    if (!this.stopping) {
+      this.phase = "stopping";
       if (this.idleTimer) clearTimeout(this.idleTimer);
       this.idleTimer = null;
-      await Promise.all(this.backends.map((backend) => backend.shutdown()));
-      const server = this.server;
-      this.server = null;
-      for (const socket of this.sockets) socket.destroy();
-      this.sockets.clear();
-      if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
-      removeStaleArtifacts([this.socketPath, this.pidPath]);
-      await Effect.runPromise(this.telemetry.disposeEffect);
-    })();
-    return this.shutdownPromise;
+      this.stopping = Promise.resolve().then(async () => {
+        // Never await public startup here: its failure path awaits this finalizer.
+        // Raw acquisition only acquires, so it cannot form that dependency cycle.
+        await this.acquisition?.catch(() => {});
+        await this.release();
+      });
+      void this.stopping.catch(() => {});
+    }
+    return this.stopping;
   }
 }
 
@@ -210,14 +348,15 @@ if (isMain) {
       console.warn("[dev-tools-daemon] telemetry configuration invalid; telemetry disabled");
     }
     const daemon = new LspDaemon(undefined, undefined, undefined, telemetry);
-    process.on("SIGTERM", () => void daemon.shutdown().then(() => process.exit(0)));
-    process.on("SIGINT", () => void daemon.shutdown().then(() => process.exit(0)));
-    try {
-      await daemon.start();
-    } catch (error) {
-      await daemon.shutdown();
-      throw error;
-    }
+    const stop = () => {
+      void daemon.shutdown().catch((error: unknown) => {
+        console.error("[dev-tools-daemon] signal shutdown failed:", error);
+        process.exitCode = 1;
+      });
+    };
+    process.on("SIGTERM", stop);
+    process.on("SIGINT", stop);
+    await daemon.start();
   };
   main().catch((error) => {
     console.error("Daemon failed to start:", error);

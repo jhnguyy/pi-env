@@ -57,7 +57,7 @@ Bound work before allocation. Prefer one-pass transformations and reuse values d
 
 1. The coordinator gives the separate implementer the accepted design handoff, supporting evidence, and work boundaries.
 2. The implementer validates the handoff against current code and discovers and applies applicable skills and repository practices. Challenge assumptions when the evidence warrants it. Return consequential deviations in scope, ownership, contracts, or verification to the coordinator before affected work proceeds; inexpensive, reversible implementation details remain at the implementer's discretion.
-3. Implement in verifiable phases against the accepted outcomes and failure cases, then return the changes, verification evidence, departures from the design, and remaining gaps.
+3. Implement every change in two sequential passes, not parallel versions. First establish the outcome and learn its constraints; then reconsider the whole solution as if those constraints had been known from the start. Revise ownership, interfaces, code, and tests together rather than preserve the first structure and layer additions. Scale both passes proportionately; documentation-only changes need drafting and reconsideration of the whole explanation and placement. Make warranted replacements without forcing churn or line-count reductions; explain reasoned retention. Return changes, both passes' findings, verification evidence, design departures, and remaining gaps.
 4. The coordinator reviews the integrated diff and verifies the combined result against the accepted outcomes and affected contracts, including repository-required checks, before review or merge. Child reports do not substitute for coordinator verification.
 
 ## Commit and publish
