@@ -19,7 +19,9 @@ describe("DocumentManager", () => {
 
   afterEach(() => {
     dm.clear();
-    try { rmSync(tmpDir, { recursive: true }); } catch {}
+    try {
+      rmSync(tmpDir, { recursive: true });
+    } catch {}
   });
 
   function mkFile(name: string, content: string): string {
@@ -43,6 +45,37 @@ describe("DocumentManager", () => {
         },
       });
     });
+
+    it.skipIf(process.platform !== "linux")(
+      "uses one escaped URI for special-filename notifications, tracking, and close",
+      () => {
+        const p = mkFile("spaced %20#?.ts", "const x = 1;");
+        const expectedUri = `file://${tmpDir}/spaced%20%2520%23%3F.ts`;
+        const opened = dm.ensure(p);
+
+        expect(opened.uri).toBe(expectedUri);
+        expect(opened.notification).toMatchObject({
+          type: "didOpen",
+          params: { textDocument: { uri: expectedUri, text: "const x = 1;" } },
+        });
+        expect(dm.openUris).toEqual([expectedUri]);
+        expect(dm.getDoc(expectedUri)).toMatchObject({ uri: expectedUri, absolutePath: p });
+        expect(dm.ensure(p).notification).toBeNull();
+
+        writeFileSync(p, "const x = 2;", "utf8");
+        expect(dm.ensure(p).notification).toMatchObject({
+          type: "didChange",
+          params: {
+            textDocument: { uri: expectedUri, version: 2 },
+            contentChanges: [{ text: "const x = 2;" }],
+          },
+        });
+        expect(dm.close(p)).toBe(expectedUri);
+        expect(dm.getDoc(expectedUri)).toBeUndefined();
+        expect(dm.openUris).toEqual([]);
+        expect(dm.projectRoots).toEqual([]);
+      },
+    );
 
     it("does not track or notify for a missing file", () => {
       expect(dm.ensure(join(tmpDir, "missing.ts")).notification).toBeNull();
