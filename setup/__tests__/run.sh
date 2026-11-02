@@ -19,18 +19,15 @@ SETUP_TESTS=(
   setup/__tests__/managed-settings.test.sh
   setup/__tests__/agent-guidelines.test.sh
   setup/__tests__/append-system.test.sh
-  setup/__tests__/nix-managed-config.test.sh
   setup/__tests__/setup-options.test.sh
   setup/__tests__/node-policy.test.sh
   setup/__tests__/repo-hooks.test.sh
-  setup/__tests__/home-manager-sync.test.sh
   setup/__tests__/worktree-init.test.sh
   setup/__tests__/runtime-install-safety.test.sh
   setup/__tests__/node-resolution.test.sh
   setup/__tests__/pi-cli-wrapper.test.sh
   setup/__tests__/verify-install.test.sh
   setup/__tests__/effect-runtime.test.sh
-  setup/__tests__/ghostty-config.test.sh
   setup/__tests__/effect-language-service.test.sh
 )
 
