@@ -3,6 +3,7 @@
  */
 
 import { relative, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // ─── Position Conversion ─────────────────────────────────────────────────────
 
@@ -20,12 +21,16 @@ export function toOneBased(line: number, character: number): { line: number; cha
 
 /** Convert a file path to a URI. */
 export function pathToUri(path: string): string {
-  return "file://" + resolve(path);
+  return pathToFileURL(resolve(path)).href;
 }
 
 /** Convert a URI to a file path. */
 export function uriToPath(uri: string): string {
-  return uri.replace(/^file:\/\//, "");
+  try {
+    return fileURLToPath(uri);
+  } catch {
+    return uri.replace(/^file:\/\//, "");
+  }
 }
 
 /**
@@ -39,18 +44,37 @@ export function relativePath(projectRoot: string, filePath: string): string {
   return rel;
 }
 
-
 // ─── LSP Symbol Kind → Label ─────────────────────────────────────────────────
 
 /** Map LSP SymbolKind numeric codes to human-readable labels. */
 export function symbolKindLabel(kind: number): string {
   const kinds: Record<number, string> = {
-    1: "file", 2: "module", 3: "namespace", 4: "package", 5: "class",
-    6: "method", 7: "property", 8: "field", 9: "constructor", 10: "enum",
-    11: "interface", 12: "function", 13: "variable", 14: "constant",
-    15: "string", 16: "number", 17: "boolean", 18: "array", 19: "object",
-    20: "key", 21: "null", 22: "enum member", 23: "struct", 24: "event",
-    25: "operator", 26: "type parameter",
+    1: "file",
+    2: "module",
+    3: "namespace",
+    4: "package",
+    5: "class",
+    6: "method",
+    7: "property",
+    8: "field",
+    9: "constructor",
+    10: "enum",
+    11: "interface",
+    12: "function",
+    13: "variable",
+    14: "constant",
+    15: "string",
+    16: "number",
+    17: "boolean",
+    18: "array",
+    19: "object",
+    20: "key",
+    21: "null",
+    22: "enum member",
+    23: "struct",
+    24: "event",
+    25: "operator",
+    26: "type parameter",
   };
   return kinds[kind] ?? "symbol";
 }
@@ -59,11 +83,16 @@ export function symbolKindLabel(kind: number): string {
 
 export function severityLabel(severity: number): "error" | "warning" | "info" | "hint" {
   switch (severity) {
-    case 1: return "error";
-    case 2: return "warning";
-    case 3: return "info";
-    case 4: return "hint";
-    default: return "error";
+    case 1:
+      return "error";
+    case 2:
+      return "warning";
+    case 3:
+      return "info";
+    case 4:
+      return "hint";
+    default:
+      return "error";
   }
 }
 

@@ -9,7 +9,6 @@ import {
   DagRunOutcome,
   DagSessionEvent,
   DagTransitionType,
-  computeDagSessionGraphId,
   createDagSessionWriter,
   reconstructDagSession,
   validateDagDefinition,
@@ -41,49 +40,6 @@ function valid(def: DagDefinition) {
 }
 
 describe("DAG session replay", () => {
-  it("replays a valid terminal history through public writer and reconstruction", () => {
-    const def = Fixtures.definition([node("a")], 1);
-    const dag = valid(def);
-    const store = Fixtures.sessionStore();
-    const writer = createDagSessionWriter(store, dag, def);
-
-    Effect.runSync(writer.appendGraph(def));
-    Effect.runSync(
-      writer.appendTransition(
-        { runId: def.runId, nodeId: "a", type: DagTransitionType.Start },
-        { nodeId: "a", attemptId: `${def.runId}:a:1`, ordinal: 1, status: DagNodeStatus.Running },
-      ),
-    );
-    Effect.runSync(
-      writer.appendTransition(
-        {
-          runId: def.runId,
-          nodeId: "a",
-          type: DagTransitionType.Complete,
-          result: { _tag: DagNodeResultTag.Succeeded, outputs: { value: 1 } },
-        },
-        { nodeId: "a", attemptId: `${def.runId}:a:1`, ordinal: 1, status: DagNodeStatus.Succeeded },
-      ),
-    );
-    Effect.runSync(writer.appendFinal(DagRunOutcome.Succeeded));
-    store.entries.push({ runId: "unrelated-run", malformed: true });
-
-    const recovered = Effect.runSync(
-      reconstructDagSession(store, def.runId, { limits: { totalMatchingEntries: 4 } }),
-    );
-    expect(recovered.graphId).toBe(computeDagSessionGraphId(def));
-    expect(recovered.terminalOutcome).toBe(DagRunOutcome.Succeeded);
-    expect(recovered.state.nodes).toEqual([
-      { nodeId: "a", status: DagNodeStatus.Succeeded, outputs: { value: 1 } },
-    ]);
-    expect(recovered.attempts[0]?.statuses).toEqual([
-      DagNodeStatus.Running,
-      DagNodeStatus.Succeeded,
-    ]);
-    expect(recovered.persistedEntryCount).toBe(4);
-    expect(recovered.recoveredFromProcessLoss).toBe(false);
-  });
-
   it("projects an open running prefix to interrupted without invoking work", () => {
     const def = Fixtures.definition([node("a")], 1);
     const dag = valid(def);

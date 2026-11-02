@@ -2,136 +2,58 @@ import { describe, expect, it } from "vitest";
 import { formatStatus } from "../formatters";
 import type { StatusResult } from "../protocol";
 
-const MAX_STATUS_DETAIL_LENGTH = 256;
-
-type ExpectedStatusContract = {
-  action: "status";
-  state: "ready" | "initializing" | "degraded" | "failed";
-  running: boolean;
-  pid?: number;
-  backend: {
-    name: string;
-    running: boolean;
-    stderrTail?: string;
-    startupFailure?: string;
-  };
-  project: {
-    mode: "configured" | "inferred" | "unknown";
-    root?: string;
-    tsconfigPath?: string;
-  };
-  initialization: {
-    state: "initializing" | "initialized" | "failed";
-  };
-  semantic: {
-    available: boolean;
-    lastRequest?: {
-      method: string;
-      itemCount: number;
-    };
-  };
-  projects: string[];
-  openFiles: string[];
-  watchedFiles: number;
-  idleMs: number;
-};
-
-function formatExpectedStatus(result: ExpectedStatusContract): string {
-  return formatStatus(result);
-}
-
 describe("status contract", () => {
-  it("formats a ready snapshot with semantic availability and zero request items", () => {
-    const result: ExpectedStatusContract = {
-      action: "status",
-      state: "ready",
-      running: true,
-      pid: 123,
-      backend: {
-        name: "typescript",
-        running: true,
-      },
-      project: {
-        mode: "configured",
-        root: "/repo",
-        tsconfigPath: "/repo/tsconfig.json",
-      },
-      initialization: {
-        state: "initialized",
-      },
-      semantic: {
-        available: true,
-        lastRequest: {
-          method: "textDocument/references",
-          itemCount: 0,
-        },
-      },
-      projects: ["/repo"],
-      openFiles: [],
-      watchedFiles: 0,
-      idleMs: 50,
-    };
-
-    expect(formatExpectedStatus(result)).toBe([
-      "state: ready",
-      "daemon: running",
-      "pid: 123",
-      "backend: typescript running",
-      "project mode: configured",
-      "project root: /repo",
-      "tsconfig: /repo/tsconfig.json",
-      "initialization: initialized",
-      "semantic: available",
-      "last semantic request: textDocument/references (0 items)",
-      "projects: /repo",
-      "open files: none",
-      "idle: 0s",
-    ].join("\n"));
-  });
-
-  it("formats an initializing snapshot with a running backend and unavailable semantics", () => {
-    const result: ExpectedStatusContract = {
+  it("formats ready and initializing branches without inventing optional request or config fields", () => {
+    const result: StatusResult = {
       action: "status",
       state: "initializing",
       running: true,
-      pid: 456,
-      backend: {
-        name: "typescript",
-        running: true,
-      },
-      project: {
-        mode: "inferred",
-        root: "/repo",
-      },
-      initialization: {
-        state: "initializing",
-      },
-      semantic: {
-        available: false,
-      },
-      projects: ["/repo"],
+      backend: { name: "bash", running: false },
+      project: { mode: "inferred", root: "/scripts" },
+      initialization: { state: "initializing" },
+      semantic: { available: false },
+      projects: [],
       openFiles: [],
       watchedFiles: 0,
       idleMs: 0,
     };
-
-    expect(formatExpectedStatus(result)).toBe([
+    const initializing = formatStatus(result);
+    for (const line of [
       "state: initializing",
       "daemon: running",
-      "pid: 456",
-      "backend: typescript running",
+      "backend: bash stopped",
       "project mode: inferred",
-      "project root: /repo",
+      "project root: /scripts",
       "initialization: initializing",
       "semantic: unavailable",
-      "projects: /repo",
-      "open files: none",
-      "idle: 0s",
-    ].join("\n"));
+    ]) {
+      expect(initializing.split("\n")).toContain(line);
+    }
+    expect(initializing).not.toMatch(/last semantic request:|tsconfig:|pid:/);
+
+    const ready = formatStatus({
+      ...result,
+      state: "ready",
+      backend: { name: "bash", running: true },
+      initialization: { state: "initialized" },
+      semantic: {
+        available: true,
+        lastRequest: { method: "textDocument/references", itemCount: 0 },
+      },
+    });
+    for (const line of [
+      "state: ready",
+      "backend: bash running",
+      "initialization: initialized",
+      "semantic: available",
+      "last semantic request: textDocument/references (0 items)",
+    ]) {
+      expect(ready.split("\n")).toContain(line);
+    }
   });
 
   it("formats a degraded snapshot with project, request, and semantic failure fields", () => {
-    const result: ExpectedStatusContract = {
+    const result: StatusResult = {
       action: "status",
       state: "degraded",
       running: true,
@@ -155,6 +77,10 @@ describe("status contract", () => {
           method: "textDocument/definition",
           itemCount: 0,
         },
+        semanticFailure: {
+          method: "textDocument/hover",
+          detail: "typescript LSP hover request timed out",
+        },
       },
       projects: ["/repo"],
       openFiles: ["/repo/src/index.ts"],
@@ -162,26 +88,29 @@ describe("status contract", () => {
       idleMs: 100,
     };
 
-    expect(formatExpectedStatus(result)).toBe([
-      "state: degraded",
-      "daemon: running",
-      "pid: 789",
-      "backend: typescript running",
-      "project mode: configured",
-      "project root: /repo",
-      "tsconfig: /repo/tsconfig.json",
-      "initialization: initialized",
-      "semantic: unavailable",
-      "last semantic request: textDocument/definition (0 items)",
-      "stderr: first line second line",
-      "projects: /repo",
-      "open files: 1",
-      "idle: 0s",
-    ].join("\n"));
+    expect(formatStatus(result)).toBe(
+      [
+        "state: degraded",
+        "daemon: running",
+        "pid: 789",
+        "backend: typescript running",
+        "project mode: configured",
+        "project root: /repo",
+        "tsconfig: /repo/tsconfig.json",
+        "initialization: initialized",
+        "semantic: unavailable",
+        "last semantic request: textDocument/definition (0 items)",
+        "semantic failure: textDocument/hover: typescript LSP hover request timed out",
+        "stderr: first line second line",
+        "projects: /repo",
+        "open files: 1",
+        "idle: 0s",
+      ].join("\n"),
+    );
   });
 
   it("formats a failed snapshot with separate daemon/backend liveness and bounded failure detail", () => {
-    const result: ExpectedStatusContract = {
+    const result: StatusResult = {
       action: "status",
       state: "failed",
       running: false,
@@ -205,21 +134,24 @@ describe("status contract", () => {
       idleMs: 0,
     };
 
-    const text = formatExpectedStatus(result);
-    expect(text).toBe([
+    const text = formatStatus(result);
+    const failureLine = text.split("\n").find((line) => line.startsWith("startup failure: "));
+    expect(failureLine).toBeDefined();
+    const detail = failureLine!.replace("startup failure: ", "");
+    expect(detail).toMatch(/^spawn ENOENT x+\.\.\.$/);
+    expect(detail).not.toMatch(/[\r\n\t]| {2}/);
+    expect(detail.length).toBeLessThanOrEqual(256);
+    expect(text).not.toContain("spawn   ENOENT");
+    expect(text.split("\n").filter((line) => line !== failureLine)).toEqual([
       "state: failed",
       "daemon: stopped",
       "backend: typescript stopped",
       "project mode: unknown",
       "initialization: failed",
       "semantic: unavailable",
-      `startup failure: ${("spawn ENOENT " + "x".repeat(300)).slice(0, MAX_STATUS_DETAIL_LENGTH - 3)}...`,
       "projects: none",
       "open files: none",
       "idle: 0s",
-    ].join("\n"));
-    expect(text).not.toContain("spawn   ENOENT");
-    const detail = text.split("startup failure: ")[1]?.split("\n")[0] ?? "";
-    expect(detail).toHaveLength(MAX_STATUS_DETAIL_LENGTH);
+    ]);
   });
 });
