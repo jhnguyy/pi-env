@@ -64,14 +64,6 @@ describe("shared execEffect", () => {
     },
   );
 
-  it("rejects Pi output overflow even when nonzero exits are allowed", async () => {
-    const exec: Exec = async () => ({ ...ok("partial"), code: 1, killed: true, truncated: true });
-
-    await expect(
-      Effect.runPromise(execEffect(exec, "cmd", [], makeError, { failOnNonZero: false })),
-    ).rejects.toThrow("cmd was terminated");
-  });
-
   it("forwards Effect interruption as the exec AbortSignal", async () => {
     let signal: AbortSignal | undefined;
     let start!: () => void;

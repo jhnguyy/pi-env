@@ -55,7 +55,7 @@ describe("shared compact tool rendering", () => {
 
   it("requires injected hints at compile time", () => {
     const theme = { fg: (_style: string, text: string) => text };
-    const missingDependencies = () => {
+    void (() => {
       // @ts-expect-error Expansion hints require host-injected bindings.
       toolExpandHint(theme);
       // @ts-expect-error Result rendering requires the host context even when expanded.
@@ -65,8 +65,7 @@ describe("shared compact tool rendering", () => {
         { expanded: true, isPartial: false },
         theme,
       );
-    };
-    expect(missingDependencies).toBeTypeOf("function");
+    });
   });
 
   it("requires both render hooks at compile time at the public registration boundary", () => {
