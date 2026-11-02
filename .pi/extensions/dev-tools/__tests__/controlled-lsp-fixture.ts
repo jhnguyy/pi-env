@@ -1,4 +1,5 @@
 import { appendFileSync } from "node:fs";
+import type { LspMessage } from "../lsp-transport";
 
 interface Message {
   id?: number;
@@ -9,7 +10,7 @@ interface Message {
 const countFile = process.argv[2];
 if (countFile) appendFileSync(countFile, "start\n");
 let buffer = Buffer.alloc(0);
-function send(message: object): void {
+function send(message: LspMessage): void {
   const body = JSON.stringify(message);
   process.stdout.write(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
 }
