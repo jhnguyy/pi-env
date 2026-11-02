@@ -15,6 +15,7 @@ if [ -z "${PI_ENV_TEST_NODE_BIN:-}" ]; then
 fi
 
 SETUP_TESTS=(
+  setup/__tests__/bash-prompt.test.sh
   setup/__tests__/settings-reset.test.sh
   setup/__tests__/managed-settings.test.sh
   setup/__tests__/agent-guidelines.test.sh

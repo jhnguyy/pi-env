@@ -33,6 +33,8 @@ in
       description = "Add user-local binary directories used by pi-env setup to the shell PATH.";
     };
 
+    shell.bashPrompt.enable = lib.mkEnableOption "the pi-env ANSI Bash prompt (owns PS1)";
+
     tmux.enable = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -75,7 +77,7 @@ in
         };
       })
 
-      (lib.mkIf (cfg.shell.enable || cfg.tmux.enable || cfg.ghostty.enable) {
+      (lib.mkIf (cfg.shell.enable || cfg.shell.bashPrompt.enable || cfg.tmux.enable || cfg.ghostty.enable) {
         home.sessionVariables.PI_ENV_CONFIG_MANAGED_BY_NIX = "1";
       })
 
@@ -91,6 +93,18 @@ in
           "$HOME/.local/bin"
           "$HOME/.pi/agent/bin"
         ];
+      })
+
+      (lib.mkIf cfg.shell.bashPrompt.enable {
+        assertions = [
+          {
+            assertion = config.programs.bash.enable;
+            message = "pi-env.shell.bashPrompt.enable requires programs.bash.enable.";
+          }
+        ];
+        programs.bash.promptInit = lib.mkDefault ''
+          source ${self}/setup/templates/bash-prompt.sh
+        '';
       })
 
       (lib.mkIf cfg.tmux.enable {

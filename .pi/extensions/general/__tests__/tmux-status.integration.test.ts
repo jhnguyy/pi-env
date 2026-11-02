@@ -117,7 +117,7 @@ class TmuxFixture {
   }
 
   // An outer tmux pane acts as the terminal, so capture-pane reports what the client drew.
-  async terminal(session: string): Promise<() => Promise<string>> {
+  async terminal(session: string, allRows = false): Promise<() => Promise<string>> {
     // -u keeps glyphs intact where the host locale is not UTF-8, as in the container image.
     const attach = `env -u TMUX TERM=xterm-256color COLORTERM=truecolor tmux -u -S '${this.socket}' attach-session -t ${session}`;
     await execute(
@@ -144,9 +144,10 @@ class TmuxFixture {
         ["-u", "-S", this.terminalSocket, "capture-pane", "-p", "-e", "-t", "0"],
         { timeout: 5_000, env: { ...process.env, TMUX: "", TMUX_PANE: "" } },
       );
-      const line = stdout.trimEnd().split("\n").at(-1) ?? "";
-      this.observations.push({ renderedStatusLine: line });
-      return line;
+      const screen = stdout.trimEnd();
+      const line = screen.split("\n").at(-1) ?? "";
+      this.observations.push(allRows ? { renderedScreen: screen } : { renderedStatusLine: line });
+      return allRows ? screen : line;
     };
   }
 
@@ -190,16 +191,17 @@ class TmuxFixture {
         failures.push(String(error));
       }
     }
+    // Stop the outer terminal before killing the server its attached client uses.
+    try {
+      await execute("tmux", ["-S", this.terminalSocket, "kill-server"], { timeout: 5_000 });
+    } catch (error) {
+      // The terminal server exists only in rendering scenarios.
+      if (!/no server running|error connecting/.test(String(error))) failures.push(String(error));
+    }
     try {
       await this.command("kill-server");
     } catch (error) {
       failures.push(String(error));
-    }
-    try {
-      await execute("tmux", ["-S", this.terminalSocket, "kill-server"], { timeout: 5_000 });
-    } catch (error) {
-      // The terminal server exists only in rendering scenarios and exits with its client.
-      if (!/no server running|error connecting/.test(String(error))) failures.push(String(error));
     }
     return failures;
   }
@@ -587,25 +589,29 @@ describe("tmux status integration (real isolated server)", () => {
     expect(await f.indicator(), "new state rearms unseen").toBe(indicator("done"));
   });
 
-  // Expected colours are the template's Gruvbox roles: bar, raised surface, secondary text, accent.
+  // Observe role pairings on rendered cells, including active and inactive agent glyphs.
   it.each([
     {
       theme: "dark",
       bar: "60,56,54",
       raised: "80,73,69",
-      label: "168,153,132",
-      accent: "250,189,47",
+      label: "213,196,161",
+      primary: "235,219,178",
+      onFocus: "40,40,40",
+      accent: "254,128,25",
     },
     {
       theme: "light",
       bar: "235,219,178",
       raised: "213,196,161",
-      label: "124,111,100",
+      label: "80,73,69",
+      primary: "60,56,54",
+      onFocus: "251,241,199",
       accent: "175,58,3",
     },
   ])(
-    "renders the $theme template with status colour on agent indicators only",
-    async ({ theme, bar, raised, label, accent }) => {
+    "renders $theme active glyphs in tab colors and inactive glyphs in status colors",
+    async ({ theme, bar, raised, label, primary, onFocus, accent }) => {
       const mode = theme as "dark" | "light";
       const f = await fixture();
       await f.command("rename-window", "-t", f.window, "alpha");
@@ -630,17 +636,114 @@ describe("tmux status integration (real isolated server)", () => {
       await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toBe("done|1|#345678|0");
 
       await expect
-        .poll(() => render("✓", "0:alpha", "⠾", "1:beta", "2:gamma"), { timeout: 7_000 })
+        .poll(() => render("status-test", "✓", "0:alpha", "⠾", "1:beta", "2:gamma"), {
+          timeout: 7_000,
+        })
         .toEqual({
           // A viewed state keeps the current tab's weight; an unseen one is bold.
-          ...expectedStyle("✓", { fg: "52,86,120", bg: raised, bold: true, dim: false }),
-          ...expectedStyle("0:alpha", { fg: accent, bg: raised, bold: true, dim: false }),
+          ...expectedStyle("status-test", { fg: primary, bg: raised, bold: true, dim: false }),
+          ...expectedStyle("✓", { fg: onFocus, bg: accent, bold: true, dim: false }),
+          ...expectedStyle("0:alpha", { fg: onFocus, bg: accent, bold: true, dim: false }),
           ...expectedStyle("⠾", { fg: "18,52,86", bg: bar, bold: true, dim: false }),
           ...expectedStyle("1:beta", { fg: label, bg: bar, bold: false, dim: false }),
           ...expectedStyle("2:gamma", { fg: label, bg: bar, bold: false, dim: false }),
         });
+      for (const [override, fg, bg, bold] of [
+        ["bg=#112233,fg=#ddeeff,bold", "221,238,255", "17,34,51", true],
+        ["bg=#112233", label, "17,34,51", false],
+        ["fg=#ddeeff", "221,238,255", bar, false],
+        ["default", label, bar, false],
+      ] as const) {
+        await f.command("set-option", "-g", "window-status-current-style", override);
+        const style = { fg, bg, bold, dim: false };
+        await expect
+          .poll(() => render("✓", "0:alpha", "⠾"), { timeout: 7_000 })
+          .toEqual({
+            ...expectedStyle("✓", style),
+            ...expectedStyle("0:alpha", style),
+            ...expectedStyle("⠾", { fg: "18,52,86", bg: bar, bold: true, dim: false }),
+          });
+      }
     },
   );
+
+  it("uses native current-style precedence and resets hidden marker colors", async () => {
+    const f = await fixture();
+    await f.command("rename-window", "-t", f.window, "alpha");
+    const background = await f.command(
+      "new-window",
+      "-d",
+      "-t",
+      "status-test",
+      "-n",
+      "beta",
+      "-P",
+      "-F",
+      "#{pane_id}",
+      "sleep 300",
+    );
+    const render = await templateTerminal(f, "dark");
+    await f.command("set-option", "-g", "status-style", "bg=themeblack,fg=#abcdef,dim");
+    await f.command("set-option", "-g", "window-status-style", "fg=#ddeeff,bold");
+    await f.command("set-option", "-g", "window-status-current-style", "bg=#112233");
+    await f.transport(background).update("running", palette.running);
+    await f.transport().update("done", palette.done);
+    await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toBe("done|1|#345678|0");
+    await expect
+      .poll(() => render("✓", "0:alpha", "1:beta"), { timeout: 7_000 })
+      .toEqual({
+        ...expectedStyle("✓", { fg: "171,205,239", bg: "17,34,51", bold: false, dim: false }),
+        ...expectedStyle("0:alpha", { fg: "171,205,239", bg: "17,34,51", bold: false, dim: true }),
+        ...expectedStyle("1:beta", { fg: "221,238,255", bg: "60,56,54", bold: true, dim: true }),
+      });
+    await f.command("set-option", "-g", "window-status-current-style", "default");
+    await expect
+      .poll(() => render("✓", "0:alpha"), { timeout: 7_000 })
+      .toEqual({
+        ...expectedStyle("✓", { fg: "221,238,255", bg: "60,56,54", bold: true, dim: false }),
+        ...expectedStyle("0:alpha", { fg: "221,238,255", bg: "60,56,54", bold: true, dim: true }),
+      });
+  });
+
+  it.each([
+    { mode: "dark", accent: "254,128,25", inactive: "80,73,69" },
+    { mode: "light", accent: "175,58,3", inactive: "213,196,161" },
+  ])("moves the $mode orange border with pane focus", async ({ mode, accent, inactive }) => {
+    const f = await fixture();
+    await f.command("source-file", template);
+    await f.command("set-option", "-g", "theme", mode);
+    for (let i = 0; i < 2; i++) {
+      await f.command("split-window", "-h", "-d", "-t", f.window, "sleep 300");
+    }
+    await f.command("select-layout", "-t", f.window, "even-horizontal");
+    const capture = await f.terminal("status-test", true);
+    const ordered = (
+      await f.command("list-panes", "-t", f.window, "-F", "#{pane_left}|#{pane_width}|#{pane_id}")
+    )
+      .split("\n")
+      .map((pane) => {
+        const [left, width, id] = pane.split("|");
+        return { left: Number(left), border: Number(left) + Number(width), id };
+      })
+      .sort((a, b) => a.left - b.left);
+    const borders = async () => {
+      const row = cells((await capture()).split("\n")[0]);
+      return ordered.slice(0, 2).map(({ border }) => ({
+        char: row[border]?.char,
+        fg: row[border]?.fg,
+      }));
+    };
+    await f.command("select-pane", "-t", ordered[0].id);
+    await expect.poll(borders, { timeout: 7_000 }).toEqual([
+      { char: "│", fg: accent },
+      { char: "│", fg: inactive },
+    ]);
+    await f.command("select-pane", "-t", ordered[2].id);
+    await expect.poll(borders, { timeout: 7_000 }).toEqual([
+      { char: "│", fg: inactive },
+      { char: "│", fg: accent },
+    ]);
+  });
 
   it("keeps last-window and bell colour overrides on agent tab labels", async () => {
     const f = await fixture();
@@ -689,19 +792,53 @@ describe("tmux status integration (real isolated server)", () => {
       });
   });
 
-  it("keeps labels readable beside indicators from earlier extension versions", async () => {
-    const f = await fixture();
-    await f.command("rename-window", "-t", f.window, "alpha");
-    const render = await templateTerminal(f, "dark");
-    // The format written before the template owned the reset.
-    const legacy = "#[push-default]#[fg=#123456,nobold,nodim,dim]✓#[pop-default]";
-    await f.command("set-option", "-w", "-t", f.window, "@pi_agent_status", legacy);
-    await expect
-      .poll(() => render("0:alpha"), { timeout: 7_000 })
-      .toEqual(
-        expectedStyle("0:alpha", { fg: "250,189,47", bg: "80,73,69", bold: true, dim: false }),
+  it.each([
+    { mode: "dark", fg: "40,40,40", bg: "254,128,25" },
+    { mode: "light", fg: "251,241,199", bg: "175,58,3" },
+  ] as const)(
+    "inherits $mode active colors across payloads and restores legacy labels",
+    async ({ mode, fg, bg }) => {
+      const f = await fixture();
+      await f.command("rename-window", "-t", f.window, "alpha");
+      const render = await templateTerminal(f, mode);
+      await f.command(
+        "set-option",
+        "-g",
+        "window-status-current-style",
+        "bg=themeyellow,fg=themeblue,nobold",
       );
-  });
+      for (const color of ["red", "#123456", "colour196", "default"]) {
+        for (const unseen of [false, true]) {
+          for (const legacy of [false, true]) {
+            const glyph = `#[fg=${color},${unseen ? "bold" : "nobold"},nodim]✓`;
+            // Earlier versions wrapped indicators in their own default-style stack.
+            const payload = legacy ? `#[push-default]${glyph}#[pop-default]` : glyph;
+            await f.command("set-option", "-w", "-t", f.window, "@pi_agent_status", payload);
+            await expect
+              .poll(() => render("✓", "0:alpha"), { timeout: 7_000 })
+              .toEqual({
+                ...expectedStyle("✓", { fg, bg, bold: unseen, dim: false }),
+                ...expectedStyle("0:alpha", { fg, bg, bold: false, dim: false }),
+              });
+          }
+        }
+      }
+      await f.command(
+        "set-option",
+        "-g",
+        "window-status-current-style",
+        "bg=themeyellow,fg=themeblue,bold",
+      );
+      const legacyDim = "#[push-default]#[fg=#123456,nobold,nodim,dim]✓#[pop-default]";
+      await f.command("set-option", "-w", "-t", f.window, "@pi_agent_status", legacyDim);
+      await expect
+        .poll(() => render("✓", "0:alpha"), { timeout: 7_000 })
+        .toEqual({
+          ...expectedStyle("✓", { fg, bg, bold: false, dim: true }),
+          ...expectedStyle("0:alpha", { fg, bg, bold: true, dim: false }),
+        });
+    },
+  );
 
   it("colours each overflow arrow by the highest-priority agent on its side", async () => {
     const f = await fixture();
@@ -724,6 +861,10 @@ describe("tmux status integration (real isolated server)", () => {
       );
     await f.command("select-window", "-t", "status-test:4");
     const render = await templateTerminal(f, "dark");
+    await f.command("set-option", "-g", "window-status-current-style", "bg=#112233");
+    await f.transport(panes[4]).update("done", palette.done);
+    await expect.poll(() => f.paneValue(panes[4]), { timeout: 7_000 }).toBe("done|1|#345678|0");
+    const current = { fg: "213,196,161", bg: "17,34,51", bold: false, dim: false };
     const left = { done: f.transport(panes[1]), running: f.transport(panes[2]) };
     const right = { error: f.transport(panes[6]), idle: f.transport(panes[7]) };
     await left.done.update("done", palette.done);
@@ -732,18 +873,22 @@ describe("tmux status integration (real isolated server)", () => {
     await right.error.update("error", "#fedcba");
     const arrow = (fg: string) => ({ fg, bg: "60,56,54", bold: false, dim: false });
     await expect
-      .poll(() => render("<", ">"), { timeout: 7_000 })
+      .poll(() => render("<", ">", "✓", "4:window-number-4"), { timeout: 7_000 })
       .toEqual({
         ...expectedStyle("<", arrow("18,52,86")),
         ...expectedStyle(">", arrow("254,220,186")),
+        ...expectedStyle("✓", current),
+        ...expectedStyle("4:window-number-4", current),
       });
     await left.running.close();
     await right.error.close();
     await expect
-      .poll(() => render("<", ">"), { timeout: 7_000 })
+      .poll(() => render("<", ">", "✓", "4:window-number-4"), { timeout: 7_000 })
       .toEqual({
         ...expectedStyle("<", arrow("52,86,120")),
         ...expectedStyle(">", arrow("171,205,239")),
+        ...expectedStyle("✓", current),
+        ...expectedStyle("4:window-number-4", current),
       });
   });
 
