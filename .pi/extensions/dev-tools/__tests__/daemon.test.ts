@@ -1,17 +1,13 @@
 /**
- * Daemon tests — use a mock LSP subprocess to verify request routing,
- * diagnostics buffering, and workspace management.
- *
- * We test by instantiating LspDaemon with mocked internals rather than
- * spawning a real process, since the goal is to test the routing and
- * formatting logic, not the language servers themselves.
+ * Daemon routing tests use canned backend responses and a real Unix socket,
+ * without launching a language-server subprocess.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import "../register-actions"; // populate action registry for daemon dispatch
 import { LspDaemon } from "../daemon";
 import { connect, type Socket } from "node:net";
-import { mkdtempSync, rmSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { serializeRequest, parseResponse, type DaemonRequest } from "../protocol";
@@ -22,9 +18,10 @@ describe("LspDaemon", () => {
   let tmpDir: string;
   let socketPath: string;
   let pidPath: string;
-  let daemon: LspDaemon;
+  let daemon: LspDaemon | undefined;
 
   beforeEach(() => {
+    daemon = undefined;
     tmpDir = mkdtempSync(join(tmpdir(), "lsp-d-"));
     socketPath = join(tmpDir, "t.sock");
     pidPath = join(tmpDir, "t.pid");
@@ -34,11 +31,10 @@ describe("LspDaemon", () => {
   });
 
   afterEach(async () => {
-    try {
-      if (existsSync(socketPath)) unlinkSync(socketPath);
-      if (existsSync(pidPath)) unlinkSync(pidPath);
-    } catch {}
-    try { rmSync(tmpDir, { recursive: true }); } catch {}
+    const failures: unknown[] = [];
+    try { await daemon?.shutdown(); } catch (error) { failures.push(error); }
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch (error) { failures.push(error); }
+    if (failures.length) throw new AggregateError(failures, "Daemon teardown failed");
   });
 
   // ─── MockedDaemon: replaces LSP subprocess with an in-process mock ────────

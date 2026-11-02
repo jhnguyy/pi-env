@@ -198,8 +198,6 @@ describe("review tool rendering", () => {
 
     expect(phases[0]).toMatchObject({ label: "planning", status: "failed" });
     expect(phases[1]).toMatchObject({ label: "reviewing", status: "interrupted" });
-    expect(phases[0]?.status).not.toBe("complete");
-    expect(phases[1]?.status).not.toBe("complete");
   });
 
   it("reports terminal nested usage once and omits it for duplicate or persisted reuse results", () => {

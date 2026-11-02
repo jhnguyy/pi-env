@@ -1,46 +1,24 @@
 import { Effect, Exit, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import {
-  DagBlockedReason,
-  DagDependencyMode,
   DagNodeResultTag,
   DagNodeStatus,
   DagRunOutcome,
   DagSessionEvent,
   DagTransitionType,
   computeDagSessionGraphId,
-  createDagRunState,
-  createDagSessionWriter,
   reconstructDagSession,
-  validateDagDefinition,
-  type DagCompletionGuardKind,
-  type DagDefinition,
   type DagSessionEntry,
   type DagSessionStore,
 } from "../index.js";
 import * as Fixtures from "./shared.js";
 
-function node(
-  id: string,
-  dependencies: readonly { readonly nodeId: string; readonly mode: "required" | "settled" }[] = [],
-  completionGuard?: {
-    readonly kind: typeof DagCompletionGuardKind.AtLeastOneSucceeded;
-    readonly dependencyIds: readonly string[];
-  },
-) {
+function node(id: string) {
   return {
     id,
     executor: { kind: "transform" as const, key: "test", payload: null },
-    dependencies,
-    ...(completionGuard ? { completionGuard } : {}),
+    dependencies: [],
   };
-}
-
-function valid(def: DagDefinition) {
-  const result = validateDagDefinition(def);
-  expect(result._tag).toBe("valid");
-  if (result._tag !== "valid") throw new Error("invalid graph");
-  return result.graph;
 }
 
 function storedEntry(data: DagSessionEntry) {

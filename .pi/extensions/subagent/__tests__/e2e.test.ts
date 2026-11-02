@@ -12,12 +12,17 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
+import { settleOperations, testCleanup } from "./cleanup";
+
 const repo = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const bundle = join(repo, ".pi/extensions/subagent/dist/index.js");
 
 // Only inference is scripted. Both sessions load native resources and execute real tools.
 it.each(["on", "only"] as const)("delegates through native codemode (%s) without recursive delegation", async (mode) => {
   const root = mkdtempSync(join(tmpdir(), "pi-native-delegation-"));
+  const cleanup = testCleanup();
+  cleanup(() => rmSync(root, { recursive: true, force: true }));
+  cleanup(() => vi.unstubAllEnvs());
   const agentDir = join(root, "agent");
   const target = join(root, "target");
   vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
@@ -33,6 +38,15 @@ it.each(["on", "only"] as const)("delegates through native codemode (%s) without
     verdict: "failed",
   };
   let parent: Awaited<ReturnType<typeof createAgentSessionFromServices>>["session"] | undefined;
+  const operations: Promise<unknown>[] = [];
+  cleanup(
+    () => parent?.abort(),
+    () => parent?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" }),
+    () => settleOperations(operations),
+    () => parent?.dispose(),
+    () => { writeFileSync(artifact, JSON.stringify(evidence, null, 2) + "\n"); },
+    () => { console.info(`Native delegation evidence: ${artifact}`); },
+  );
   try {
     mkdirSync(agentDir);
     mkdirSync(target);
@@ -100,9 +114,7 @@ export default function(pi) {
     );
     evidence.parentCodeResults = parentCodeResults;
     expect(parentCodeResults).toHaveLength(1);
-    expect(parentCodeResults.every((message) => message.role === "toolResult" && !message.isError)).toBe(true);
-    const result = parentCodeResults.find((message) => message.role === "toolResult" && !message.isError);
-    expect(result?.role).toBe("toolResult");
+    const result = parentCodeResults[0];
     if (result?.role !== "toolResult") throw new Error("Missing parent codemode result");
     evidence.parentResult = result;
     expect(result.isError).toBe(false);
@@ -127,9 +139,9 @@ export default function(pi) {
         (message) => message.role === "toolResult" && message.toolName === "codemode",
       );
       expect(codeResults).toHaveLength(1);
-      expect(codeResults.every((message) => message.role === "toolResult" && !message.isError)).toBe(true);
-      const codeResult = codeResults.find((message) => message.role === "toolResult" && !message.isError);
-      expect(codeResult?.role === "toolResult" && codeResult.isError).toBe(false);
+      const codeResult = codeResults[0];
+      if (codeResult?.role !== "toolResult") throw new Error("Missing child codemode result");
+      expect(codeResult.isError).toBe(false);
       expect(JSON.stringify(codeResult)).toContain("child-native identity");
       expect(JSON.stringify(codeResult)).not.toContain("parent identity must not leak");
       expect(JSON.stringify(codeResult)).toContain('\\"parentTool\\":false');
@@ -150,6 +162,7 @@ export default function(pi) {
       evidence.cancellationFinishedAfterMs = performance.now() - cancellationStarted;
       evidence.cancellationOutput = parent?.messages.slice(cancellationMessageStart);
     });
+    operations.push(cancelled);
     await vi.waitUntil(
       () => {
         if (existsSync(join(target, "entered"))) return true;
@@ -166,23 +179,10 @@ export default function(pi) {
     await parent.abort();
     await cancelled;
     await vi.waitFor(() => expect(existsSync(join(target, "settled"))).toBe(true));
-    const cancellationSettled = existsSync(join(target, "settled"));
-    evidence.cancellationSettled = cancellationSettled;
-    expect(cancellationSettled).toBe(true);
+    evidence.cancellationSettled = true;
     evidence.verdict = "passed";
   } catch (error) {
     evidence.failure = error instanceof Error ? error.message : String(error);
     throw error;
-  } finally {
-    try {
-      await parent?.abort();
-      await parent?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
-    } finally {
-      parent?.dispose();
-      vi.unstubAllEnvs();
-      writeFileSync(artifact, JSON.stringify(evidence, null, 2) + "\n");
-      console.info(`Native delegation evidence: ${artifact}`);
-      rmSync(root, { recursive: true, force: true });
-    }
   }
 }, 30000);

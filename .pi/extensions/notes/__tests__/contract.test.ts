@@ -148,7 +148,7 @@ describe("notes tool contract", () => {
   it("uses provider-owned orientation and routes provider-neutral operations", async () => {
     const fake = provider();
     const contract = createNotesContract(fake);
-    await contract.execute({ action: "index" }, { cwd: "/repo" });
+    const index = await contract.execute({ action: "index" }, { cwd: "/repo" });
     const listed = await contract.execute(
       { action: "list", prefix: "projects/notes", limit: 12 },
       { cwd: "/repo" },
@@ -157,7 +157,7 @@ describe("notes tool contract", () => {
       { action: "read", path: "records/2026/09/01.md" },
       { cwd: "/repo" },
     );
-    await contract.execute({ action: "search", query: "topic", limit: 12 }, { cwd: "/repo" });
+    const searched = await contract.execute({ action: "search", query: "topic", limit: 12 }, { cwd: "/repo" });
     const resolved = await contract.execute(
       { action: "resolve", reference: "record/by-date" },
       { cwd: "/repo" },
@@ -169,6 +169,12 @@ describe("notes tool contract", () => {
     expect(listed.content).toContainEqual({
       type: "text",
       text: expect.stringContaining("under projects/notes"),
+    });
+    expect(index.content).toContainEqual({
+      type: "text", text: expect.stringContaining("[Notes Index]|provider:test"),
+    });
+    expect(searched.content).toContainEqual({
+      type: "text", text: expect.stringContaining("records/2026/09/01.md"),
     });
     expect(fake.index).toHaveBeenCalledWith(undefined);
     expect(fake.list).toHaveBeenCalledWith({ prefix: "projects/notes", limit: 12 }, undefined);
@@ -475,12 +481,15 @@ describe("notes tool contract", () => {
       { collection: "wiki", action: "read", limit: 1 },
       { cwd: "/repo" },
     );
+    expect(wiki.details.items).toEqual([{ kind: "folder", target: "nested", path: "wiki/nested/" }]);
     expect(wiki.details.nextCursor).toEqual(expect.any(String));
     const continuedWiki = await contract.execute(
       { collection: "wiki", action: "read", limit: 1, cursor: wiki.details.nextCursor },
       { cwd: "/repo" },
     );
-    expect(continuedWiki.details.items).toHaveLength(1);
+    expect(continuedWiki.details.items).toEqual([
+      expect.objectContaining({ kind: "file", target: "a.md", path: "wiki/a.md" }),
+    ]);
     await expect(
       contract.execute(
         { collection: "wiki", action: "read", target: "nested", cursor: wiki.details.nextCursor },
@@ -671,6 +680,7 @@ describe("notes tool contract", () => {
       },
       { cwd: "/repo" },
     );
+    expect(await readFile(path.join(vault, "wiki/new.md"), "utf8")).toBe("new");
     await expect(
       contract.execute(
         {
@@ -830,21 +840,21 @@ describe("notes tool contract", () => {
     });
     expect(fake.list).not.toHaveBeenCalled();
   });
-  it("bounds structured list details", async () => {
+  it("preserves a full list page and the provider continuation cursor", async () => {
     const fake = provider();
-    vi.mocked(fake.list).mockResolvedValue({
-      entries: Array.from({ length: MAX_DETAIL_ITEMS }, (_, index) => ({
-        path: `${index}.md`,
-      })),
-      nextCursor: "next-page",
-    });
+    const entries = Array.from({ length: MAX_DETAIL_ITEMS }, (_, index) => ({ path: `${index}.md` }));
+    vi.mocked(fake.list).mockResolvedValue({ entries, nextCursor: "next-page" });
     const contract = createNotesContract(fake);
     const output = await contract.execute({ action: "list" }, { cwd: "/repo" });
-    expect(output.details.notes).toHaveLength(MAX_DETAIL_ITEMS);
+    expect(output.details.notes).toEqual(entries);
+    expect(output.details.nextCursor).toBe("next-page");
     expect(output.details.truncated).toBe(true);
+    expect(output.content).toContainEqual({ type: "text", text: expect.stringContaining("0.md") });
+    expect(output.content).toContainEqual({ type: "text", text: expect.stringContaining("next-page") });
   });
 
   it("rejects unsafe paths and oversized UTF-8 content before provider IO", async () => {
+    const oversizedUtf8 = "é".repeat(Math.floor(MAX_NOTE_BYTES / 2) + 1);
     const fake = provider();
     const contract = createNotesContract(fake);
     await expect(
@@ -867,14 +877,14 @@ describe("notes tool contract", () => {
         {
           action: "write",
           path: "wiki/large.md",
-          content: "é".repeat(MAX_NOTE_BYTES),
+          content: oversizedUtf8,
           revision: null,
         },
         { cwd: "/repo" },
       ),
     ).rejects.toMatchObject({ code: "resource-limit" });
     expect(() =>
-      applyExactEdits("x", [{ oldText: "x", newText: "é".repeat(MAX_NOTE_BYTES) }]),
+      applyExactEdits("x", [{ oldText: "x", newText: oversizedUtf8 }]),
     ).toThrow("exceeds");
     expect(() => applyExactEdits("aaa", [{ oldText: "aa", newText: "b" }])).toThrow(
       "more than once",

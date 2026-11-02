@@ -24,8 +24,8 @@ test_nix_managed_config_skips_terminal_writes() {
 
   run_terminal_config
 
-  [ ! -e "$HOME/.tmux.conf" ] || fail "tmux config should not be created when Nix manages config"
-  [ ! -e "$HOME/.config/ghostty/config" ] || fail "Ghostty config should not be linked when Nix manages config"
+  [ ! -e "$HOME/.tmux.conf" ] && [ ! -L "$HOME/.tmux.conf" ] || fail "tmux config should not be created when Nix manages config"
+  [ ! -e "$HOME/.config/ghostty/config" ] && [ ! -L "$HOME/.config/ghostty/config" ] || fail "Ghostty config should not be linked when Nix manages config"
 
   unset PI_ENV_CONFIG_MANAGED_BY_NIX SHOULD_LINK_GHOSTTY CONTEXT_LABEL
   HOME="$old_home"
@@ -44,8 +44,8 @@ test_granular_skip_flags_skip_terminal_writes() {
 
   run_terminal_config
 
-  [ ! -e "$HOME/.tmux.conf" ] || fail "tmux config should not be created when PI_ENV_SKIP_TMUX=1"
-  [ ! -e "$HOME/.config/ghostty/config" ] || fail "Ghostty config should not be linked when PI_ENV_SKIP_GHOSTTY=1"
+  [ ! -e "$HOME/.tmux.conf" ] && [ ! -L "$HOME/.tmux.conf" ] || fail "tmux config should not be created when PI_ENV_SKIP_TMUX=1"
+  [ ! -e "$HOME/.config/ghostty/config" ] && [ ! -L "$HOME/.config/ghostty/config" ] || fail "Ghostty config should not be linked when PI_ENV_SKIP_GHOSTTY=1"
 
   unset PI_ENV_SKIP_TMUX PI_ENV_SKIP_GHOSTTY SHOULD_LINK_GHOSTTY CONTEXT_LABEL
   HOME="$old_home"

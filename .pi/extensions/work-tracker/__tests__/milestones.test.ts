@@ -15,10 +15,14 @@ describe("todo milestones", () => {
     ])).toBe("todo: Implement session navigation +1");
   });
 
-  it("normalizes whitespace and caps label length", () => {
-    const label = formatTodoMilestoneLabel([{ id: 1, text: `  ${"word ".repeat(40)}  ` }]);
-    expect(label?.startsWith("todo: word word")).toBe(true);
-    expect(label?.length).toBeLessThanOrEqual("todo: ".length + 80);
+  it("collapses whitespace in the completed task label", () => {
+    expect(formatTodoMilestoneLabel([{ id: 1, text: " \tfirst\n second  " }]))
+      .toBe("todo: first second");
+  });
+
+  it("limits the task portion of the label to 80 characters", () => {
+    expect(formatTodoMilestoneLabel([{ id: 1, text: "x".repeat(81) }]))
+      .toBe(`todo: ${"x".repeat(80)}`);
   });
 
   it("returns undefined without completed todos", () => {

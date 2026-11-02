@@ -11,6 +11,7 @@ describe("replace a private share", () => {
     f.session.appendMessage({ role: "user", content: "updated synthetic export", timestamp: Date.now() });
     await f.invoke();
     expect(f.uploads).toHaveLength(2);
+    expect(f.prompts).toBe(1);
     expect(f.uploads[1]?.["sha"]).toBe(original.sha);
     expect(f.github.contents.get(key)?.path).toBe(original.path);
     expect(f.confirmations[1]).toMatch(/replac.*existing/i);

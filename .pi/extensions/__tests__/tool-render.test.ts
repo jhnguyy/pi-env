@@ -52,7 +52,7 @@ describe("shared compact tool rendering", () => {
     expect(rendered.text).toContain("<error>✗</error>");
   });
 
-  it("requires both render hooks at the public registration boundary", () => {
+  it("requires both render hooks at compile time at the public registration boundary", () => {
     const host = { registerTool: () => undefined };
     // @ts-expect-error Public Pi tools must provide renderCall and renderResult.
     registerPublicTool(host, {

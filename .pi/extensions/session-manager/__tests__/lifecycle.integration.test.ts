@@ -137,7 +137,7 @@ describe("session lifecycle", () => {
   });
 
   it("adopts a session whose JSONL cwd is a symlink to the canonical workspace", async () => {
-    const { root, cwd, lifecycle, input } = await fixture();
+    const { root, cwd, catalog, lifecycle, input } = await fixture();
     const alias = join(root, "workspace-alias");
     await symlink(cwd, alias);
     await writeFile(
@@ -148,6 +148,11 @@ describe("session lifecycle", () => {
     const adopted = await Effect.runPromise(lifecycle.adopt({ ...input, cwd: alias }));
 
     expect(adopted.record.cwd).toBe(cwd);
+    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]).toMatchObject({
+      sessionId: input.sessionId,
+      cwd,
+      persistence: { state: "materialized", sessionFile: input.sessionFile },
+    });
   });
 
   it("keeps a record pending until the first JSONL header matches the active session", async () => {
@@ -171,6 +176,9 @@ describe("session lifecycle", () => {
       lifecycle.refreshMaterialization(started.session, input.sessionFile),
     );
     expect(refreshed.record.persistence.state).toBe("materialized");
+    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.persistence).toEqual({
+      state: "materialized", sessionFile: input.sessionFile,
+    });
   });
 
   it("writes the closure source without changing history persistence", async () => {

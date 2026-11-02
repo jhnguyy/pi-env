@@ -270,12 +270,15 @@ describe("session runtime bus", () => {
 
   it("secures a runtime directory that was initially accessible to other users", async () => {
     const root = await temporaryRoot();
-    await chmod(root, 0o755);
     const cwd = join(root, "workspace");
     await mkdir(cwd);
 
     const paths = await Effect.runPromise(resolveRuntimePaths(cwd, { XDG_RUNTIME_DIR: root }));
+    await chmod(paths.directory, 0o755);
 
-    expect((await lstat(paths.directory)).mode & 0o777).toBe(0o700);
+    const secured = await Effect.runPromise(resolveRuntimePaths(cwd, { XDG_RUNTIME_DIR: root }));
+
+    expect(secured.directory).toBe(paths.directory);
+    expect((await lstat(secured.directory)).mode & 0o777).toBe(0o700);
   });
 });

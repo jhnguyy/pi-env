@@ -41,7 +41,7 @@ function formatExpectedStatus(result: ExpectedStatusContract): string {
 }
 
 describe("status contract", () => {
-  it("defines ready as semantic readiness and preserves a valid empty semantic result", () => {
+  it("formats a ready snapshot with semantic availability and zero request items", () => {
     const result: ExpectedStatusContract = {
       action: "status",
       state: "ready",
@@ -89,7 +89,7 @@ describe("status contract", () => {
     ].join("\n"));
   });
 
-  it("defines initializing as process-live but not semantically ready", () => {
+  it("formats an initializing snapshot with a running backend and unavailable semantics", () => {
     const result: ExpectedStatusContract = {
       action: "status",
       state: "initializing",
@@ -130,7 +130,7 @@ describe("status contract", () => {
     ].join("\n"));
   });
 
-  it("defines degraded as process-live but semantically unavailable while retaining required project and semantic request fields", () => {
+  it("formats a degraded snapshot with project, request, and semantic failure fields", () => {
     const result: ExpectedStatusContract = {
       action: "status",
       state: "degraded",
@@ -180,7 +180,7 @@ describe("status contract", () => {
     ].join("\n"));
   });
 
-  it("defines failed independently from process liveness and bounds normalized failure detail", () => {
+  it("formats a failed snapshot with separate daemon/backend liveness and bounded failure detail", () => {
     const result: ExpectedStatusContract = {
       action: "status",
       state: "failed",

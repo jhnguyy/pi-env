@@ -3,15 +3,16 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { afterEach, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import * as ChildContext from "../../_shared/child-context";
 import * as ChildTypes from "../child-types";
 import * as Execute from "../execute";
 import * as Control from "../control";
 
+import { testCleanup } from "./cleanup";
+
 const tool = "mcp__fixture__echo";
-afterEach(() => vi.unstubAllEnvs());
 // An external process speaking real stdio JSON-RPC, not a mocked MCP loader.
 const server = String.raw`import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
@@ -37,6 +38,9 @@ for await (const line of createInterface({input:process.stdin})) {
 
 async function fixture(options: { broken?: boolean; timeout?: boolean; handled?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "native-mcp-"));
+  const cleanup = testCleanup();
+  cleanup(() => rm(root, { recursive: true, force: true }));
+  cleanup(() => vi.unstubAllEnvs());
   const agentDir = join(root, "agent");
   await mkdir(agentDir);
   // Native MCP reads its global directory through this documented environment setting.
@@ -76,6 +80,10 @@ export default function(pi) {
   }));
   const parent = SessionManager.create(root, join(root, "sessions"));
   let child: ChildTypes.NativeChildSession | undefined;
+  cleanup(
+    () => child?.close(),
+    () => Control.disposeSubagentRunSupervisor(parent.getSessionId()),
+  );
   return {
     root,
     child: () => child!,
@@ -86,21 +94,17 @@ export default function(pi) {
         onChild: (value) => { child = value; },
       })),
     ),
-    async dispose() {
-      // Native shutdown must complete while the server and logs still exist.
-      await Control.disposeSubagentRunSupervisor(parent.getSessionId());
-      await rm(root, { recursive: true, force: true });
-    },
+    // Registered teardown retains the root until child and supervisor shutdown finish.
   };
 }
 
 it.each(["exact", "omitted", "empty"])("native MCP %s selection dispatches only when allowed and retains a real human prompt", async (selection) => {
   const f = await fixture();
-  try {
+  {
     const result = await f.execute(selection === "exact" ? [tool] : selection === "empty" ? [] : undefined);
     expect(result.details.isError).toBe(false);
     expect(result.details.finalOutput).toContain("initial complete");
-    const initial = f.child().inspect().initialResult;
+    const initial = structuredClone(f.child().inspect().initialResult);
     expect(await f.child().input("human echo", ChildTypes.NativeInputMode.Prompt)).toEqual({ outcome: "started" });
     expect(f.child().inspect().initialResult).toEqual(initial);
     const messages = f.child().inspect().messages;
@@ -128,21 +132,17 @@ it.each(["exact", "omitted", "empty"])("native MCP %s selection dispatches only 
     expect(protocol).toContain('"method":"initialize"');
     expect(protocol).toContain('"method":"tools/list"');
     expect(protocol).toContain('"event":"exit"');
-  } finally {
-    await f.dispose();
   }
 }, 30000);
 
 it.each(["missing", "connection failure", "timeout"])("unavailable exact selection rejects without inference: %s", async (mode) => {
   const f = await fixture({ broken: mode === "connection failure", timeout: mode === "timeout" });
-  try {
+  {
     await expect(f.execute([mode === "missing" ? "mcp__fixture__nonexistent" : tool])).rejects.toThrow(/Child tools unavailable:.*native preflight.*bounded/);
     expect(existsSync(join(f.root, "inference"))).toBe(false);
     expect(existsSync(join(f.root, "dispatch.jsonl"))).toBe(false);
     expect(f.child().inspect().state).toBe("closed");
     expect(f.child().inspect().initialResult).toBeUndefined();
-  } finally {
-    await f.dispose();
   }
 }, 30000);
 
@@ -150,7 +150,7 @@ it.each([{ tools: ["read"] }, { tools: [tool] }])("handled initial input checks 
   // An unanswered initialize makes the handled-input catalog deterministically
   // incomplete; a healthy fast server could finish discovery before the check.
   const f = await fixture({ handled: true, timeout: tools[0] !== "read" });
-  try {
+  {
     if (tools[0] === "read") {
       expect((await f.execute(tools)).details.isError).toBe(false);
     } else {
@@ -159,7 +159,5 @@ it.each([{ tools: ["read"] }, { tools: [tool] }])("handled initial input checks 
     }
     expect(existsSync(join(f.root, "inference"))).toBe(false);
     expect(existsSync(join(f.root, "dispatch.jsonl"))).toBe(false);
-  } finally {
-    await f.dispose();
   }
 }, 30000);

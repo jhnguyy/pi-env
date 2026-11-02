@@ -38,7 +38,7 @@ it("dispatches run-local review authority through the real DAG and retains its n
   let parent: Awaited<ReturnType<typeof createAgentSessionFromServices>>["session"] | undefined;
   let service: DagRuntimeService.ActiveDagRuntimeService | undefined;
   let unsubscribe: (() => void) | undefined;
-  let passed = false;
+  const failures: unknown[] = [];
   vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
   try {
     await mkdir(agentDir);
@@ -178,15 +178,34 @@ export default function(pi) {
     expect(child.summary().state).toBe("closed");
     expect(toolFree.summary().state).toBe("closed");
     await expect(child.input("must not run after close", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow(/closed/);
-    passed = true;
+  } catch (cause) {
+    failures.push(cause);
   } finally {
-    await service?.closeChildren?.(runId);
-    await parent?.abort();
-    await parent?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
-    parent?.dispose();
-    unsubscribe?.();
-    vi.unstubAllEnvs();
-    if (passed) await rm(root, { recursive: true, force: true });
-    else console.error(`Native DAG failure evidence (synthetic inputs only): ${root}`);
+    const cleanup = [
+      () => service?.closeChildren?.(runId),
+      () => parent?.abort(),
+      () => parent?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" }),
+      () => parent?.dispose(),
+      () => unsubscribe?.(),
+      () => vi.unstubAllEnvs(),
+    ];
+    for (const release of cleanup) {
+      try {
+        await release();
+      } catch (cause) {
+        failures.push(cause);
+      }
+    }
+    if (failures.length === 0) {
+      try {
+        await rm(root, { recursive: true, force: true });
+      } catch (cause) {
+        failures.push(cause);
+      }
+    }
+    if (failures.length > 0) {
+      console.error(`Native DAG failure evidence (synthetic inputs only): ${root}`);
+      throw new AggregateError(failures, "Native review DAG operation or cleanup failed");
+    }
   }
 }, 30_000);

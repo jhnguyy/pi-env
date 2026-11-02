@@ -12,8 +12,9 @@ function git(repo: string, cmd: string): void {
   execSync(`git -C ${repo} ${cmd}`, { stdio: "pipe" });
 }
 
-function makeRepo(): string {
+function makeRepo(track: (path: string) => void): string {
   const dir = mkdtempSync(join(tmpdir(), "wt-ctx-test-"));
+  track(dir);
   git(dir, "init -b main");
   git(dir, 'config user.email "test@test.com"');
   git(dir, 'config user.name "Test"');
@@ -23,6 +24,14 @@ function makeRepo(): string {
   return dir;
 }
 
+function removeDirectories(directories: string[]): void {
+  const failures: unknown[] = [];
+  for (const directory of directories.splice(0).reverse()) {
+    try { rmSync(directory, { recursive: true, force: true }); } catch (error) { failures.push(error); }
+  }
+  if (failures.length) throw new AggregateError(failures, "Work-tracker fixture cleanup failed");
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("getActiveWorktrees", () => {
@@ -30,18 +39,12 @@ describe("getActiveWorktrees", () => {
   let tmpDirs: string[] = [];
 
   beforeEach(() => {
-    repo = makeRepo();
-    tmpDirs = [repo];
+    tmpDirs = [];
+    repo = makeRepo((directory) => tmpDirs.push(directory));
     invalidateGitCache();
   });
 
-  afterEach(() => {
-    // Remove worktrees before deleting dirs
-    try { git(repo, "worktree prune"); } catch {}
-    for (const d of tmpDirs) {
-      try { rmSync(d, { recursive: true, force: true }); } catch {}
-    }
-  });
+  afterEach(() => removeDirectories(tmpDirs));
 
   it("returns empty array when no extra worktrees exist", () => {
     expect(getActiveWorktrees(repo)).toEqual([]);
@@ -72,16 +75,6 @@ describe("getActiveWorktrees", () => {
     expect(result).toContain("fix/bar");
   });
 
-  it("does not include the primary worktree's branch", () => {
-    const wt = mkdtempSync(join(tmpdir(), "wt-extra-"));
-    tmpDirs.push(wt);
-    rmSync(wt, { recursive: true, force: true });
-    git(repo, `worktree add -b feat/foo ${wt}`);
-    invalidateGitCache();
-
-    expect(getActiveWorktrees(repo)).not.toContain("main");
-  });
-
   it("caches — returns same result on repeated calls without invalidation", () => {
     const wt = mkdtempSync(join(tmpdir(), "wt-extra-"));
     tmpDirs.push(wt);
@@ -93,8 +86,9 @@ describe("getActiveWorktrees", () => {
     // Remove the worktree without invalidating cache
     git(repo, `worktree remove --force ${wt}`);
     const second = getActiveWorktrees(repo);
-    // Cache still returns the stale result
-    expect(second).toEqual(first);
+    // Cache still returns the stale result.
+    expect(first).toEqual(["feat/foo"]);
+    expect(second).toEqual(["feat/foo"]);
   });
 
   it("re-fetches after invalidateGitCache", () => {
@@ -124,17 +118,12 @@ describe("buildStatusLine", () => {
   const config = () => ({ guardedRepos: [repo], protectedBranches: ["main"] });
 
   beforeEach(() => {
-    repo = makeRepo();
-    tmpDirs = [repo];
+    tmpDirs = [];
+    repo = makeRepo((directory) => tmpDirs.push(directory));
     invalidateGitCache();
   });
 
-  afterEach(() => {
-    try { git(repo, "worktree prune"); } catch {}
-    for (const d of tmpDirs) {
-      try { rmSync(d, { recursive: true, force: true }); } catch {}
-    }
-  });
+  afterEach(() => removeDirectories(tmpDirs));
 
   it("returns null when no worktrees and primary tree is clean", () => {
     expect(buildStatusLine(config())).toBeNull();

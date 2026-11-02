@@ -29,14 +29,15 @@ describe("Renderers", () => {
   describe("renderDevToolsCall", () => {
     it("includes tool title and action", () => {
       const t = text(renderDevToolsCall({ action: "diagnostics", path: "/project/src/foo.ts" }, mockTheme));
-      expect(t).toContain("dev-tools");
-      expect(t).toContain("diagnostics");
+      expect(t).toContain("[toolTitle:**dev-tools**]");
+      expect(t).toContain("[accent:diagnostics]");
     });
 
     it("shows last 2 path segments", () => {
       const t = text(renderDevToolsCall({ action: "hover", path: "/project/src/foo.ts", line: 5, character: 10 }, mockTheme));
-      expect(t).toContain("src/foo.ts");
-      expect(t).toContain(":5");
+      expect(t).toContain("[muted:src/foo.ts]");
+      expect(t).toContain("[muted::5][muted::10]");
+      expect(t).not.toContain("/project/");
     });
 
     it("shows query for workspace symbols", () => {
@@ -80,14 +81,14 @@ describe("Renderers", () => {
     it("shows success and scanned file summary for no errors", () => {
       const t = text(renderDevToolsResult({ isError: false, content: [], details: noDiags }, {}, mockTheme));
       expect(t).toContain("no errors");
-      expect(t).toContain("success");
+      expect(t).toContain("[success:✓ no errors]");
       expect(t).toContain("scanned 1 file: a.ts");
     });
 
     it("shows error count with error color", () => {
       const t = text(renderDevToolsResult({ isError: false, content: [], details: withErrors }, {}, mockTheme));
-      expect(t).toContain("error");
-      expect(t).toContain("2 errors");
+      expect(t).toContain("[error:✗ 2 errors]");
+      expect(t).toContain("[warning:⚠ 1 warning]");
     });
 
     it("expanded=true shows pretty-printed diagnostics JSON", () => {
@@ -116,7 +117,7 @@ describe("Renderers", () => {
         { line: 2, character: 1, severity: "warning", code: "TS7006", message: "Implicit any." },
       ]};
       const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
-      expect(t).toContain("warning");
+      expect(t).toContain("[warning:⚠ 2 warnings]");
     });
 
     it("shows scanned files for bulk diagnostics", () => {
@@ -146,8 +147,7 @@ describe("Renderers", () => {
         isError: true,
         content: [{ type: "text", text: "No hover information" }],
       }, {}, mockTheme));
-      expect(t).toContain("error");
-      expect(t).toContain("No hover information");
+      expect(t).toBe("[error:✗ No hover information]");
     });
   });
 
@@ -157,7 +157,7 @@ describe("Renderers", () => {
     it("renders hover success", () => {
       const r: HoverResult = { action: "hover", path: "/a.ts", line: 1, character: 1, signature: "string" };
       const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
-      expect(t).toContain("hover");
+      expect(t).toBe("[success:✓ hover]");
     });
   });
 });

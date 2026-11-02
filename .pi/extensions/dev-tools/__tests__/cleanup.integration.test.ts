@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -157,16 +157,25 @@ describe("/cleanup command", () => {
   });
 
   it("applies safe cleanup without deleting force-required branches unless force is set", () => {
-    const { repo } = createCleanupFixture();
+    const { repo, dirtyWorktree } = createCleanupFixture();
+    const expectDirtyPreserved = () => {
+      expect(existsSync(dirtyWorktree)).toBe(true);
+      expect(readFileSync(join(dirtyWorktree, "dirty.txt"), "utf8")).toBe("dirty\n");
+      expect(git(dirtyWorktree, "branch", "--show-current")).toBe("feat/dirty");
+      expect(git(repo, "branch", "--list", "feat/dirty")).toContain("feat/dirty");
+      expect(git(repo, "worktree", "list", "--porcelain")).toContain(`worktree ${dirtyWorktree}`);
+    };
     const safeOnlyPlan = buildCleanupPlan(repo, { apply: true, force: false, fetch: false, baseRef: "origin/main" });
 
     const safeActions = applyCleanupPlan(safeOnlyPlan, { apply: true, force: false, fetch: false, baseRef: "origin/main" });
+    expectDirtyPreserved();
     expect(safeActions).toContain("deleted branch feat/ancestor");
     expect(git(repo, "branch", "--list", "feat/ancestor")).toBe("");
     expect(git(repo, "branch", "--list", "fix/squashed")).toContain("fix/squashed");
 
     const forcePlan = buildCleanupPlan(repo, { apply: true, force: true, fetch: false, baseRef: "origin/main" });
     const forceActions = applyCleanupPlan(forcePlan, { apply: true, force: true, fetch: false, baseRef: "origin/main" });
+    expectDirtyPreserved();
     expect(forceActions).toContain("deleted branch fix/squashed");
     expect(git(repo, "branch", "--list", "fix/squashed")).toBe("");
   });

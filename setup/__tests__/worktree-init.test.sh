@@ -27,7 +27,7 @@ if [ "${1:-}" = "install" ]; then
   fi
 fi
 if [ "${1:-}" = run ]; then
-  printf '%s\n' completed > "$NUB_VERIFY"
+  printf "%s\n" "$*" > "$NUB_VERIFY"
 fi'
 }
 
@@ -65,12 +65,14 @@ test_initializes_from_nested_cwd_without_sharing_dependencies() {
   new_fixture
   local shared="$TEMP/shared-node-modules"
   mkdir -p "$shared"
+  printf '%s\n' shared > "$shared/sentinel"
   ln -s "$shared" "$REPO/node_modules"
 
   run_init "$REPO/nested/path" >/dev/null
 
   [ ! -L "$REPO/node_modules" ] || fail "worktree kept a shared node_modules symlink"
-  [ -e "$VERIFY" ] || fail "worktree initialization skipped install verification"
+  assert_eq "$(cat "$VERIFY")" "run verify:install" "worktree install verification dispatch"
+  assert_file_contains "$shared/sentinel" shared
   assert_eq "$(cat "$COUNT")" "1" "successful install count"
   finish_fixture
 }

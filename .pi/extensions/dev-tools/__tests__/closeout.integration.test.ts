@@ -64,7 +64,7 @@ function createCloseoutFixture() {
 type ExecCall = { command: string; args: string[]; cwd?: string };
 
 function createExec(
-  fixture: ReturnType<typeof createCloseoutFixture>,
+  fixture: Pick<ReturnType<typeof createCloseoutFixture>, "headOid" | "mergeOid">,
   metadata: Record<string, unknown> = {},
   intercept?: (call: ExecCall) => ExecResult | undefined,
 ): { exec: ExtensionAPI["exec"]; calls: ExecCall[] } {
@@ -252,6 +252,18 @@ describe("/closeout command", () => {
     const { exec, calls } = createExec(fixture, {}, githubAlias);
 
     const result = await closeoutPullRequest(exec, "/home/agent", request(fixture.repo));
+    const persisted = () => ({
+      head: git(fixture.repo, "rev-parse", "HEAD"),
+      branches: git(fixture.repo, "show-ref", "--heads"),
+      worktrees: git(fixture.repo, "worktree", "list", "--porcelain"),
+      featureExists: existsSync(fixture.featureWorktree),
+      unrelatedExists: existsSync(fixture.unrelatedWorktree),
+    });
+    const afterFirst = persisted();
+    const repeated = await closeoutPullRequest(exec, "/home/agent", request(fixture.repo));
+    expect(repeated.deletedBranch).toBe(false);
+    expect(repeated.removedWorktree).toBeUndefined();
+    expect(persisted()).toEqual(afterFirst);
 
     expect(result.prNumber).toBe(42);
     expect(result.baseBranch).toBe("main");
@@ -276,13 +288,13 @@ describe("/closeout command", () => {
     const fixture = createCloseoutFixture();
     const indexLock = join(fixture.repo, ".git", "index.lock");
     let attempts = 0;
-    let releaseLock: ReturnType<typeof setTimeout> | undefined;
     const { exec } = createExec(fixture, {}, ({ command, args }) => {
       if (command === "git" && args[0] === "merge") {
         attempts += 1;
         if (attempts === 1) {
           writeFileSync(indexLock, "another Git process owns this lock\n");
-          releaseLock = setTimeout(() => rmSync(indexLock), 50);
+        } else if (attempts === 2) {
+          rmSync(indexLock);
         }
       }
       return undefined;
@@ -290,12 +302,11 @@ describe("/closeout command", () => {
 
     try {
       const result = await closeoutPullRequest(exec, "/home/agent", request(fixture.repo));
-      expect(attempts).toBeGreaterThan(1);
+      expect(attempts).toBe(2);
       expect(result.deletedBranch).toBe(true);
       expect(git(fixture.repo, "rev-parse", "HEAD")).toBe(fixture.mergeOid);
       expect(existsSync(fixture.featureWorktree)).toBe(false);
     } finally {
-      clearTimeout(releaseLock);
       rmSync(indexLock, { force: true });
     }
   });
@@ -435,14 +446,13 @@ describe("/closeout command", () => {
   );
 
   it("rejects a PR that is not merged before running git", async () => {
-    const fixture = createCloseoutFixture();
-    const { exec, calls } = createExec(fixture, {
+    const { exec, calls } = createExec({ headOid: "b".repeat(40), mergeOid: "a".repeat(40) }, {
       state: "OPEN",
       mergedAt: null,
       mergeCommit: null,
     });
 
-    await expect(closeoutPullRequest(exec, "/home/agent", request(fixture.repo))).rejects.toThrow(
+    await expect(closeoutPullRequest(exec, "/repo", { pr: "42" })).rejects.toThrow(
       "is not merged",
     );
     expect(calls.filter(({ command }) => command === "git")).toEqual([]);
@@ -515,10 +525,12 @@ describe("/closeout command", () => {
   });
 
   it("rejects fork pull requests before running git", async () => {
-    const fixture = createCloseoutFixture();
-    const { exec, calls } = createExec(fixture, { isCrossRepository: true });
+    const { exec, calls } = createExec(
+      { headOid: "b".repeat(40), mergeOid: "a".repeat(40) },
+      { isCrossRepository: true },
+    );
 
-    await expect(closeoutPullRequest(exec, "/home/agent", request(fixture.repo))).rejects.toThrow(
+    await expect(closeoutPullRequest(exec, "/repo", { pr: "42" })).rejects.toThrow(
       "fork pull requests",
     );
     expect(calls.filter(({ command }) => command === "git")).toEqual([]);

@@ -11,6 +11,7 @@ import {
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveNodeCommand } from "../../../../src/process/platform.js";
@@ -24,6 +25,8 @@ import {
 import { git, reviewRepo } from "./fixtures/review-repo";
 
 const mocked = { agentDir: "" };
+const commandTreeUrl = new URL("./fixtures/command-tree.ts", import.meta.url);
+const commandTreePath = fileURLToPath(commandTreeUrl);
 
 const temps: string[] = [];
 afterEach(() => {
@@ -46,6 +49,47 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
+async function withOwnedCommand(
+  controller: AbortController,
+  running: Promise<unknown>,
+  parentPidPath: string,
+  childPidPath: string,
+  check: () => Promise<void>,
+): Promise<void> {
+  const settled = running.catch(() => {});
+  const failures: unknown[] = [];
+  try {
+    await check();
+  } catch (cause) {
+    failures.push(cause);
+  } finally {
+    controller.abort();
+    await settled;
+    const pids: number[] = [];
+    for (const pidPath of [parentPidPath, childPidPath]) {
+      try {
+        if (!existsSync(pidPath)) continue;
+        const pid = Number(readFileSync(pidPath, "utf8"));
+        if (!Number.isSafeInteger(pid) || pid <= 1 || pid === process.pid)
+          throw new Error(`Unsafe fixture PID in ${pidPath}`);
+        pids.push(pid);
+        expect(existsSync(`${pidPath}.watchdog`)).toBe(false);
+      } catch (cause) {
+        failures.push(cause);
+      }
+    }
+    try {
+      await vi.waitFor(() => {
+        for (const pid of pids) expect(processIsAlive(pid)).toBe(false);
+      });
+    } catch (cause) {
+      failures.push(cause);
+    }
+  }
+  if (failures.length)
+    throw new AggregateError(failures, "Command fixture operation or cleanup failed");
+}
+
 function fixture() {
   mocked.agentDir = temp("pi-review-agent-");
   return reviewRepo();
@@ -56,39 +100,33 @@ describe("review snapshot Git integration", () => {
     "terminates the complete command process group on cancellation",
     async () => {
       const root = temp("pi-review-process-");
-      const script = join(root, "git-process.mjs");
       const parentPidPath = join(root, "parent.pid");
       const childPidPath = join(root, "child.pid");
       const node = resolveNodeCommand();
-      const childCode = `require("node:fs").writeFileSync(${JSON.stringify(childPidPath)}, String(process.pid)); setInterval(() => {}, 1000);`;
-      writeFileSync(
-        script,
-        `import { spawn } from "node:child_process"; import { writeFileSync } from "node:fs";\n` +
-          `spawn(${JSON.stringify(resolveNodeCommand())}, ["-e", ${JSON.stringify(childCode)}], { stdio: "ignore" });\n` +
-          `writeFileSync(${JSON.stringify(parentPidPath)}, String(process.pid));\n` +
-          `process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);\n`,
-      );
+
       const controller = new AbortController();
-      const running = managedGitExec(node, [script], {
+      const running = managedGitExec(node, [commandTreePath, parentPidPath, childPidPath], {
         cwd: root,
         signal: controller.signal,
         timeout: 10_000,
       });
-      await vi.waitFor(
-        () => {
-          expect(existsSync(parentPidPath)).toBe(true);
-          expect(existsSync(childPidPath)).toBe(true);
-        },
-        { timeout: 3_000 },
-      );
-      const parentPid = Number(readFileSync(parentPidPath, "utf8"));
-      const childPid = Number(readFileSync(childPidPath, "utf8"));
+      await withOwnedCommand(controller, running, parentPidPath, childPidPath, async () => {
+        await vi.waitFor(
+          () => {
+            expect(existsSync(parentPidPath)).toBe(true);
+            expect(existsSync(childPidPath)).toBe(true);
+          },
+          { timeout: 3_000 },
+        );
+        const parentPid = Number(readFileSync(parentPidPath, "utf8"));
+        const childPid = Number(readFileSync(childPidPath, "utf8"));
 
-      controller.abort();
-      await expect(running).rejects.toBeDefined();
-      await vi.waitFor(() => {
-        expect(processIsAlive(parentPid)).toBe(false);
-        expect(processIsAlive(childPid)).toBe(false);
+        controller.abort();
+        await expect(running).rejects.toBeDefined();
+        await vi.waitFor(() => {
+          expect(processIsAlive(parentPid)).toBe(false);
+          expect(processIsAlive(childPid)).toBe(false);
+        });
       });
     },
     10_000,
@@ -103,14 +141,11 @@ describe("review snapshot Git integration", () => {
       const parentPidPath = join(root, "parent.pid");
       const childPidPath = join(root, "child.pid");
       const node = resolveNodeCommand();
-      const childCode = `require("node:fs").writeFileSync(${JSON.stringify(childPidPath)}, String(process.pid)); setInterval(() => {}, 1000);`;
       writeFileSync(
         fakeGit,
         `#!${node}\n` +
-          `const { spawn } = require("node:child_process"); const { writeFileSync } = require("node:fs");\n` +
-          `spawn(${JSON.stringify(node)}, ["-e", ${JSON.stringify(childCode)}], { stdio: "ignore" });\n` +
-          `writeFileSync(${JSON.stringify(parentPidPath)}, String(process.pid));\n` +
-          `process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);\n`,
+          `process.argv = [process.execPath, ${JSON.stringify(commandTreePath)}, ${JSON.stringify(parentPidPath)}, ${JSON.stringify(childPidPath)}];\n` +
+          `import(${JSON.stringify(commandTreeUrl.href)});\n`,
       );
       chmodSync(fakeGit, 0o700);
       vi.stubEnv("PATH", `${root}:${process.env.PATH ?? ""}`);
@@ -136,19 +171,21 @@ describe("review snapshot Git integration", () => {
         mocked.agentDir,
         reviewGitExec,
       );
-      await vi.waitFor(
-        () => {
-          expect(existsSync(parentPidPath)).toBe(true);
-          expect(existsSync(childPidPath)).toBe(true);
-        },
-        { timeout: 3_000 },
-      );
-      const parentPid = Number(readFileSync(parentPidPath, "utf8"));
-      const childPid = Number(readFileSync(childPidPath, "utf8"));
-      controller.abort();
-      await expect(running).rejects.toBeDefined();
-      expect(processIsAlive(parentPid)).toBe(false);
-      expect(processIsAlive(childPid)).toBe(false);
+      await withOwnedCommand(controller, running, parentPidPath, childPidPath, async () => {
+        await vi.waitFor(
+          () => {
+            expect(existsSync(parentPidPath)).toBe(true);
+            expect(existsSync(childPidPath)).toBe(true);
+          },
+          { timeout: 3_000 },
+        );
+        const parentPid = Number(readFileSync(parentPidPath, "utf8"));
+        const childPid = Number(readFileSync(childPidPath, "utf8"));
+        controller.abort();
+        await expect(running).rejects.toBeDefined();
+        expect(processIsAlive(parentPid)).toBe(false);
+        expect(processIsAlive(childPid)).toBe(false);
+      });
     },
     10_000,
   );

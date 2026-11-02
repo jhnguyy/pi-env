@@ -36,7 +36,7 @@ describe("subagent usage accumulation", () => {
     });
   });
 
-  it("aggregates sync and async records exactly and idempotently", () => {
+  it("counts the first record for each run ID and clears the ledger", () => {
     const ledger = new Usage.SubagentUsageLedger();
     ledger.record("sync-1", "sync", details("scout", 2, 3));
     ledger.record("job-1", "async", details("builder", 5, 7));
@@ -67,7 +67,7 @@ describe("subagent usage accumulation", () => {
     ).toBe("latest first\nlatest second");
   });
 
-  it("accumulates transcript, usage, tool count, and turn-limit state", () => {
+  it.each(["stop", "toolUse"] as const)("accumulates usage and formats final content at the turn limit: %s", (stopReason) => {
     const accumulator = new Usage.SubagentRunAccumulator({
       name: "scout",
       task: "x",
@@ -76,6 +76,7 @@ describe("subagent usage accumulation", () => {
       sessionId: "session-1",
       sessionName: "sub-scout",
       cwd: "/tmp/project",
+      maxTurns: 1,
     }, (turns) => turns >= 1);
     accumulator.acceptEvent({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "read", args: {} });
     accumulator.acceptEvent({
@@ -86,7 +87,7 @@ describe("subagent usage accumulation", () => {
         api: "test",
         provider: "test",
         model: "m",
-        stopReason: "stop",
+        stopReason,
         timestamp: 1,
         usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, totalTokens: 3, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.5 } },
       } as any,
@@ -116,6 +117,13 @@ describe("subagent usage accumulation", () => {
     expect(accumulator.output()).toBe("answer");
     expect(accumulator.toolCallCount).toBe(1);
     expect(accumulator.usage).toMatchObject({ input: 11, output: 22, cacheRead: 33, cacheWrite: 44, cost: 2, turns: 1 });
-    expect(accumulator.turnLimitExceeded).toBe(false);
+    const limited = stopReason !== "stop";
+    expect(accumulator.turnLimitExceeded).toBe(limited);
+    const finalOutput = limited
+      ? "answer\n\n[Note: Turn limit (1) reached. Output may be incomplete.]"
+      : "answer";
+    const result = accumulator.success([]);
+    expect(result.content).toEqual([{ type: "text", text: finalOutput }]);
+    expect(result.details).toMatchObject({ finalOutput, isError: false, turnLimitExceeded: limited, stopReason: limited ? "turn_limit" : "stop" });
   });
 });

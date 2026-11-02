@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { lookupRegisteredDagExecutor } from "../../_shared/dag-executor-registration";
 import type { ReviewState } from "../core";
 import { ReviewEvidenceExecutorKind, ReviewEvidenceResolverKey } from "../evidence-resolver";
@@ -42,6 +42,7 @@ function state(id: string): ReviewState {
 describe("ReviewCoordinator", () => {
   it("retains state for repeated activation of one session and isolates a new session", () => {
     const coordinator = new ReviewCoordinator();
+    onTestFinished(() => coordinator.deactivate());
     const first = context("first");
 
     coordinator.activate(first);
@@ -63,24 +64,9 @@ describe("ReviewCoordinator", () => {
     expect(coordinator.review("stale-review")).toBeUndefined();
   });
 
-  it("rejects a write from an operation that completes after a session switch", async () => {
-    const coordinator = new ReviewCoordinator();
-    coordinator.activate(context("first"));
-    const scope = coordinator.captureScope();
-    let finish!: () => void;
-    const operation = new Promise<void>((resolve) => {
-      finish = resolve;
-    }).then(() => coordinator.remember(state("late"), scope));
-
-    coordinator.activate(context("second"));
-    finish();
-
-    expect(await operation).toBe(false);
-    expect(coordinator.review("late")).toBeUndefined();
-  });
-
   it("registers and removes the evidence executor with its runtime generation", () => {
     const coordinator = new ReviewCoordinator();
+    onTestFinished(() => coordinator.deactivate());
     coordinator.activate(context("session"));
     coordinator.setDagRegistration({
       registrationId: "registration",
@@ -110,9 +96,24 @@ describe("ReviewCoordinator", () => {
     ).toBeUndefined();
   });
 
-  it("deactivate and reset clear all workflow ownership", () => {
+  it("deactivate resets workflow ownership and unregisters the evidence executor", () => {
     const coordinator = new ReviewCoordinator();
+    onTestFinished(() => coordinator.deactivate());
     coordinator.activate(context("session"));
+    coordinator.setDagRegistration({
+      registrationId: "reset-registration",
+      parentSessionId: "session",
+      sessionGeneration: "reset-generation",
+      service: {},
+    } as any);
+    expect(
+      lookupRegisteredDagExecutor(
+        "session",
+        "reset-generation",
+        ReviewEvidenceExecutorKind,
+        ReviewEvidenceResolverKey,
+      ),
+    ).toBeTypeOf("function");
     coordinator.remember(state("review"));
     coordinator.beginPreparation("review");
     expect(coordinator.beginReconciliation("run")).toBe(true);
@@ -124,6 +125,14 @@ describe("ReviewCoordinator", () => {
 
     expect(coordinator.activeContext).toBeUndefined();
     expect(coordinator.dagRegistration).toBeUndefined();
+    expect(
+      lookupRegisteredDagExecutor(
+        "session",
+        "reset-generation",
+        ReviewEvidenceExecutorKind,
+        ReviewEvidenceResolverKey,
+      ),
+    ).toBeUndefined();
     expect(coordinator.latestState()).toBeUndefined();
     expect(coordinator.reviews()).toHaveLength(0);
     expect(coordinator.isPreparing("review")).toBe(false);

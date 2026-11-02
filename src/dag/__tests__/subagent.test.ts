@@ -1,9 +1,9 @@
-import { mkdir, writeFile, mkdtemp, readdir } from "node:fs/promises";
+import { mkdir, writeFile, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Layer, Ref } from "effect";
-import { describe, expect } from "vitest";
+import { describe, expect, onTestFinished } from "vitest";
 import {
   DagDependencyMode,
   DagExecutorKind,
@@ -21,7 +21,9 @@ import {
   createDagRunState,
   getDagNodeState,
   createDagSubagentExecutor,
+  materializeDagTextArtifact,
   materializeDagTextContext,
+  parseDagTextArtifactReference,
   parseDagSubagentPayload,
   publishDagSubagentTextResult,
   submitDagRun,
@@ -31,7 +33,9 @@ import {
 import * as Shared from "./shared.js";
 
 async function tempRoot(): Promise<string> {
-  return mkdtemp(path.join(tmpdir(), "pi-dag-subagent-"));
+  const root = await mkdtemp(path.join(tmpdir(), "pi-dag-subagent-"));
+  onTestFinished(() => rm(root, { recursive: true, force: true }));
+  return root;
 }
 
 function payload(root: string, overrides: Record<string, unknown> = {}) {
@@ -139,7 +143,6 @@ describe("DAG subagent executor", () => {
         parseDagSubagentPayload(target.executor.payload),
         context,
       );
-      expect(prompt.system).not.toContain("agent sys");
       const user = JSON.parse(prompt.user);
       expect(user).toMatchObject({
         schema: "pi-env/dag-subagent-task",
@@ -225,7 +228,7 @@ describe("DAG subagent executor", () => {
         const executor = createDagSubagentExecutor({
           artifactRoot: root,
           runtime: {
-            run: (request) => Ref.update(calls, (all) => [...all, request]).pipe(Effect.as("")),
+            run: (request) => Ref.update(calls, (all) => [...all, request]).pipe(Effect.as("published π sentinel")),
           },
         });
         const result = yield* executor({
@@ -237,8 +240,27 @@ describe("DAG subagent executor", () => {
         });
         const seen = yield* Ref.get(calls);
         expect(seen).toHaveLength(1);
+        expect(seen[0]).toMatchObject({
+          runId: "run-test",
+          nodeId: "child",
+          attemptId: "run-test:child:1",
+          payload: parseDagSubagentPayload(target.executor.payload),
+        });
+        expect(JSON.parse(seen[0].prompt.user)).toMatchObject({
+          instructions: "summarize",
+          context: [{ producerNodeId: "producer", outputName: "input", text: "input" }],
+        });
         expect(Object.isFrozen(result)).toBe(true);
-        expect((result.answer as any).bytes).toBe(0);
+        const reference = parseDagTextArtifactReference(result.answer);
+        expect(reference).toMatchObject({
+          runId: "run-test", producerNodeId: "child", outputName: "answer",
+          bytes: Buffer.byteLength("published π sentinel"),
+        });
+        const published = yield* materializeDagTextArtifact(root, reference, {
+          runId: "run-test", producerNodeId: "child", outputName: "answer",
+        });
+        expect(published.text).toBe("published π sentinel");
+        expect(published.reference).toEqual(result.answer);
         const files = yield* Effect.promise(() => readdir(root));
         expect(files.filter((file) => file.endsWith(".tmp"))).toEqual([]);
         expect(files.filter((file) => file.endsWith(".txt"))).toHaveLength(1);
@@ -307,6 +329,13 @@ describe("DAG subagent executor", () => {
         bytes: 8,
       });
       expect(state.outputs.answer).not.toHaveProperty("text");
+      const published = yield* materializeDagTextArtifact(
+        root,
+        parseDagTextArtifactReference(state.outputs.answer),
+        { runId: "run-test", producerNodeId: "child", outputName: "answer" },
+      );
+      expect(published.text).toBe("complete");
+      expect(published.reference).toEqual(state.outputs.answer);
     }),
   );
 });

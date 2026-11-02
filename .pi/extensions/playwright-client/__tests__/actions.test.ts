@@ -23,7 +23,7 @@ describe("executeBrowserAction", () => {
     expect(result.details).toMatchObject({ action: "screenshot", path: "/tmp/shot.png", mimeType: "image/png" });
   });
 
-  it("saves downloads through the browser client", async () => {
+  it("maps the browser client's download result", async () => {
     const browser = fakeBrowser({
       download: vi.fn(async () => ({
         target: "local",

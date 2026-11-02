@@ -85,6 +85,9 @@ describe("built-image Trivy policy", () => {
     expect(result.stdout).toContain("High: 2");
     expect(result.stdout).toContain("Ignored unfixed HIGH/CRITICAL vulnerabilities: 2");
     expect(result.stdout).toContain("Policy findings: 1");
+    expect(result.stdout.split("\n").filter((line) => line.startsWith("VULN "))).toEqual([
+      "VULN HIGH CVE-TEST-HIGH-FIXED high-package 1.0.0 -> 1.2.3 (test-image)",
+    ]);
   });
 
   it("preserves high-severity secret and misconfiguration enforcement", () => {

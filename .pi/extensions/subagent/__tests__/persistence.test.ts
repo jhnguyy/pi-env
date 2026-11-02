@@ -1,14 +1,15 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 import { createPersistentSubagentSession } from "../execute";
 import * as Config from "../config";
+import { testCleanup } from "./cleanup";
 
 describe("persistent subagent sessions", () => {
-  it("stores a named child below its parent session ID and preserves its linked transcript", () => {
+  it("stores a named child below its parent session ID and records its parent link and session name", () => {
     const sessionDir = mkdtempSync(join(tmpdir(), "pi-subagent-session-"));
     try {
       const parent = SessionManager.create("/tmp/project", sessionDir);
@@ -70,6 +71,10 @@ describe("persistent subagent sessions", () => {
       expect(reopened.getSessionId()).toBe(child.id);
       expect(reopened.getHeader()?.parentSession).toBe(parent.getSessionFile());
       expect(reopened.getSessionName()).toBe("sub-audit");
+      expect(reopened.buildSessionContext().messages).toEqual([
+        expect.objectContaining({ role: "user", content: "child prompt" }),
+        expect.objectContaining({ role: "assistant", content: [{ type: "text", text: "child response" }] }),
+      ]);
     } finally {
       rmSync(sessionDir, { recursive: true, force: true });
     }
@@ -95,13 +100,18 @@ describe("persistent subagent sessions", () => {
   });
 
   it("uses native default storage when the parent session is in memory", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-subagent-default-storage-"));
+    const cleanup = testCleanup();
+    cleanup(() => rmSync(root, { recursive: true, force: true }));
+    cleanup(() => vi.unstubAllEnvs());
+    vi.stubEnv("PI_CODING_AGENT_DIR", root);
     const child = createPersistentSubagentSession("audit", {
       cwd: "/tmp/project",
       sessionManager: SessionManager.inMemory("/tmp/project"),
     } as any);
     const nativeDefault = SessionManager.create("/tmp/project");
-
     expect(child.manager.getSessionDir()).toBe(nativeDefault.getSessionDir());
+    expect(relative(root, child.manager.getSessionDir())).not.toMatch(/^\.\.(?:\/|$)/);
   });
 
   it("supports sibling storage as an explicit compatibility mode", () => {

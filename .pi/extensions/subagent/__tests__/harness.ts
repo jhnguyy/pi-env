@@ -6,6 +6,7 @@ export function createSubagentHarness(dependencies: SubagentSessionRuntimeDepend
   const handlers = new Map<string, (...args: any[]) => any>();
   const commands = new Map<string, any>();
   const pi = {
+    getAllTools: () => [],
     appendEntry: () => {},
     registerTool: (tool: any) => tools.set(tool.name, tool),
     registerCommand: (name: string, command: any) => commands.set(name, command),

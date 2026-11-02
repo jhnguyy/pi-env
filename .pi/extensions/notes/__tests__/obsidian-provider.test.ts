@@ -25,7 +25,7 @@ function paginated(result: NotesListResponse): NotesListResult {
 }
 
 describe("Obsidian notes provider", () => {
-  it("provides bounded store orientation and provider-neutral inventory", async () => {
+  it("reports visible inventory and limits search results", async () => {
     const { provider } = await fixture({
       "projects/topic.md": "# Topic\nsearch target",
       "knowledge/day.md": "# Day\nsearch target",
@@ -79,7 +79,7 @@ describe("Obsidian notes provider", () => {
   it("bounds vault traversal depth", async () => {
     const { vault, provider } = await fixture();
     let directory = vault;
-    for (let depth = 0; depth < 66; depth += 1) {
+    for (let depth = 0; depth < 65; depth += 1) {
       directory = path.join(directory, "d");
       await mkdir(directory);
     }
@@ -273,6 +273,7 @@ describe("Obsidian notes provider", () => {
     await chmod(notePath, 0o1640);
     const note = await provider.read("note.md");
     await provider.write({ path: "note.md", content: "second", expectedRevision: note.revision });
+    expect(await readFile(notePath, "utf8")).toBe("second");
     const finalMetadata = await stat(notePath);
     expect(finalMetadata.mode & 0o7777).toBe(0o1640);
     expect(finalMetadata.uid).toBe(initialMetadata.uid);

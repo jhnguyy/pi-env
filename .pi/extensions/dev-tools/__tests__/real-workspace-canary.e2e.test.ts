@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { registerDevTools } from "../index";
-import { createLspDaemonFixture, type LspDaemonFixture, sleep } from "./e2e-fixture";
+import { createLspDaemonFixture, type LspDaemonFixture } from "./e2e-fixture";
 import type { LspClient } from "../client";
 import type {
   DefinitionResult,
@@ -136,7 +136,7 @@ describe("real workspace semantic canary", () => {
   });
 
   it(
-    "covers real-worktree semantic operations and cold restart behavior",
+    "observes real-worktree semantic results eventually and document symbols after restart",
     async () => {
       try {
         const position = sourcePosition(analyzeFile, "  registerPublicTool,", "registerPublicTool");
@@ -174,12 +174,6 @@ describe("real workspace semantic canary", () => {
         expect((hoverResult as HoverResult).signature).toContain("registerPublicTool");
 
         await fixture.restartDaemon();
-        const coldSymbols = await measured("cold document symbols", () =>
-          fixture.callDaemon({ action: "symbols", path: analyzeFile }),
-        );
-        expectSymbol(coldSymbols, "analyzeToolSchema");
-
-        await fixture.restartDaemon();
         await measured("shared API symbol warmup", () =>
           fixture.callDaemon({ action: "symbols", path: sharedApiFile }),
         );
@@ -187,21 +181,23 @@ describe("real workspace semantic canary", () => {
           fixture.callDaemon({ action: "symbols", query: "registerPublicTool" }),
         );
         expectSymbol(workspaceSymbols, "registerPublicTool");
-        await sleep(3_000);
-        const referencesResult = await measured("shared API references", () =>
-          fixture.callDaemon({
+        const observation: { references?: ReferencesResult } = {};
+        await measured("eventual shared API references", () => expect.poll(async () => {
+          const result = await fixture.callDaemon({
             action: "references",
             path: sharedApiFile,
-            ...sourcePosition(
-              sharedApiFile,
-              "export function registerPublicTool",
-              "registerPublicTool",
-            ),
-          }),
-        );
-        expect(referencesResult.action).toBe("references");
-        const references = referencesResult as ReferencesResult;
-        evidence.references = references;
+            ...target,
+          });
+          expect(result.action).toBe("references");
+          const references = result as ReferencesResult;
+          observation.references = references;
+          evidence.references = references;
+          return [analyzeFile, sharedApiFile].every((file) =>
+            references.items.some((item) => item.absolutePath === file),
+          );
+        }, { timeout: 20_000, interval: 250 }).toBe(true));
+        const references = observation.references;
+        if (!references) throw new Error("No reference result captured");
         expect(references.total).toBeGreaterThan(1);
         expect(references.items.some((item) => item.absolutePath === analyzeFile)).toBe(true);
         expect(references.items.some((item) => item.absolutePath === sharedApiFile)).toBe(true);

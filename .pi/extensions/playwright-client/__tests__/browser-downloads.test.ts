@@ -1,13 +1,13 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 // @ts-ignore - the extension-level inferred LSP project does not see root devDependencies; root tsc resolves vitest.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserClient, type BrowserLike, type PlaywrightLoader } from "../browser";
 import type { BrowserClientConfig } from "../config";
 import type { LocatorLike, PageLike } from "../locators";
 
-describe("BrowserClient downloads", () => {
+describe("BrowserClient downloads with a fake browser", () => {
   let artifactDir: string;
   let page: FakePage;
   let connectOverCDP: ReturnType<typeof vi.fn<(endpointURL: string) => Promise<BrowserLike>>>;
@@ -24,14 +24,14 @@ describe("BrowserClient downloads", () => {
     await rm(artifactDir, { recursive: true, force: true });
   });
 
-  it("clicks a locator, waits for a download, and saves it under the artifact dir", async () => {
+  it("registers the listener before clicking and saves returned bytes under the artifact directory", async () => {
     const client = new BrowserClient(config(artifactDir), loadPlaywright);
 
     const result = await client.download("local", { text: "Export" });
 
     expect(page.downloadRequested).toBe(true);
     expect(result.suggestedFilename).toBe("report.csv");
-    expect(result.path).toContain(join(artifactDir, "downloads"));
+    expect(dirname(result.path)).toBe(join(artifactDir, "downloads"));
     expect(result.path).toMatch(/report\.csv$/);
     await expect(readFile(result.path, "utf8")).resolves.toBe("a,b\n1,2\n");
   });
@@ -67,6 +67,7 @@ function fakeBrowser(page: PageLike): BrowserLike {
 }
 
 function fakePage(): FakePage {
+  let downloadListenerRegistered = false;
   const passiveLocator: LocatorLike = {
     click: async () => undefined,
     fill: async () => undefined,
@@ -87,6 +88,7 @@ function fakePage(): FakePage {
     waitForURL: async () => undefined,
     waitForEvent: async (event) => {
       expect(event).toBe("download");
+      downloadListenerRegistered = true;
       return {
         suggestedFilename: () => "report.csv",
         failure: async () => null,
@@ -102,6 +104,7 @@ function fakePage(): FakePage {
       ...passiveLocator,
       click: async () => {
         expect(text).toBe("Export");
+        expect(downloadListenerRegistered).toBe(true);
         page.downloadRequested = true;
       },
     }),

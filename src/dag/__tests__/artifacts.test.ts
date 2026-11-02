@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { it as effectIt } from "@effect/vitest";
 import {
   DagArtifactFailureTag,
@@ -37,7 +37,9 @@ import {
 import * as Shared from "./shared.js";
 
 async function tempRoot(): Promise<string> {
-  return mkdtemp(path.join(tmpdir(), "pi-dag-artifacts-"));
+  const root = await mkdtemp(path.join(tmpdir(), "pi-dag-artifacts-"));
+  onTestFinished(() => rm(root, { recursive: true, force: true }));
+  return root;
 }
 
 describe("DAG text artifact contract", () => {
@@ -89,10 +91,6 @@ describe("DAG text artifact contract", () => {
       const target = Shared.node("target", [{ nodeId: "producer", mode: DagDependencyMode.Required }]);
       const dag = Shared.graph([producer, target]);
       const state = Shared.finish(dag, createDagRunState(dag), "producer", { _tag: DagNodeResultTag.Succeeded, outputs });
-      const otherRoot = yield* Effect.promise(() => tempRoot());
-      yield* Effect.promise(() => mkdir(path.join(otherRoot, "out")));
-      yield* Effect.promise(() => writeFile(path.join(otherRoot, "out", "hello.txt"), "wrong root"));
-
       const context = yield* materializeDagTextContext(root, "run-test", target, state, ["answer"]);
       expect(context.bytes).toBe(Buffer.byteLength("hello π"));
       expect(context.outputs.map((output) => output.text)).toEqual(["hello π"]);
@@ -257,7 +255,7 @@ describe("DAG text artifact contract", () => {
     expect(() => selectDagTextArtifactReferences("run-test", target, replayedOverflow, ["o0"])).toThrow(DagArtifactOutputLimitExceeded);
   });
 
-  effectIt.effect("session round-trip stores references without artifact bytes and replay does not read files", () =>
+  effectIt.effect("session round-trip stores references without artifact bytes and replays independently of changed bytes", () =>
     Effect.gen(function* () {
       const root = yield* Effect.promise(() => tempRoot());
       yield* Effect.promise(() => writeFile(path.join(root, "artifact.txt"), "secret bytes"));
@@ -287,7 +285,11 @@ describe("DAG text artifact contract", () => {
       yield* Effect.promise(() => writeFile(path.join(root, "artifact.txt"), "changed after persist"));
       const replayed = yield* reconstructDagSession(store, "run-test");
       const replayedProducer = replayed.state.nodes.find((node) => node.nodeId === "producer");
-      expect(replayedProducer?.status).toBe(DagNodeStatus.Succeeded);
+      expect(replayedProducer).toEqual({
+        nodeId: "producer",
+        status: DagNodeStatus.Succeeded,
+        outputs,
+      });
     }));
 
   effectIt.effect("enforces exact count and byte boundaries without partial text", () =>
@@ -309,11 +311,10 @@ describe("DAG text artifact contract", () => {
       const count = yield* admitDagTextArtifacts(root, "run", "node", many).pipe(Effect.flip);
       expect(count._tag).toBe(DagArtifactFailureTag.OutputLimitExceeded);
 
-      for (let index = 0; index < 8; index += 1) yield* Effect.promise(() => writeFile(path.join(root, `max-${index}.txt`), exact));
-      const exactNodeOutputs = Object.fromEntries(Array.from({ length: 4 }, (_, index) => [`n${index}`, `max-${index}.txt`]));
+      const exactNodeOutputs = Object.fromEntries(Array.from({ length: 4 }, (_, index) => [`n${index}`, "exact.txt"]));
       const exactNode = yield* admitDagTextArtifacts(root, "run", "node", exactNodeOutputs);
       expect(Object.values(exactNode).reduce((sum, reference) => sum + reference.bytes, 0)).toBe(DagDefaultArtifactLimits.maxBytesPerNode);
-      const contextReferences = Array.from({ length: 8 }, (_, index) => ({ ...admitted.exact, path: `max-${index}.txt`, producerNodeId: `p${index}`, outputName: `c${index}` }));
+      const contextReferences = Array.from({ length: 8 }, (_, index) => ({ ...admitted.exact, producerNodeId: `p${index}`, outputName: `c${index}` }));
       const exactContext = yield* materializeReferences(root, contextReferences.map((reference) => reference.producerNodeId), contextReferences);
       expect(exactContext.bytes).toBe(DagDefaultArtifactLimits.maxContextBytes);
 

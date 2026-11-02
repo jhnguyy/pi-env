@@ -106,15 +106,6 @@ describe("Formatters", () => {
       expect(text).not.toContain("/a.ts:"); // clean file omitted
     });
 
-    it("omits clean files from item listing", () => {
-      const r: DiagnosticsResult = {
-        action: "diagnostics", path: "/a.ts", errorCount: 1, warnCount: 0,
-        items: [], files: [cleanFile, errorFile],
-      };
-      const lines = formatDiagnostics(r).split("\n");
-      expect(lines.some(l => l.includes("/a.ts:"))).toBe(false);
-    });
-
     it("includes fileErrors in summary and output", () => {
       const r: DiagnosticsResult = {
         action: "diagnostics", path: "/b.ts", errorCount: 1, warnCount: 0,
@@ -195,6 +186,8 @@ describe("Formatters", () => {
         }],
       };
       const text = formatDefinition(r);
+      expect(text).toContain("src/big.ts:1");
+      expect(text).toContain("class Big {\n  // ...\n}");
       expect(text).toContain("... (50 more lines)");
     });
 
@@ -253,6 +246,8 @@ describe("Formatters", () => {
       };
       const text = formatReferences(r);
       expect(text).toContain("35 references");
+      expect(text).toContain("src/0.ts:1 usage 0");
+      expect(text).toContain("src/19.ts:20 usage 19");
       expect(text).toContain("... 15 more");
     });
 
@@ -396,6 +391,7 @@ describe("Formatters", () => {
         items: [{ name: "a", kind: "function", relativePath: "a.ts", absolutePath: "/a.ts", line: 1, content: "a()" }],
       };
       const text = formatIncomingCalls(r);
+      expect(text).toContain("a.ts:1 function a");
       expect(text).toContain("... 34 more");
     });
   });

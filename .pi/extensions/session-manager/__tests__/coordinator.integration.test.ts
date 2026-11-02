@@ -46,6 +46,7 @@ describe("workspace coordinator", () => {
       })),
     );
     expect(await Effect.runPromise(ensureCoordinator({ catalog, cwd }))).toEqual(first);
+    expect((await Effect.runPromise(catalog.read(cwd)))?.coordinator).toEqual(first);
   });
 
   it("restores independent sessions and reports one failure without failing the workspace", async () => {
@@ -183,7 +184,7 @@ describe("workspace coordinator", () => {
     });
   });
 
-  it("leaves an unready restored window running and reports its timeout", async () => {
+  it("reports a readiness timeout after creating a window", async () => {
     const { cwd, catalog } = await fixture();
     const coordinator = await Effect.runPromise(ensureCoordinator({ catalog, cwd }));
     const timestamp = new Date().toISOString();

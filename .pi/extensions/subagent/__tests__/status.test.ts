@@ -36,8 +36,6 @@ describe("active subagent status", () => {
       "subagent second [running]",
       "subagent third [cancelling]",
     ]);
-    expect(lines.join("\n")).not.toContain("private delegated task");
-    expect(lines.join("\n")).not.toContain("•");
   });
 
   it("places active lines below the editor and clears the slot at terminal state", () => {

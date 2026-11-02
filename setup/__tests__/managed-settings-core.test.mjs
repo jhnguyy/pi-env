@@ -24,6 +24,7 @@ describe("managed settings core", () => {
     const result = parseJsonRelaxedText('{"__proto__":{"polluted":true},"ok":1}');
 
     expect(Object.hasOwn(result, "__proto__")).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(result, "__proto__")?.value).toEqual({ polluted: true });
     expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
     expect(result.polluted).toBeUndefined();
     expect(result.ok).toBe(1);

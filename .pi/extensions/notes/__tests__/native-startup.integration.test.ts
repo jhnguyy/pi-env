@@ -23,14 +23,16 @@ it("keeps simultaneous native owners' configured vaults independent through shut
   const closed = new Set<AgentSession>();
   const close = async (session: AgentSession) => {
     if (closed.has(session)) return;
-    closed.add(session);
-    await session.abort();
+    const failures: unknown[] = [];
+    try { await session.abort(); } catch (error) { failures.push(error); }
     try {
       await session.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
-    } finally {
-      session.dispose();
-    }
+    } catch (error) { failures.push(error); }
+    try { session.dispose(); } catch (error) { failures.push(error); }
+    if (failures.length) throw new AggregateError(failures, "Notes session cleanup failed");
+    closed.add(session);
   };
+  const failures: unknown[] = [];
   try {
     const create = async (name: string) => {
       const cwd = join(root, name);
@@ -105,7 +107,6 @@ it("keeps simultaneous native owners' configured vaults independent through shut
       await session.prompt("Read identity.md using notes.");
       await session.waitForIdle();
       const result = session.messages.slice(start).find((message) => message.role === "toolResult");
-      expect(result).toBeDefined();
       expect(result).toMatchObject({ isError: false });
       return result;
     };
@@ -123,8 +124,13 @@ it("keeps simultaneous native owners' configured vaults independent through shut
       const reopened = SessionManager.open(session.sessionManager.getSessionFile()!);
       expect(reopened.buildSessionContext().messages).toEqual(session.messages);
     }
+  } catch (error) {
+    failures.push(error);
   } finally {
-    for (const session of sessions) await close(session);
-    await rm(root, { recursive: true, force: true });
+    for (const session of sessions) {
+      try { await close(session); } catch (error) { failures.push(error); }
+    }
+    try { await rm(root, { recursive: true, force: true }); } catch (error) { failures.push(error); }
   }
+  if (failures.length) throw new AggregateError(failures, "Native notes owner scenario failed");
 });

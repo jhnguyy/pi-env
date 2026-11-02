@@ -42,8 +42,22 @@ process.stdin.on("data", (chunk) => {
 
 const roots: string[] = [];
 afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  const failures: unknown[] = [];
+  for (const root of roots.splice(0)) {
+    try { rmSync(root, { recursive: true, force: true }); } catch (error) { failures.push(error); }
+  }
+  if (failures.length) throw new AggregateError(failures, "Telemetry fixture removal failed");
 });
+
+async function withCleanup(run: () => Promise<void>, ...cleanup: (() => Promise<unknown>)[]): Promise<void> {
+  const failures: unknown[] = [];
+  try { await run(); } catch (error) { failures.push(error); }
+  for (const release of cleanup) {
+    try { await release(); } catch (error) { failures.push(error); }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, "Telemetry operation and cleanup failed");
+}
 
 function inMemoryExporter(finished: ReadableSpan[]): SpanExporter {
   return {
@@ -106,7 +120,7 @@ function assertSafeSpans(finished: ReadableSpan[], sentinels: string[]): void {
 }
 
 describe("dev-tools tooling telemetry", () => {
-  it("emits bounded backend lifecycle spans without request params or paths", async () => {
+  it("emits backend lifecycle fields and excludes supplied path and parameter sentinels", async () => {
     const root = mkdtempSync(join(tmpdir(), "dev-tools-secret-path-"));
     roots.push(root);
     const pathSentinel = join(root, "private-file.ts");
@@ -130,16 +144,13 @@ describe("dev-tools tooling telemetry", () => {
       runtime,
     );
 
-    try {
+    await withCleanup(async () => {
       await backend.ensureStarted();
       await backend.lspRequest("textDocument/hover", {
         textDocument: { uri: `file://${pathSentinel}` },
         sentinel: paramsSentinel,
       });
-      await backend.shutdown();
-    } finally {
-      await Effect.runPromise(runtime.disposeEffect);
-    }
+    }, () => backend.shutdown(), () => Effect.runPromise(runtime.disposeEffect));
 
     expect(finished.map((span) => span.name)).toEqual(
       expect.arrayContaining([
@@ -160,7 +171,7 @@ describe("dev-tools tooling telemetry", () => {
     assertSafeSpans(finished, [root, pathSentinel, paramsSentinel, "file://"]);
   });
 
-  it("emits a sanitized daemon request span and disposes its shared runtime", async () => {
+  it("emits daemon outcome and parent fields and excludes supplied sentinels", async () => {
     const root = mkdtempSync(join(tmpdir(), "dev-tools-daemon-otel-"));
     roots.push(root);
     const socketPath = join(root, "daemon.sock");
@@ -188,22 +199,23 @@ describe("dev-tools tooling telemetry", () => {
     );
     (daemon as any).backends = [backend];
 
-    await daemon.start();
-    const response = await sendDaemonRequest(socketPath, {
-      id: 1,
-      action: "hover",
-      path: privateFile,
-      line: 1,
-      character: 1,
-    });
-    expect(response).toMatchObject({ id: 1, ok: false });
     const unknownAction = "private-unbounded-action";
-    const unknown = await sendDaemonRequest(socketPath, {
-      id: 2,
-      action: unknownAction,
-    } as any);
-    expect(unknown).toMatchObject({ id: 2, ok: false });
-    await daemon.shutdown();
+    await withCleanup(async () => {
+      await daemon.start();
+      const response = await sendDaemonRequest(socketPath, {
+        id: 1,
+        action: "hover",
+        path: privateFile,
+        line: 1,
+        character: 1,
+      });
+      expect(response).toMatchObject({ id: 1, ok: false });
+      const unknown = await sendDaemonRequest(socketPath, {
+        id: 2,
+        action: unknownAction,
+      } as any);
+      expect(unknown).toMatchObject({ id: 2, ok: false });
+    }, () => backend.shutdown(), () => daemon.shutdown(), () => Effect.runPromise(runtime.disposeEffect));
 
     const hoverDaemonSpan = finished.find(
       (span) => span.name === DevToolsSpanName.DaemonRequest && span.attributes.action === "hover",

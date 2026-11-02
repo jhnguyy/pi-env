@@ -66,11 +66,10 @@ describe("fixed pull request review graph", () => {
 
     const synthesis = compiled.nodes.find((node) => node.id === "synthesis")!;
     const reviewerIds: string[] = ReviewGraph.ReviewerNodes.map((node) => node.nodeId);
-    expect(
-      synthesis.dependencies
-        .filter((dependency) => reviewerIds.includes(dependency.nodeId))
-        .every((dependency) => dependency.mode === DagDependencyMode.Settled),
-    ).toBe(true);
+    expect(synthesis.dependencies).toEqual([
+      { nodeId: "reading-plan", mode: DagDependencyMode.Settled },
+      ...reviewerIds.map((nodeId) => ({ nodeId, mode: DagDependencyMode.Settled })),
+    ]);
     expect(synthesis.completionGuard?.dependencyIds).toEqual(reviewerIds);
   });
 
@@ -81,12 +80,6 @@ describe("fixed pull request review graph", () => {
     )) {
       const payload = subagentPayload(node);
       expect(payload.workspace).toEqual({ cwd: "/workspace", access: "read" });
-      expect(payload.tools).not.toContain("bash");
-      expect(payload.tools).not.toContain("read");
-      expect(payload.tools).not.toContain("write");
-      expect(payload.tools).not.toContain("subagent");
-      expect(payload.tools).not.toContain("review");
-      expect(payload.tools).not.toContain("pr_review");
       expect(payload.tools).toEqual(
         node.id === "reading-plan"
           ? [tools.deck, ...tools.read, tools.planSubmission]

@@ -263,6 +263,9 @@ describe("license bundle generation", () => {
       type: "repository-package",
       package: "project-core@1.0.0",
     });
+    const copied = [...fileTree(join(repoRoot, "licenses", "packages"))]
+      .flatMap(([path, content]) => platform.files.some((file) => path.endsWith(`/${file}`)) ? [content] : []);
+    expect(copied).toEqual(["shared project license\n"]);
   });
 
   it("does not borrow same-repository license text from a different version", () => {
@@ -305,6 +308,8 @@ describe("license bundle generation", () => {
 
     expect(record.upstreamLicenseTextMissing).toBe(true);
     expect(record.licenseSource.type).toBe("reviewed-override");
+    expect([...fileTree(join(repoRoot, "licenses", "packages")).values()])
+      .toEqual(["reviewed license notice\n"]);
     expect(notices).toContain("metadata-only@1.0.0");
   });
 
