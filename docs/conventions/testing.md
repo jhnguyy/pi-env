@@ -16,13 +16,15 @@ Assertions need to reach the promised result. A recorded call shows that a reque
 
 A workflow test can reveal broken collaboration between otherwise correct modules. A focused test can make a large space of policy decisions or a rare failure cheaper and clearer to exercise. Neither is inherently sufficient or superior. Choose the boundary that exposes the relevant defect without constructing unrelated parts of the application.
 
+Use small, deterministic examples for mechanically decidable functional behavior. A fixture should distinguish correct from incorrect behavior, not require a particular machine capacity. Capacity and stress qualification need separate selection and measured evidence; a large input alone does not explain a useful contract.
+
 Keep inexpensive, deterministic collaborators real when that strengthens the evidence. Substitute external services, credentials, nondeterminism, or hard-to-induce failures at a meaningful boundary. Explain what the substitute cannot establish, and retain real-adapter evidence where compatibility or lifecycle behavior depends on it. A fake provider can control inference while real SDK sessions and tools establish local integration; it cannot establish hosted-provider compatibility.
 
 ## Revisit the test architecture
 
 Revisit the test architecture when the production design or verification strategy changes. Before adding cases, review existing scenarios, fixtures, and coverage boundaries as a whole. Decide which tests or suites need to be rewritten or replaced to express the new architecture. Carry forward relevant contracts and failure cases, retire obsolete assumptions, and integrate new cases into a coherent suite.
 
-Compare tests by the responsibilities and failures they expose. Similar-looking tests may protect different permissions, failure stages, or recovery behavior. Consolidation should preserve those distinctions; additional coverage should answer a distinct question.
+Compare tests by the responsibilities and failures they expose. Similar-looking tests may protect different permissions, failure stages, or recovery behavior. Consolidation should preserve those distinctions; additional coverage should answer a distinct question. In particular, permission, integrity, persistence, cancellation, and lifecycle failures can have similar visible outcomes without protecting the same contract.
 
 ## Make the outcome readable and reproducible
 

@@ -17,7 +17,7 @@ const integrationTestRoots = [
 
 export default defineConfig({
   test: {
-    project: ["unit", "integration"],
+    project: ["unit"],
     pool: "forks",
     maxWorkers: 1,
     maxConcurrency: 1,

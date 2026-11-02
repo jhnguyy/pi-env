@@ -50,7 +50,14 @@ const it = test.extend({
       await writeFile(join(root, ".gitignore"), "node_modules\n");
       await writeFile(
         join(root, "vitest.config.mjs"),
-        `export default { test: { globals: true, pool: 'forks', maxWorkers: 1, fileParallelism: false, forceRerunTriggers: [], include: ['src/**/*.test.mjs'] } };\n`,
+        `export default { test: {
+  project: ['unit', 'integration', 'e2e'], globals: true, pool: 'forks', maxWorkers: 1, fileParallelism: false, forceRerunTriggers: [],
+  projects: [
+    { extends: true, test: { name: 'unit', include: ['src/**/*.test.mjs'], exclude: ['**/*.integration.test.mjs', '**/e2e.test.mjs'] } },
+    { extends: true, test: { name: 'integration', include: ['src/**/*.integration.test.mjs'] } },
+    { extends: true, test: { name: 'e2e', include: ['src/**/e2e.test.mjs'] } },
+  ],
+} };\n`,
       );
       for (const area of ["feature", "consumer", "unrelated"])
         await mkdir(join(root, `src/${area}/__tests__`), { recursive: true });
@@ -63,6 +70,15 @@ const it = test.extend({
         await writeFile(
           join(root, `src/${area}/__tests__/value.test.mjs`),
           `import { appendFileSync } from 'node:fs';\nimport { value } from ${JSON.stringify(source)};\ntest(${JSON.stringify(area)}, () => { if (value !== 2) throw new Error('wrong value'); appendFileSync(${JSON.stringify(join(root, "observed"))}, ${JSON.stringify(`${area}\n`)}); });\n`,
+        );
+      }
+      for (const [file, label] of [
+        ["value.integration.test.mjs", "integration"],
+        ["e2e.test.mjs", "e2e"],
+      ]) {
+        await writeFile(
+          join(root, "src/consumer/__tests__", file),
+          `import { appendFileSync } from 'node:fs';\nimport { value } from '../../feature/value.ts';\ntest(${JSON.stringify(label)}, () => { if (value !== 2) throw new Error('wrong value'); appendFileSync(${JSON.stringify(join(root, "observed"))}, ${JSON.stringify(`${label}\n`)}); });\n`,
         );
       }
       await writeFile(
@@ -158,6 +174,31 @@ it('must not run', () => { appendFileSync(${JSON.stringify(marker)}, 'later\\n')
   expect(await readFile(marker, "utf8")).toBe("failed\n");
 });
 
+it("defaults to units with the shipped test configuration", async ({ workspace }) => {
+  const directory = join(workspace.root, "src/defaults/__tests__");
+  const marker = join(workspace.root, "selected-projects");
+  await mkdir(directory, { recursive: true });
+  for (const [file, label] of [
+    ["value.test.ts", "unit"],
+    ["value.integration.test.ts", "integration"],
+    ["e2e.test.ts", "e2e"],
+  ]) {
+    await writeFile(
+      join(directory, file),
+      `import { appendFileSync } from 'node:fs';\nimport { it } from 'vitest';\nit(${JSON.stringify(label)}, () => appendFileSync(${JSON.stringify(marker)}, ${JSON.stringify(`${label}\n`)}));\n`,
+    );
+  }
+  const result = await workspace.run("test", [
+    "--config",
+    join(repo, "vitest.config.ts"),
+    "--root",
+    workspace.root,
+    "src/defaults/__tests__",
+  ]);
+  expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+  expect(await readFile(marker, "utf8")).toBe("unit\n");
+});
+
 it("does no analysis for an empty or documentation-only delta", async ({ workspace }) => {
   for (const content of [undefined, "# Documentation\n"]) {
     if (content) await writeFile(join(workspace.root, "README.md"), content);
@@ -248,7 +289,7 @@ it("keeps both sides of a rename for impact selection but never passes deleted p
   expect(
     lines.some(
       (line) =>
-        line.includes("test related") &&
+        line.includes("test:unit related") &&
         line.includes("src/feature/value.ts") &&
         line.includes("src/consumer/new name.ts"),
     ),
@@ -283,6 +324,15 @@ it("runs the owning component and transitive consumers without running unrelated
   expect(result.stdout).not.toContain("typecheck");
   expect(result.stdout).not.toContain("type-aware lint");
 }, 45_000);
+
+it("runs integration only when explicitly selected", async ({ workspace }) => {
+  await writeFile(join(workspace.root, "src/feature/value.ts"), "export const value = 2;\n");
+  const result = await workspace.run("test:integration", [
+    "src/consumer/__tests__/value.integration.test.mjs",
+  ]);
+  expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+  expect(await readFile(join(workspace.root, "observed"), "utf8")).toBe("integration\n");
+});
 
 it("executes a changed test itself without selecting unrelated components", async ({
   workspace,
@@ -329,7 +379,8 @@ for (const failure of [undefined, "typecheck"]) {
       "lint:type",
       "build",
       "test:setup",
-      "test",
+      "test:unit",
+      "test:integration",
       "verify:install",
       "test:workflows",
     ];

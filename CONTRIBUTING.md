@@ -18,7 +18,15 @@ Toolchain provisioning is another boundary. Pi may come from Nix or from the che
 
 ## Verification
 
-`nub run verify` provides change-scoped feedback. Use `--list` to inspect the selection, `--base <ref>` to choose the comparison, or `--checks-only` to omit tests. Commands and the broader sequence live in [`package.json#scripts`](package.json).
+`nub run verify` provides change-scoped checks and unit-test feedback. Use `--list` to inspect the selection, `--base <ref>` to choose the comparison, or `--checks-only` to omit tests. `nub run test` also defaults to the unit project. Unit classification is not a capacity guarantee; review fixture and import costs when adding coverage. Commands and the broader sequence live in [`package.json#scripts`](package.json).
+
+Integration, setup-shell (`nub run test:setup`), and E2E suites are explicitly selected, even when they import changed source or belong to its component. An integration-only edit may therefore select no runnable unit tests; successful local feedback does not qualify that integration test. Select the relevant file directly, for example:
+
+```bash
+nub run test:integration src/process/__tests__/platform.integration.test.ts
+```
+
+Use `nub run test:workflows` for the built-bundle native SDK workflows and `nub run test:e2e .pi/extensions/dev-tools/__tests__/e2e.test.ts` for real LSP qualification. Build matching artifacts first when the selected workflow loads bundles.
 
 CI combines changed-file policy with `nub run verify:full` for integration coverage. Local selection cannot reliably discover every consequence of configuration, dependency, generated-artifact, or dynamic-input changes. A green local result describes the evidence obtained, not everything that remains unaffected.
 

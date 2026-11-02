@@ -38,9 +38,8 @@ export function changedVerificationPlan(change, { checksOnly = false, cwd = proc
     const inputs = [...new Set([...change.files.filter(codeFile), ...suites])].sort();
     if (inputs.length)
       steps.push(
-        script("test", "related", "--passWithNoTests", ...inputs.map((file) => `./${file}`)),
+        script("test:unit", "related", "--passWithNoTests", ...inputs.map((file) => `./${file}`)),
       );
-    if (owners.has("setup")) steps.push(script("test:setup"));
   }
   return steps;
 }
