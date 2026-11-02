@@ -30,150 +30,96 @@ describe("DocumentManager", () => {
     return p;
   }
 
-  // ─── ensure ────────────────────────────────────────────────────────────────
-
-  describe("ensure", () => {
-    it("opens a new file with its language, version, and content", () => {
-      const p = mkFile("a.ts", "export type T = string;");
-      const result = dm.ensure(p);
-
-      expect(result.uri).toMatch(/^file:\/\//);
-      expect(result.notification).toMatchObject({
+  it("opens, leaves unchanged, changes, closes, and reopens one tracked document", () => {
+    const p = mkFile(process.platform === "linux" ? "spaced %20#?.ts" : "a.ts", "const x = 1;");
+    const opened = dm.ensure(p);
+    const uri = opened.uri;
+    if (process.platform === "linux") {
+      expect(uri).toBe(`file://${tmpDir}/spaced%20%2520%23%3F.ts`);
+    }
+    expect(uri).toMatch(/^file:\/\//);
+    expect(opened).toEqual({
+      uri,
+      projectRoot: tmpDir,
+      isNewRoot: true,
+      notification: {
         type: "didOpen",
         params: {
-          textDocument: { languageId: "typescript", version: 1, text: "export type T = string;" },
+          textDocument: { uri, languageId: "typescript", version: 1, text: "const x = 1;" },
         },
-      });
-    });
-
-    it.skipIf(process.platform !== "linux")(
-      "uses one escaped URI for special-filename notifications, tracking, and close",
-      () => {
-        const p = mkFile("spaced %20#?.ts", "const x = 1;");
-        const expectedUri = `file://${tmpDir}/spaced%20%2520%23%3F.ts`;
-        const opened = dm.ensure(p);
-
-        expect(opened.uri).toBe(expectedUri);
-        expect(opened.notification).toMatchObject({
-          type: "didOpen",
-          params: { textDocument: { uri: expectedUri, text: "const x = 1;" } },
-        });
-        expect(dm.openUris).toEqual([expectedUri]);
-        expect(dm.getDoc(expectedUri)).toMatchObject({ uri: expectedUri, absolutePath: p });
-        expect(dm.ensure(p).notification).toBeNull();
-
-        writeFileSync(p, "const x = 2;", "utf8");
-        expect(dm.ensure(p).notification).toMatchObject({
-          type: "didChange",
-          params: {
-            textDocument: { uri: expectedUri, version: 2 },
-            contentChanges: [{ text: "const x = 2;" }],
-          },
-        });
-        expect(dm.close(p)).toBe(expectedUri);
-        expect(dm.getDoc(expectedUri)).toBeUndefined();
-        expect(dm.openUris).toEqual([]);
-        expect(dm.projectRoots).toEqual([]);
       },
-    );
-
-    it("does not track or notify for a missing file", () => {
-      expect(dm.ensure(join(tmpDir, "missing.ts")).notification).toBeNull();
-      expect(dm.openUris).toEqual([]);
-      expect(dm.projectRoots).toEqual([]);
     });
-
-    it("does not notify for unchanged content", () => {
-      const p = mkFile("a.ts", "export type T = string;");
-      dm.ensure(p);
-
-      expect(dm.ensure(p).notification).toBeNull();
+    expect(dm.openUris).toEqual([uri]);
+    expect(dm.projectRoots).toEqual([tmpDir]);
+    expect(dm.getDoc(uri)).toMatchObject({
+      uri,
+      absolutePath: p,
+      version: 1,
+      content: "const x = 1;",
     });
+    expect(dm.ensure(p).notification).toBeNull();
 
-    it("sends changed content with a new version", () => {
-      const p = mkFile("a.ts", "const x = 1;");
-      dm.ensure(p);
-      writeFileSync(p, "const x = 2;", "utf8");
-
-      expect(dm.ensure(p).notification).toMatchObject({
+    writeFileSync(p, "const x = 2;", "utf8");
+    expect(dm.ensure(p)).toMatchObject({
+      uri,
+      isNewRoot: false,
+      notification: {
         type: "didChange",
+        params: { textDocument: { uri, version: 2 }, contentChanges: [{ text: "const x = 2;" }] },
+      },
+    });
+    expect(dm.getDoc(uri)).toMatchObject({ version: 2, content: "const x = 2;" });
+    expect(dm.close(p)).toBe(uri);
+    expect(dm.getDoc(uri)).toBeUndefined();
+    expect(dm.openUris).toEqual([]);
+    expect(dm.projectRoots).toEqual([]);
+
+    expect(dm.ensure(p)).toEqual({
+      uri,
+      projectRoot: tmpDir,
+      isNewRoot: true,
+      notification: {
+        type: "didOpen",
         params: {
-          textDocument: { version: 2 },
-          contentChanges: [{ text: "const x = 2;" }],
+          textDocument: { uri, languageId: "typescript", version: 1, text: "const x = 2;" },
         },
-      });
+      },
     });
-
-    it("identifies only the first file in a project as a new root", () => {
-      const first = mkFile("a.ts", "const x = 1;");
-      const second = mkFile("b.ts", "const y = 2;");
-
-      expect(dm.ensure(first).isNewRoot).toBe(true);
-      expect(dm.ensure(second).isNewRoot).toBe(false);
-    });
+    expect(dm.openUris).toEqual([uri]);
   });
 
-  // ─── close ──────────────────────────────────────────────────────────────────
-
-  describe("close", () => {
-    it("returns uri for an open file and removes it", () => {
-      const p = mkFile("a.ts", "const a = 1;");
-      const opened = dm.ensure(p);
-      expect(dm.openUris).toContain(opened.uri);
-      expect(dm.close(p)).toBe(opened.uri);
-      expect(dm.openUris).not.toContain(opened.uri);
-    });
-
-    it("returns null for a file that is not open", () => {
-      const result = dm.close("/nonexistent/foo.ts");
-      expect(result).toBeNull();
-    });
-
-    it("cleans up project files tracking", () => {
-      const p = mkFile("a.ts", "const a = 1;");
-      dm.ensure(p);
-      expect(dm.projectRoots.length).toBe(1);
-      dm.close(p);
-      // Project root should be removed since no files remain
-      expect(dm.projectRoots.length).toBe(0);
-    });
-
-    it("preserves other files in the same project", () => {
-      const p1 = mkFile("a.ts", "const a = 1;");
-      const p2 = mkFile("b.ts", "const b = 2;");
-      const first = dm.ensure(p1);
-      const second = dm.ensure(p2);
-      expect(dm.close(p1)).toBe(first.uri);
-      expect(dm.openUris).toEqual([second.uri]);
-      expect(dm.ensure(p2).notification).toBeNull();
-      expect(dm.projectRoots).toEqual([tmpDir]);
-    });
-
-    it("allows re-opening a closed file", () => {
-      const p = mkFile("a.ts", "const a = 1;");
-      dm.ensure(p);
-      dm.close(p);
-      const result = dm.ensure(p);
-      expect(result.notification).not.toBeNull();
-      expect(result.notification!.type).toBe("didOpen");
-    });
+  it("does not track or notify for a missing file", () => {
+    expect(dm.ensure(join(tmpDir, "missing.ts")).notification).toBeNull();
+    expect(dm.openUris).toEqual([]);
+    expect(dm.projectRoots).toEqual([]);
   });
 
-  // ─── projectRoots / openUris ───────────────────────────────────────────────
+  it("identifies only the first file in a project as a new root", () => {
+    const first = mkFile("a.ts", "const x = 1;");
+    const second = mkFile("b.ts", "const y = 2;");
+    expect(dm.ensure(first).isNewRoot).toBe(true);
+    expect(dm.ensure(second).isNewRoot).toBe(false);
+  });
 
-  describe("state tracking", () => {
-    it("tracks open URIs", () => {
-      const p = mkFile("a.ts", "const a = 1;");
-      dm.ensure(p);
-      expect(dm.openUris.length).toBe(1);
-    });
+  it("returns null for a file that is not open", () => {
+    expect(dm.close(join(tmpDir, "nonexistent.ts"))).toBeNull();
+  });
 
-    it("clear() resets state", () => {
-      const p = mkFile("a.ts", "const a = 1;");
-      dm.ensure(p);
-      dm.clear();
-      expect(dm.openUris.length).toBe(0);
-      expect(dm.projectRoots.length).toBe(0);
-    });
+  it("preserves other files in the same project", () => {
+    const p1 = mkFile("a.ts", "const a = 1;");
+    const p2 = mkFile("b.ts", "const b = 2;");
+    const first = dm.ensure(p1);
+    const second = dm.ensure(p2);
+    expect(dm.close(p1)).toBe(first.uri);
+    expect(dm.openUris).toEqual([second.uri]);
+    expect(dm.ensure(p2).notification).toBeNull();
+    expect(dm.projectRoots).toEqual([tmpDir]);
+  });
+
+  it("clear() resets state", () => {
+    dm.ensure(mkFile("a.ts", "const a = 1;"));
+    dm.clear();
+    expect(dm.openUris).toEqual([]);
+    expect(dm.projectRoots).toEqual([]);
   });
 });

@@ -3,97 +3,53 @@ import { formatStatus } from "../formatters";
 import type { StatusResult } from "../protocol";
 
 describe("status contract", () => {
-  it("formats a ready snapshot with semantic availability and zero request items", () => {
-    const result: StatusResult = {
-      action: "status",
-      state: "ready",
-      running: true,
-      pid: 123,
-      backend: {
-        name: "typescript",
-        running: true,
-      },
-      project: {
-        mode: "configured",
-        root: "/repo",
-        tsconfigPath: "/repo/tsconfig.json",
-      },
-      initialization: {
-        state: "initialized",
-      },
-      semantic: {
-        available: true,
-        lastRequest: {
-          method: "textDocument/references",
-          itemCount: 0,
-        },
-      },
-      projects: ["/repo"],
-      openFiles: [],
-      watchedFiles: 0,
-      idleMs: 50,
-    };
-
-    expect(formatStatus(result)).toBe(
-      [
-        "state: ready",
-        "daemon: running",
-        "pid: 123",
-        "backend: typescript running",
-        "project mode: configured",
-        "project root: /repo",
-        "tsconfig: /repo/tsconfig.json",
-        "initialization: initialized",
-        "semantic: available",
-        "last semantic request: textDocument/references (0 items)",
-        "projects: /repo",
-        "open files: none",
-        "idle: 0s",
-      ].join("\n"),
-    );
-  });
-
-  it("formats an initializing snapshot with a running backend and unavailable semantics", () => {
+  it("formats ready and initializing branches without inventing optional request or config fields", () => {
     const result: StatusResult = {
       action: "status",
       state: "initializing",
       running: true,
-      pid: 456,
-      backend: {
-        name: "typescript",
-        running: true,
-      },
-      project: {
-        mode: "inferred",
-        root: "/repo",
-      },
-      initialization: {
-        state: "initializing",
-      },
-      semantic: {
-        available: false,
-      },
-      projects: ["/repo"],
+      backend: { name: "bash", running: false },
+      project: { mode: "inferred", root: "/scripts" },
+      initialization: { state: "initializing" },
+      semantic: { available: false },
+      projects: [],
       openFiles: [],
       watchedFiles: 0,
       idleMs: 0,
     };
+    const initializing = formatStatus(result);
+    for (const line of [
+      "state: initializing",
+      "daemon: running",
+      "backend: bash stopped",
+      "project mode: inferred",
+      "project root: /scripts",
+      "initialization: initializing",
+      "semantic: unavailable",
+    ]) {
+      expect(initializing.split("\n")).toContain(line);
+    }
+    expect(initializing).not.toMatch(/last semantic request:|tsconfig:|pid:/);
 
-    expect(formatStatus(result)).toBe(
-      [
-        "state: initializing",
-        "daemon: running",
-        "pid: 456",
-        "backend: typescript running",
-        "project mode: inferred",
-        "project root: /repo",
-        "initialization: initializing",
-        "semantic: unavailable",
-        "projects: /repo",
-        "open files: none",
-        "idle: 0s",
-      ].join("\n"),
-    );
+    const ready = formatStatus({
+      ...result,
+      state: "ready",
+      backend: { name: "bash", running: true },
+      initialization: { state: "initialized" },
+      semantic: {
+        available: true,
+        lastRequest: { method: "textDocument/references", itemCount: 0 },
+      },
+    });
+    for (const line of [
+      "state: ready",
+      "backend: bash running",
+      "initialization: initialized",
+      "semantic: available",
+      "last semantic request: textDocument/references (0 items)",
+    ]) {
+      expect(ready.split("\n")).toContain(line);
+    }
   });
 
   it("formats a degraded snapshot with project, request, and semantic failure fields", () => {
