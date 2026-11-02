@@ -19,11 +19,6 @@ export default defineConfig({
   test: {
     project: ["unit"],
     pool: "forks",
-    maxWorkers: 1,
-    maxConcurrency: 1,
-    fileParallelism: false,
-    isolate: true,
-    bail: 1,
     // Global inputs require explicit full verification, not an implicit local suite expansion.
     forceRerunTriggers: [],
     testTimeout: 30_000,
@@ -56,6 +51,14 @@ export default defineConfig({
         test: {
           name: "e2e",
           include: [".pi/extensions/**/__tests__/e2e.test.ts"],
+          exclude: [".pi/extensions/session-manager/**"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "session-manager-e2e",
+          include: [".pi/extensions/session-manager/__tests__/e2e.test.ts"],
         },
       },
       {

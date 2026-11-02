@@ -6,7 +6,7 @@ import { parseArgs } from "node:util";
 import * as HeavyweightLock from "./heavyweight-lock.mjs";
 import { changedFiles } from "./changed-files.mjs";
 import { runSupervisedNode } from "./run-supervised-node.mjs";
-import { changedVerificationPlan } from "./verification-plan.mjs";
+import { changedVerificationPlan, unqualifiedGlobalInputs } from "./verification-plan.mjs";
 import { listPlan, runPlan } from "./verification-runner.mjs";
 
 const repo = resolve(import.meta.dirname, "..");
@@ -33,6 +33,15 @@ async function verify(args) {
   const steps = changedVerificationPlan(change, { checksOnly });
   console.log(`Verification scope: ${change.files.length} changed paths since ${change.base}.`);
   console.log("Local feedback does not replace CI's changed-file policy and integration checks.");
+  const unqualified = unqualifiedGlobalInputs(change.files);
+  if (unqualified.length) {
+    console.log(
+      `Global inputs not qualified by local test selection:\n${unqualified.map((file) => `  ${file}`).join("\n")}`,
+    );
+    console.log(
+      "Run nub run verify:full in an environment with adequate capacity to qualify these inputs.",
+    );
+  }
   if (list) {
     console.log(listPlan(steps).join("\n"));
     return;

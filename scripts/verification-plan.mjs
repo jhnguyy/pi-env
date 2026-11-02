@@ -4,8 +4,17 @@ const script = (name, ...args) => ({ label: name, command: "nub", args: ["run", 
 const codeFile = (file) => /\.[cm]?[jt]sx?$/.test(file);
 const formattable = (file) => /\.(?:[cm]?[jt]sx?|jsonc?|ya?ml|md|css|html)$/.test(file);
 function owner(file) {
-  if (file.startsWith(".pi/extensions/_shared/")) return ".pi/extensions";
+  if (file.startsWith(".pi/extensions/_shared/")) return undefined;
   return /^(\.pi\/extensions\/[^/]+|src\/[^/]+|scripts|setup)\//.exec(file)?.[1];
+}
+
+export function unqualifiedGlobalInputs(files) {
+  return files.filter(
+    (file) =>
+      (!file.includes("/") && !/\.(?:md|txt)$/.test(file)) ||
+      /^(?:\.github|nix|patches|tools)\//.test(file) ||
+      (file.startsWith(".pi/extensions/_shared/") && !codeFile(file)),
+  );
 }
 
 export function changedVerificationPlan(change, { checksOnly = false, cwd = process.cwd() } = {}) {
@@ -29,16 +38,29 @@ export function changedVerificationPlan(change, { checksOnly = false, cwd = proc
     steps.push(script("check:async-risk:changed", "--ref", change.base));
   }
   if (!checksOnly) {
-    // Vitest supplies reverse import analysis. Component suites cover additional
-    // CLI/filesystem inputs, but this heuristic cannot qualify every dynamic dependency.
-    const owners = new Set(change.files.map(owner).filter(Boolean));
+    // Vitest supplies reverse import analysis for source changes. Component suites
+    // cover non-source inputs, but this heuristic cannot qualify every dynamic dependency.
+    const owners = new Set(
+      change.files
+        .filter((file) => !codeFile(file))
+        .map(owner)
+        .filter(Boolean),
+    );
     const suites = [...owners].flatMap((root) =>
       globSync([`${root}/__tests__/**/*.test.ts`, `${root}/__tests__/**/*.test.mjs`], { cwd }),
     );
     const inputs = [...new Set([...change.files.filter(codeFile), ...suites])].sort();
     if (inputs.length)
       steps.push(
-        script("test:unit", "related", "--passWithNoTests", ...inputs.map((file) => `./${file}`)),
+        script(
+          "test:unit",
+          "related",
+          "--maxWorkers=1",
+          "--no-file-parallelism",
+          "--bail=1",
+          "--passWithNoTests",
+          ...inputs.map((file) => `./${file}`),
+        ),
       );
   }
   return steps;
