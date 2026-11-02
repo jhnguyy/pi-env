@@ -11,7 +11,7 @@ Find the target project's guidance through its `README.md`, `CONTRIBUTING.md`, a
 
 ## Define the promise
 
-Discover useful units through design. An internal function or module can own a responsibility with independently testable expectations. Choose seams that make its inputs, collaborator outcomes, and ownership controllable; a unit test need not enter through the application's public CLI.
+Discover useful units through design. An internal function or module can own a responsibility with independently testable expectations. Choose seams that make its inputs, collaborator outcomes, and ownership controllable; a functional slice need not enter through the application's public CLI or cross every deployment boundary. Test design can reveal scattered policy, unclear ownership, or lifecycle decisions missing from production. Use that evidence to improve production responsibilities; an abstraction should benefit production callers, not only make collaborators mockable.
 
 Describe what follows from those inputs: outputs, state changes, effects, and failures. Include meaningful input distinctions and failure stages, especially where an effect may have occurred before confirmation was lost. Resolve unclear readiness, completion, cancellation, or recovery semantics in the production contract so the test can establish what callers may safely do next.
 
@@ -33,7 +33,7 @@ Choose collaborators for the evidence needed. Inexpensive, deterministic impleme
 
 Design the fixture's lifecycle alongside the scenario. It owns resources from allocation, including partial startup that cannot return successfully. Arrange cleanup as resources are acquired, attempt independent releases, and preserve useful original failures alongside cleanup failures.
 
-Account for import, startup, build, child-process, native-allocation, and retained-state costs when choosing execution resources. Select scale and resource qualification separately with explicit inputs, limits, and claims. Small fixtures, serial execution, and unit classification do not establish aggregate memory containment; generated artifacts and dynamic inputs also affect which evidence a change needs.
+Account for setup, import, startup, settling, build, child-process, native-allocation, and retained-state costs when choosing execution resources. Select scale and resource qualification separately with explicit inputs, limits, and claims. Small fixtures, serial execution, and unit classification do not establish aggregate memory containment; generated artifacts and dynamic inputs also affect which evidence a change needs.
 
 ## Observe the promised outcome
 
@@ -43,8 +43,10 @@ For lifecycle promises, observe the result after awaited shutdown, scope closure
 
 ## Evolve the suite with the design
 
-Compare tests by the contract violations they detect, not by similar assertions or test count. Permission, integrity, persistence, cancellation, readiness, completion, and lifecycle can be distinct promises. When production design or verification strategy changes, revisit the suite as a whole and replace boundaries and fixtures that embody obsolete assumptions rather than only adding cases to them. Before removing protection for a current requirement, show that retained or replacement evidence detects the same violations; retire obsolete requirements explicitly.
+Work through one meaningful functional slice at a time: establish a failing expectation first when practical, implement sufficient behavior to satisfy the promise, then refactor with that coverage in place. For regressions, reproduce the failure without the fix when practical and retain the meaningful case. Let each slice inform the next rather than writing a broad batch of speculative tests before implementing any behavior.
 
-For regressions, reproduce the failure without the fix when practical and retain the meaningful case. Use negative controls or relevant production mutations when they resolve consequential uncertainty about detection, rather than as a ritual for every trivial edit.
+Compare tests by the contract violations they detect, not by similar assertions or test count. Permission, integrity, persistence, cancellation, readiness, completion, and lifecycle can be distinct promises. When production design or verification strategy changes, revisit the suite as a whole and replace boundaries and fixtures that embody obsolete assumptions rather than only adding cases to them. Replacement is an evidence decision, not an automatic deletion rule: before removing protection for a current requirement, show that retained or replacement evidence detects the same violations, including any real-integration qualification on which the claim depends. Retire obsolete requirements explicitly.
+
+Use negative controls or relevant production mutations when they resolve consequential uncertainty about detection, rather than as a ritual for every trivial edit.
 
 Keep temporary diagnostic or catching experiments uncommitted. Retain enough evidence to reproduce consequential results; existing CI output may suffice. Report what was checked, the outcome, and material gaps so the claim stays within the evidence.

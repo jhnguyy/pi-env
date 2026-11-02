@@ -6,43 +6,34 @@ description: Assess evidence-backed refactor opportunities, module seams, and te
 
 # Refactor
 
-Assess opportunities without changing code.
+Assess opportunities without changing code. An assessment is not implementation authorization; use the [code-contribution skill](../code-contribution/SKILL.md) when implementation is requested and the [planning skill](../planning/SKILL.md) for delivery and rollout decisions.
 
-## Trace the friction
+## Establish the design problem
 
-Read repository instructions and establish the review scope. Use language-aware navigation when available to trace representative workflows through callers, module boundaries, tests, and configuration. Reuse domain terms from code and documentation.
+Read repository instructions and establish the review scope. Trace representative workflows through owners, callers, data, tests, and dependencies, using language-aware navigation when available. Reuse the domain terms in code and documentation.
 
-Look for concrete costs:
+Connect each candidate to inspected evidence and a current cost: repeated caller coordination, exposed sequencing or state, scattered policy, unclear resource ownership, or changes that require reconstructing one behavior across many modules. Test friction can reveal these problems, but distinguish production ownership issues from fixture limitations. Similar names, file size, or hypothetical reuse alone do not establish a design problem. Finding no worthwhile refactor is a valid result.
 
-- orchestration repeated across callers of shallow modules
-- interfaces that expose internal state or sequencing
-- behavior that requires visiting many files to understand or change
-- tests that reach through interfaces or cover pure helpers while missing orchestration failures
-- dependencies whose protocol, lifecycle, or failure assumptions leak across boundaries
+State what callers need to accomplish, what they must know today, and what evidence would show an improvement. Separate observed behavior from assumptions and proposed checks.
 
-Connect each candidate to code or test evidence and a current cost. Do not invent future requirements or generalize from similar names alone. Finding no worthwhile refactor is a valid result.
+## Compare responsibilities and interfaces
 
-## Evaluate the seam
+Identify the responsibility and its natural owner before proposing a seam. Inspect nearby modules and available dependencies for existing capabilities. Keep policy near the workflow and data it governs, and keep state transitions, resource lifecycle, and error handling with the owner that has the authority and information to manage them.
 
-Identify which responsibility should move and what the proposed interface would hide. Check whether deeper modules would reduce caller coordination without combining unrelated responsibilities.
+Evaluate interface depth by the capability and coordination hidden from callers relative to the knowledge they still need. A useful interface lets callers express intent without reconstructing internal sequencing, representation, or recovery. Line counts and interface-to-implementation ratios do not measure that benefit. Make required authority, inputs, outcomes, and failures explicit while hiding decisions callers should not own.
 
-Classify relevant dependencies to choose the boundary:
+Use dependency characteristics to inform the boundary rather than prescribe a layer: direct in-process calls may preserve locality; protocols or deployment boundaries may warrant adapters; substitution may help testing or migration. An abstraction should improve production use and ownership, not exist only to accommodate mocks. Keep cohesive behavior together and preserve distinctions that carry different authority, lifecycle, or failure contracts.
 
-- Keep direct calls for in-process dependencies when they preserve locality.
-- For locally substitutable dependencies, assess the replacement seam for tests or migration.
-- Isolate protocol and deployment concerns for remote, owned dependencies through ports or adapters.
-- Put external dependencies behind mockable adapters with explicit external assumptions.
+Compare credible alternatives, including leaving the design unchanged, simplifying within the current owner, extending an existing capability, or moving responsibility behind a new interface. Weigh caller knowledge, locality, coupling, operational cost, and migration risk against the observed problem. Recommend the smallest change whose benefit justifies those costs, and identify evidence that could change the recommendation.
 
-Compare the candidate with leaving the code alone. Check whether it reduces the files and concepts needed to understand one behavior, keeps policy near its workflow or data, and prevents invalid call sequences. Reject interfaces that merely add layers, fragment cohesive behavior, or simplify tests without improving production orchestration.
+## Establish preservation and migration evidence
 
-## Check tests and migration
+Identify affected callers and the contracts that must remain true, including relevant permissions, data integrity, persistence, readiness, completion, cancellation, and resource release. Distinguish intentional behavior changes from structural changes so preservation claims remain testable. Follow the [testing-practices skill](../testing-practices/SKILL.md) for independent expectations, coverage comparison, and real-integration qualification.
 
-Identify behavior and contracts that must remain unchanged, affected callers, and tests that would establish preservation through stable seams. Use the [testing-practices skill](../testing-practices/SKILL.md) for test selection.
-
-Describe migration slices, compatibility needs, rollback, and deletion of temporary paths. Flag big-bang migrations and uncertain behavior preservation as costs, not implementation details to defer silently.
+Propose functional vertical slices: each should preserve or deliver one observable behavior through the responsibilities needed to establish it, rather than moving every layer before anything can be checked. A slice can end at a meaningful internal seam; it need not cross every deployment boundary. Identify baseline evidence, affected-call-site checks, compatibility needs, and the evidence required before switching or removing an old path. Account for partial migration, rollback, and temporary-path removal; treat uncertain preservation and big-bang migration as design costs.
 
 ## Report the assessment
 
-Report only supported opportunities, with no candidate quota or required report template. For each, give the affected files or modules, observed cost, proposed seam, expected benefit, test and migration impact, and recommendation. For uncertain candidates, state unresolved questions and the next evidence needed.
+Report supported opportunities without a candidate quota or mandatory template. Give the affected owners and callers, observed cost, alternatives and tradeoffs, recommended responsibility and interface, preservation and migration evidence, and remaining uncertainties. Distinguish proposed verification from completed checks.
 
-Keep the assessment in the response unless a durable artifact is requested or required by local policy. Before creating one, load the local notes or storage adapter and follow its conventions. Ask if the destination is unclear. Capture the selected decision and follow-up work rather than duplicating the entire exploration.
+Keep the assessment in the response unless a durable artifact is requested or required by local policy. Before creating one, load the local notes or storage adapter and follow its conventions. Ask if the destination is unclear. Capture the selected decision and follow-up work rather than duplicating the exploration.
