@@ -1,49 +1,37 @@
 # Testing
 
-Tests make boundaries of responsibility visible. They describe what a module promises to callers, what it expects from collaborators, and how an interaction may succeed, fail, or stop. Those boundaries give other modules stable places to connect and give a reader a way to understand the target's specifications.
+The [testing-practices skill](../../.agents/skills/testing-practices/SKILL.md) owns the portable method: prove the target unit's functional promises through useful input/output seams and rely on collaborators' established contracts. This page adds pi-env's test organization, fixtures, and qualification requirements.
 
-A test makes part of that specification executable. It provides evidence for a promise. A useful suite lets a reader follow the meaningful chains of outcomes across the module's responsibility without having to reconstruct its implementation.
+For prerequisites, commands, build sequencing, and execution precautions, see [contribution guidance](../../CONTRIBUTING.md#verification).
 
-## Caller boundary: prove the promised result
+## Suite and fixture placement
 
-Begin with what the caller should be able to rely on. Expectations should come from that contract. If completion, cancellation, or recovery has no clear meaning, resolve the design question rather than letting a fixture invent the answer.
+Keep tests with their owning area under `__tests__`. The [Vitest configuration](../../vitest.config.ts) defines runnable roots and project selection.
 
-Success is only one outcome. Invalid input, conflicting state, interrupted work, and partial failure may change what callers can safely do next. A failure before an external effect is different from losing confirmation after it may have happened. Tests should expose that distinction where it affects retries, recovery, or ownership.
+Name integration tests `*.integration.test.ts`, or `*.integration.test.mjs` for JavaScript suites. Follow the configuration's specific filenames for E2E and real-workspace canary scenarios. Setup shell tests run separately from Vitest; use their [shared helpers](../../setup/__tests__/README.md).
 
-Assert the whole consumer-visible result, including required content and failure information, rather than only an intermediate signal. A recorded call shows that a request arrived, not that its result was used. A cancellation signal does not show that work stopped. Valid metadata does not show that useful tool output reached the model. For bounded output, proving that truncation happened is not enough; the promised useful portion must survive.
+Keep substantial executable fixture programs in typed source files so repository checks can inspect them. Source snippets that an analyzer parses as input are data, not executable fixture programs.
 
-Name a test for what its assertions prove, not a broader outcome implied by its setup. Demonstrate that a new or replacement check fails when its target contract is violated; a passing run alone does not establish that the check detects the defect.
+Place expensive native SDK, real LSP, Docker, and platform qualification in explicitly selected suites. Review actual import and startup costs when adding or reworking coverage; existing unit classification does not establish inexpensive execution.
 
-## Collaboration boundary: choose and corroborate evidence
+## Model-facing and durable results
 
-A workflow test can reveal broken collaboration between otherwise correct modules. A focused test can make a large space of policy decisions or a rare failure cheaper and clearer to exercise. Neither is inherently sufficient or superior. Choose the boundary that exposes the relevant defect without constructing unrelated parts of the application.
+Pi tools expose model-facing `content` separately from structured `details` and UI rendering. Tests of a tool's answer establish its required content. Tests of routing and request translation establish the adapter's own decisions without requalifying the engine in each formatting case. For bounded output, check that promised useful content survives alongside any truncation report.
 
-Use small, deterministic examples for mechanically decidable functional behavior. Do not derive unit-test fixture sizes from available machine capacity. Capacity and stress qualification need separate selection and measured evidence; a large input alone does not explain a useful contract. Small fixtures and low concurrency do not establish memory containment.
+For persistence across reload, inspect state through a fresh reader or reloaded session. An append call or in-memory result establishes a different promise. For setup or migration idempotency, rerun against the state produced by the first run and check that the promised result remains unchanged.
 
-Keep inexpensive, deterministic collaborators real when that strengthens the evidence. Substitute external services, credentials, nondeterminism, or hard-to-induce failures at a meaningful boundary. Corroborate a double's assumptions with a contract test, sandbox run, or recorded response from the real dependency, and explain what the double cannot establish. Upstream evidence can support those assumptions but does not prove this repository's integration. Retain real-adapter evidence where compatibility or lifecycle behavior depends on it. A fake provider can control inference while real SDK sessions and tools establish local integration; it cannot establish hosted-provider compatibility.
+## Test services and isolated state
 
-## Coverage boundary: preserve distinct contracts
+Follow [Effect test guidance](effect-guardrails.md#tests) for Effect-native tests, injected services, test clocks, scopes, and interruption. Plain TypeScript and compatibility adapters can use regular Vitest tests.
 
-Revisit the test architecture when the production design or verification strategy changes. Before adding cases, review existing scenarios, fixtures, and coverage boundaries as a whole. Decide which tests or suites need to be rewritten or replaced to express the new architecture. Carry forward relevant contracts and failure cases, retire obsolete assumptions, and integrate new cases into a coherent suite.
+Setup and native-session fixtures isolate the user state they can reach: homes, agent directories, settings, sessions, repositories, sockets, and shared services as applicable. Set an isolated `PI_CODING_AGENT_DIR` for processes that would otherwise discover personal Pi state; a temporary cwd alone leaves that state exposed.
 
-Compare tests by the responsibilities and failures they expose, not by test count. Similar-looking tests may protect different permissions, failure stages, or recovery behavior. Consolidation should preserve those distinctions; additional coverage should answer a distinct question. In particular, permission, integrity, persistence, cancellation, and lifecycle failures can have similar visible outcomes without protecting the same contract.
+Validate setup with isolated state rather than resetting personal settings or activating a live host profile. Account for dependency installation's artifact preparation and LSP daemon restart before using installation in a fixture or experiment.
 
-Before deleting coverage for a current contract, demonstrate that the replacement evidence catches the same contract violations. Retire checks only when their requirements are obsolete or their protection is demonstrably retained elsewhere.
+## Runtime qualification
 
-## Scenario boundary: make outcomes reproducible
+Source imports and loaded extension bundles establish different evidence. Use matching checkout dependencies and built artifacts for workflows that load bundles; see [extension runtime conventions](extensions.md#runtime-shape). Exercise the rebuilt extension in a reloaded or restarted Pi session when the changed behavior depends on native loading.
 
-Keep scenarios independently understandable. Parameterization helps when inputs vary within the same workflow; separate scenarios often explain different workflows better. Shared setup can reduce expensive initialization, but shared mutable state can hide order dependence.
+A deterministic inference provider can accompany real SDK sessions and tools to establish local integration without hosted inference. Hosted-provider compatibility remains a separate qualification.
 
-Control incidental time and randomness when they obscure the result. Use real conditions when those conditions are the behavior under test. Explicit readiness and completion signals are stronger than elapsed-time assumptions. A watchdog bounds a stalled test; it is not evidence that the expected outcome occurred.
-
-Reproduce a reported failure when practical before changing the code, and work through new expectations early enough to influence the design. Keep regression tests for current contracts; leave temporary catching tests and diagnostic experiments uncommitted.
-
-Keep enough evidence to reproduce and assess the result. CI output is often sufficient; retain additional artifacts when they clarify the outcome, following the target project's privacy and storage policy.
-
-## Resource boundary: observe ownership and cleanup
-
-Own resources from allocation through cleanup, including failed startup and assertions. Attempt independent releases, preserve useful failures, and observe results after cleanup settles.
-
-Account for startup, child processes, native allocations, and retained state when choosing execution resources. Measure consequential changes and isolate workloads with uncertain demands. Include runtime artifacts and dynamic inputs when selecting evidence for a change.
-
-For Effect-specific runtime and test services, see [Effect guidance](effect-guardrails.md#tests). For pi-env commands and operating constraints, see [contribution guidance](../../CONTRIBUTING.md#verification).
+Keep real-adapter evidence for promises that depend on native cancellation, process termination, persistence, transport compatibility, or shared resource ownership. Reuse that evidence across focused tests relying on the same established contract. Select the canary and Docker suites when the change reaches their real-workspace or tmux boundaries.

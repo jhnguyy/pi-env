@@ -1,41 +1,56 @@
 # Contributing
 
-pi-env is a package loaded into Pi, not an application with one self-contained runtime. A change can involve TypeScript source, generated extension bundles, a host-provided SDK, and user state outside the checkout. Understanding which of those the change reaches matters more than adopting the maintainer's personal development setup.
+Start with [README](README.md) for setup modes and the [code-contribution skill](.agents/skills/code-contribution/SKILL.md) for the contribution workflow. This page adds pi-env's development requirements.
 
-## From checkout to running extension
+## Prepare a checkout
 
-Pi loads built extension bundles, while many tests import source directly. Editing a source file or passing a source-level test does not mean an existing Pi session has loaded the change. Dependencies and generated bundles need to match the checkout being exercised; sharing them between different revisions can make the running behavior disagree with the source under review.
+Use Node compatible with [`package.json#engines`](package.json) and Nub on `PATH`. Check the [prerequisites](docs/prerequisites.md) and follow the [setup guidance](docs/setup.md) for Nix-managed or portable environments.
 
-Dependency installation also prepares runtime artifacts. The install-time [hydration](scripts/hydrate.mjs) patches the Effect language service, builds bundles, and restarts the LSP daemon. It is more than downloading packages. The checkout initialization command, `nub run --no-check worktree:init`, provides dependency isolation and install validation when preparing an additional worktree; it is not a requirement to use that checkout layout.
+Keep dependency links and generated bundles local to each checkout. Installation runs [hydration](scripts/hydrate.mjs), which prepares bundles and the Effect language service and restarts the LSP daemon. For an additional worktree, initialize those artifacts:
 
-An extension participates through package registration, workspace membership, and its bundle entrypoints. [Extension conventions](docs/conventions/extensions.md) explain those relationships and the shared lifecycle boundary. Pi peer packages are externalized so bundles use the host SDK rather than introducing independent runtime copies. Updating Pi therefore involves compatibility between the host release and the development SDK packages, not only a dependency edit. The Nix input and development packages are version-checked together; the [release collector](scripts/collect-pi-release-evidence.mjs) can gather matching upstream release material for that assessment.
+```bash
+nub run --no-check worktree:init
+```
 
-## Development is not a separate user environment
+## Develop
 
-A temporary working directory does not isolate Pi's agent directory, settings, sessions, or shared services. Tests and setup experiments can otherwise reach personal state even when their source checkout is separate. Settings integration can also use synthetic settings. Validate setup with isolated homes and agent directories rather than resetting personal settings or activating a live host profile; an intentional deployment is a separate action with different effects and responsibilities.
+Follow the [extension conventions](docs/conventions/extensions.md) for package registration, runtime boundaries, and shared services. Pi loads generated bundles, so build changes before exercising them in a Pi session:
 
-Toolchain provisioning is another boundary. Pi may come from Nix or from the checkout's installed dependencies. A container supplied with Nix-built tools does not necessarily have permission to realize store paths or activate a host generation. [Setup modes](README.md#setup-choices) and [runtime integration](docs/setup.md#runtime-integration) describe those choices without requiring contributors to reproduce a particular host.
+```bash
+nub run build
+```
+
+Reload or restart that session afterward. For activated Nix artifacts, follow [host integration](docs/setup.md#declarative-host-integration) instead of assuming a checkout build replaces them.
+
+Keep tests and setup experiments isolated from personal homes, agent directories, settings, and sessions. Use the [dependency-update skill](.agents/skills/dependency-update/SKILL.md) when changing dependencies and the [documentation conventions](docs/conventions/documentation.md) when changing documentation.
 
 ## Verification
 
-`nub run verify` provides change-scoped checks and unit-test feedback. Use `--list` to inspect the selection, `--base <ref>` to choose the comparison, or `--checks-only` to omit tests. `nub run test` also defaults to the unit project. Unit classification is not a capacity guarantee; review fixture and import costs when adding coverage. Commands and the broader sequence live in [`package.json#scripts`](package.json).
-
-Keep executable fixtures in typed source files rather than embedded program strings so repository checks can inspect them. Name integration tests `*.integration.test.ts` (or `*.integration.test.mjs` for JavaScript suites) to match the Vitest project selection. For setup or migration idempotency, rerun against the state produced by the first run and check that the promised result remains unchanged.
-
-Integration, setup-shell (`nub run test:setup`), and E2E suites are explicitly selected, even when they import changed source or belong to its component. An integration-only edit may therefore select no runnable unit tests; successful local feedback does not qualify that integration test. Select the relevant file directly, for example:
+Inspect the change-scoped plan, then run it:
 
 ```bash
-nub run test:integration src/process/__tests__/platform.integration.test.ts
+nub run verify --list
+nub run verify
 ```
 
-`nub run test:workflows` selects the regular non-Docker E2E project, including built-bundle native SDK workflows and real LSP qualification. Use `nub run test:e2e .pi/extensions/dev-tools/__tests__/e2e.test.ts` to select the LSP workflow alone. Build matching artifacts first when the selected workflow loads bundles.
+Use `--base <ref>` to choose the comparison and `--checks-only` to omit tests. The commit hook runs checks only; native lint and Analyze still take the heavyweight lock.
 
-The local verify plan supplies serial-worker and fail-fast flags to its test step; the shared Vitest configuration does not impose them on CI. `--checks-only` still runs native lint and Analyze, so it retains the heavyweight lock rather than overlapping those workloads with another worktree's full run.
+Local verification selects related unit tests. An integration-only edit may select no runnable unit tests, and generated artifacts or dynamic inputs can escape import-based selection. Choose qualification for the affected contracts:
 
-CI combines changed-file policy with `nub run verify:full` for integration coverage. Local selection cannot reliably discover every consequence of configuration, dependency, generated-artifact, or dynamic-input changes. A green local result describes the evidence obtained, not everything that remains unaffected.
+| Evidence                           | Command                                   |
+| ---------------------------------- | ----------------------------------------- |
+| Focused units                      | `nub run test:unit <file>`                |
+| Focused integration                | `nub run test:integration <file>`         |
+| Setup shell workflows              | `nub run test:setup`                      |
+| Regular native SDK and LSP E2Es    | `nub run test:workflows`                  |
+| Real-workspace canary              | `nub run test:canary`                     |
+| Isolated session-manager/tmux E2Es | `nub run test:e2e:session-manager:docker` |
+| Broader CI integration pipeline    | `nub run verify:full`                     |
 
-Broad work can exhaust a shared machine even with low test concurrency. [Analyze's public entrypoint](src/analyze/public.ts) admits bounded syntax work to a supervised worker and refuses strict capabilities without aggregate containment. Its process groups cannot contain detached descendants, and syntax budgets do not make a changing filesystem a security sandbox. Those safeguards do not apply to arbitrary package commands, native linters, or subprocesses started elsewhere. Choose capacity and isolation for the workload rather than inferring safety from a command name or worker setting.
+Run broad qualification only in an environment with adequate capacity. Supervision and serial execution do not guarantee aggregate memory containment. CI runs `verify:full`; select the canary and Docker qualification separately when relevant.
 
-Some behavior needs environment qualification beyond ordinary source tests. `nub run test:canary` exercises dev-tools against the real workspace; `nub run test:e2e:session-manager:docker` exercises real Pi session ownership in an isolated tmux environment. Their evidence is useful when the change reaches those boundaries, not as a ritual for every edit.
+[Testing conventions](docs/conventions/testing.md) cover organization, fixtures, and qualification boundaries. [`package.json#scripts`](package.json) owns executable commands.
 
-[Testing conventions](docs/conventions/testing.md) explain how to choose and assess evidence. [Documentation conventions](docs/conventions/documentation.md) explain what durable guidance should add beyond the code and its checks.
+## Submit a change
+
+Use the [pull request template](.github/pull_request_template.md) to explain the behavioral outcome, relevant design choices, and validation. Distinguish checks that passed from qualification still pending, and retain useful failure evidence. Passing source tests does not establish that a built extension or activated host environment loaded the change.

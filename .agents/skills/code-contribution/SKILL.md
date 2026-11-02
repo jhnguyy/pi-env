@@ -40,7 +40,7 @@ Bound work before allocation. Prefer one-pass transformations and reuse values d
 1. Define expected outcomes and failure cases before implementation.
 2. Inspect current behavior and use the [testing-practices skill](../testing-practices/SKILL.md) to select evidence while the design can still change.
 3. Implement in verifiable phases against those outcomes.
-4. Verify the complete workflow and run repository-required checks before review or merge.
+4. Verify the affected contracts and interactions, including repository-required checks, before review or merge.
 
 ## Commit and publish
 

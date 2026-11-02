@@ -8,6 +8,7 @@ This file owns repository documentation policy.
 - A directory `README.md` states only the directory purpose or entry condition.
 - The [`code-contribution` skill](../../.agents/skills/code-contribution/SKILL.md) owns the portable contribution method.
 - `CONTRIBUTING.md` owns pi-env-specific contribution requirements.
+- The [`testing-practices` skill](../../.agents/skills/testing-practices/SKILL.md) owns the portable testing method; [testing conventions](testing.md) own pi-env-specific organization, fixtures, and qualification.
 - `AGENTS.md` owns coding-agent navigation.
 - Keep roadmaps, proposed architecture, migration sequencing, research, and open decisions in project notes, not usage or convention docs.
 - When documenting a behavioral requirement, distinguish it from implemented support.
