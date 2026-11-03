@@ -1,4 +1,3 @@
-import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
 
@@ -28,7 +27,7 @@ export const MAX_CONTEXT_PAGE_SIZE = 5;
 export const PrReviewParamsSchema = Type.Object(
   {
     command: Type.Literal("pr"),
-    action: StringEnum(REVIEW_COMMAND_VALUES),
+    action: Type.Enum(REVIEW_COMMAND_VALUES, { type: "string" }),
     url: Type.Optional(
       Type.String({
         description:
@@ -36,7 +35,8 @@ export const PrReviewParamsSchema = Type.Object(
       }),
     ),
     feedback: Type.Optional(
-      StringEnum(PR_REVIEW_FEEDBACK_VALUES, {
+      Type.Enum(PR_REVIEW_FEEDBACK_VALUES, {
+        type: "string",
         description: "Feedback category for `review pr get`. Defaults to all categories.",
       }),
     ),
@@ -110,7 +110,7 @@ export const PlanCohortSchema = Type.Object(
 export const PlanFileSchema = Type.Object(
   {
     path: NonEmptyString,
-    attention: StringEnum(Object.values(Attention) as [string, ...string[]]),
+    attention: Type.Enum(Object.values(Attention), { type: "string" }),
     role: NonEmptyString,
   },
   { additionalProperties: false },
@@ -149,10 +149,10 @@ export const PlanSchema = Type.Object(
 );
 export const FindingInputSchema = Type.Object(
   {
-    severity: StringEnum(Object.values(Severity) as [string, ...string[]]),
-    impact: StringEnum(Object.values(Impact) as [string, ...string[]]),
+    severity: Type.Enum(Object.values(Severity), { type: "string" }),
+    impact: Type.Enum(Object.values(Impact), { type: "string" }),
     file: Type.Optional(NonEmptyString),
-    side: Type.Optional(StringEnum(Object.values(Side) as [string, ...string[]])),
+    side: Type.Optional(Type.Enum(Object.values(Side), { type: "string" })),
     line: Type.Optional(Type.Integer({ minimum: 1, maximum: 999999 })),
     problem: NonEmptyString,
     consequence: NonEmptyString,
@@ -170,7 +170,7 @@ export const ReviewerRoles = [
 ] as const;
 export const ReviewerOutputSchema = Type.Object(
   {
-    role: StringEnum(ReviewerRoles),
+    role: Type.Enum(ReviewerRoles, { type: "string" }),
     evidenceDigest: Type.String({ pattern: "^[0-9a-f]{64}$" }),
     verdict: NonEmptyString,
     findings: Type.Array(FindingInputSchema, { maxItems: 1000 }),
@@ -180,7 +180,7 @@ export const ReviewerOutputSchema = Type.Object(
 export const SynthesisFindingSchema = Type.Object(
   {
     ...FindingInputSchema.properties,
-    sourceReviewers: Type.Array(StringEnum(ReviewerRoles), {
+    sourceReviewers: Type.Array(Type.Enum(ReviewerRoles, { type: "string" }), {
       minItems: 1,
       maxItems: ReviewerRoles.length,
       uniqueItems: true,
@@ -194,16 +194,16 @@ export const SynthesisReviewSchema = Type.Object(
     verdict: NonEmptyString,
     coverage: Type.Object(
       {
-        status: StringEnum(["complete", "degraded"] as const),
-        succeeded: Type.Array(StringEnum(ReviewerRoles), {
+        status: Type.Enum(["complete", "degraded"], { type: "string" }),
+        succeeded: Type.Array(Type.Enum(ReviewerRoles, { type: "string" }), {
           maxItems: ReviewerRoles.length,
           uniqueItems: true,
         }),
-        failed: Type.Array(StringEnum(ReviewerRoles), {
+        failed: Type.Array(Type.Enum(ReviewerRoles, { type: "string" }), {
           maxItems: ReviewerRoles.length,
           uniqueItems: true,
         }),
-        malformed: Type.Array(StringEnum(ReviewerRoles), {
+        malformed: Type.Array(Type.Enum(ReviewerRoles, { type: "string" }), {
           maxItems: ReviewerRoles.length,
           uniqueItems: true,
         }),

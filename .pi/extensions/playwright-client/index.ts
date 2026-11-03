@@ -1,17 +1,29 @@
 // @ts-nocheck
 // The extension-level inferred LSP project does not see root dependencies; root tsc resolves pi packages.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { StringEnum } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { txt } from "../_shared/result";
-import { BROWSER_ACTIONS, executeBrowserAction, formatActionSummary, formatTargets, translateBrowserError, type BrowserAction, type BrowserArgs } from "./actions";
+import {
+  BROWSER_ACTIONS,
+  executeBrowserAction,
+  formatActionSummary,
+  formatTargets,
+  translateBrowserError,
+  type BrowserAction,
+  type BrowserArgs,
+} from "./actions";
 import { BrowserClient } from "./browser";
 import { loadBrowserClientConfig } from "./config";
 
-const browserActionSchema = StringEnum(BROWSER_ACTIONS, { description: "Browser action to perform" });
+const browserActionSchema = Type.Enum(BROWSER_ACTIONS, {
+  type: "string",
+  description: "Browser action to perform",
+});
 
-type BrowserCommandContext = { ui: { notify(message: string, level?: "info" | "warning" | "error"): void } };
+type BrowserCommandContext = {
+  ui: { notify(message: string, level?: "info" | "warning" | "error"): void };
+};
 
 export default function playwrightClientExtension(pi: ExtensionAPI) {
   const browser = new BrowserClient(loadBrowserClientConfig());
@@ -20,7 +32,8 @@ export default function playwrightClientExtension(pi: ExtensionAPI) {
     name: "browser",
     label: "Browser",
     description: DESCRIPTION,
-    promptSnippet: "Control a configured Chrome/Chromium CDP target: list targets/pages, snapshot, navigate, wait, click, type, screenshot, download.",
+    promptSnippet:
+      "Control a configured Chrome/Chromium CDP target: list targets/pages, snapshot, navigate, wait, click, type, screenshot, download.",
     promptGuidelines: [
       "Use browser action=targets first when you need to discover configured browser targets.",
       "Use browser action=snapshot before browser action=screenshot; snapshots provide text/accessibility state with less context cost.",
@@ -29,47 +42,124 @@ export default function playwrightClientExtension(pi: ExtensionAPI) {
     ],
     parameters: Type.Object({
       action: browserActionSchema,
-      target: Type.Optional(Type.String({ description: "Browser target name from action=targets, e.g. local or a configured settings target" })),
-      args: Type.Optional(Type.Object({
-        state: Type.Optional(StringEnum(["agent", "human", "unlocked"] as const, { description: "Control state for action=control" })),
-        pageId: Type.Optional(Type.String({ description: "Page id for action=pages selection; omit to list pages" })),
-        pageTitle: Type.Optional(Type.String({ description: "Title substring for action=pages selection" })),
-        pageUrl: Type.Optional(Type.String({ description: "URL substring for action=pages selection" })),
-        fullPage: Type.Optional(Type.Boolean({ description: "Capture full scrollable page for action=screenshot" })),
-        url: Type.Optional(Type.String({ description: "URL for action=navigate, or URL/string pattern for action=wait" })),
-        loadState: Type.Optional(StringEnum(["domcontentloaded", "load", "networkidle"] as const, { description: "Load state for action=wait" })),
-        locatorState: Type.Optional(StringEnum(["attached", "detached", "visible", "hidden"] as const, { description: "Locator state for action=wait with a locator" })),
-        timeout: Type.Optional(Type.Number({ description: "Timeout in milliseconds for action=wait or action=download" })),
-        limit: Type.Optional(Type.Number({ description: "Number of history entries for action=history" })),
-        role: Type.Optional(Type.String({ description: "ARIA role locator for click/type, e.g. button, textbox, link" })),
-        name: Type.Optional(Type.String({ description: "Accessible name for role locator" })),
-        text: Type.Optional(Type.String({ description: "Visible text locator" })),
-        label: Type.Optional(Type.String({ description: "Form label locator" })),
-        placeholder: Type.Optional(Type.String({ description: "Input placeholder locator" })),
-        testId: Type.Optional(Type.String({ description: "data-testid locator" })),
-        selector: Type.Optional(Type.String({ description: "CSS selector fallback; prefer semantic locators first" })),
-        exact: Type.Optional(Type.Boolean({ description: "Use exact matching for supported semantic locators" })),
-        value: Type.Optional(Type.String({ description: "Text to enter for action=type" })),
-        mode: Type.Optional(StringEnum(["fill", "type"] as const, { description: "For action=type: fill replaces element value; type sends keystrokes" })),
-      })),
+      target: Type.Optional(
+        Type.String({
+          description:
+            "Browser target name from action=targets, e.g. local or a configured settings target",
+        }),
+      ),
+      args: Type.Optional(
+        Type.Object({
+          state: Type.Optional(
+            Type.Enum(["agent", "human", "unlocked"], {
+              type: "string",
+              description: "Control state for action=control",
+            }),
+          ),
+          pageId: Type.Optional(
+            Type.String({ description: "Page id for action=pages selection; omit to list pages" }),
+          ),
+          pageTitle: Type.Optional(
+            Type.String({ description: "Title substring for action=pages selection" }),
+          ),
+          pageUrl: Type.Optional(
+            Type.String({ description: "URL substring for action=pages selection" }),
+          ),
+          fullPage: Type.Optional(
+            Type.Boolean({ description: "Capture full scrollable page for action=screenshot" }),
+          ),
+          url: Type.Optional(
+            Type.String({
+              description: "URL for action=navigate, or URL/string pattern for action=wait",
+            }),
+          ),
+          loadState: Type.Optional(
+            Type.Enum(["domcontentloaded", "load", "networkidle"], {
+              type: "string",
+              description: "Load state for action=wait",
+            }),
+          ),
+          locatorState: Type.Optional(
+            Type.Enum(["attached", "detached", "visible", "hidden"], {
+              type: "string",
+              description: "Locator state for action=wait with a locator",
+            }),
+          ),
+          timeout: Type.Optional(
+            Type.Number({
+              description: "Timeout in milliseconds for action=wait or action=download",
+            }),
+          ),
+          limit: Type.Optional(
+            Type.Number({ description: "Number of history entries for action=history" }),
+          ),
+          role: Type.Optional(
+            Type.String({
+              description: "ARIA role locator for click/type, e.g. button, textbox, link",
+            }),
+          ),
+          name: Type.Optional(Type.String({ description: "Accessible name for role locator" })),
+          text: Type.Optional(Type.String({ description: "Visible text locator" })),
+          label: Type.Optional(Type.String({ description: "Form label locator" })),
+          placeholder: Type.Optional(Type.String({ description: "Input placeholder locator" })),
+          testId: Type.Optional(Type.String({ description: "data-testid locator" })),
+          selector: Type.Optional(
+            Type.String({ description: "CSS selector fallback; prefer semantic locators first" }),
+          ),
+          exact: Type.Optional(
+            Type.Boolean({ description: "Use exact matching for supported semantic locators" }),
+          ),
+          value: Type.Optional(Type.String({ description: "Text to enter for action=type" })),
+          mode: Type.Optional(
+            Type.Enum(["fill", "type"], {
+              type: "string",
+              description: "For action=type: fill replaces element value; type sends keystrokes",
+            }),
+          ),
+        }),
+      ),
     }),
-    async execute(_toolCallId: string, params: { action: unknown; target?: unknown; args?: unknown }) {
+    async execute(
+      _toolCallId: string,
+      params: { action: unknown; target?: unknown; args?: unknown },
+    ) {
       const action = params.action as BrowserAction;
       const args = (params.args ?? {}) as BrowserArgs;
       const target = typeof params.target === "string" ? params.target : undefined;
       try {
         const result = await executeBrowserAction(browser, action, target, args);
-        const page = target ? await browser.currentPageSummary(target).catch(() => undefined) : undefined;
-        if (action !== "history") browser.recordHistory({ action, target, pageTitle: page?.title, pageUrl: page?.url, result: result.text.split("\n")[0] });
+        const page = target
+          ? await browser.currentPageSummary(target).catch(() => undefined)
+          : undefined;
+        if (action !== "history")
+          browser.recordHistory({
+            action,
+            target,
+            pageTitle: page?.title,
+            pageUrl: page?.url,
+            result: result.text.split("\n")[0],
+          });
         return { content: [txt(result.text), ...(result.content ?? [])], details: result.details };
       } catch (error) {
-        const page = target ? await browser.currentPageSummary(target).catch(() => undefined) : undefined;
+        const page = target
+          ? await browser.currentPageSummary(target).catch(() => undefined)
+          : undefined;
         const message = translateBrowserError(error);
-        if (action !== "history") browser.recordHistory({ action, target, pageTitle: page?.title, pageUrl: page?.url, error: message });
+        if (action !== "history")
+          browser.recordHistory({
+            action,
+            target,
+            pageTitle: page?.title,
+            pageUrl: page?.url,
+            error: message,
+          });
         throw new Error(message, { cause: error });
       }
     },
-    renderCall(args: Record<string, unknown>, theme: { fg(scope: string, text: string): string; bold(text: string): string }) {
+    renderCall(
+      args: Record<string, unknown>,
+      theme: { fg(scope: string, text: string): string; bold(text: string): string },
+    ) {
       const action = String(args.action ?? "");
       const target = typeof args.target === "string" ? ` ${args.target}` : "";
       const summary = formatActionSummary(action, args.args as Record<string, unknown> | undefined);
@@ -120,7 +210,7 @@ function launchGuidance(): string {
     'chromium --remote-debugging-port=9222 --user-data-dir="$HOME/.config/pi-browser-default"',
     "Use browser action=targets to list targets. Other browser actions require target.",
     "Configure custom targets in settings.json under playwrightClient.targets.",
-    "Example: {\"playwrightClient\":{\"targets\":{\"daily-driver\":{\"host\":\"127.0.0.1\",\"port\":9222,\"description\":\"SSH reverse-forwarded Chromium\"}}}}",
+    'Example: {"playwrightClient":{"targets":{"daily-driver":{"host":"127.0.0.1","port":9222,"description":"SSH reverse-forwarded Chromium"}}}}',
   ].join("\n");
 }
 

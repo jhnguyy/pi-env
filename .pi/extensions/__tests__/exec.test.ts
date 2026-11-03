@@ -14,7 +14,13 @@ class TestError extends Error {
   }
 }
 
-const ok = (stdout = ""): ExecResult => ({ code: 0, stdout, stderr: "", killed: false });
+const ok = (stdout = ""): ExecResult => ({
+  code: 0,
+  stdout,
+  stderr: "",
+  killed: false,
+  truncated: false,
+});
 const makeError = (detail: string, cause?: unknown) => new TestError(detail, cause);
 
 describe("shared execEffect", () => {
@@ -47,13 +53,16 @@ describe("shared execEffect", () => {
     ).resolves.toMatchObject({ code: 7 });
   });
 
-  it.each([true, false])("rejects terminated processes even with exit code zero (failOnNonZero=%s)", async (failOnNonZero) => {
-    const exec: Exec = async () => ({ ...ok(), killed: true });
+  it.each([true, false])(
+    "rejects terminated processes even with exit code zero (failOnNonZero=%s)",
+    async (failOnNonZero) => {
+      const exec: Exec = async () => ({ ...ok(), killed: true });
 
-    await expect(
-      Effect.runPromise(execEffect(exec, "cmd", [], makeError, { failOnNonZero })),
-    ).rejects.toThrow("cmd was terminated");
-  });
+      await expect(
+        Effect.runPromise(execEffect(exec, "cmd", [], makeError, { failOnNonZero })),
+      ).rejects.toThrow("cmd was terminated");
+    },
+  );
 
   it("forwards Effect interruption as the exec AbortSignal", async () => {
     let signal: AbortSignal | undefined;

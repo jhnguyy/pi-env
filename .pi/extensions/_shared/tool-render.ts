@@ -1,10 +1,8 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import {
-  keyHint,
-  keyText,
-  rawKeyHint,
-  type ToolDefinition,
-  type ToolRenderResultOptions,
+import type {
+  KeybindingHints,
+  ToolDefinition,
+  ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 import {
   Text,
@@ -21,9 +19,15 @@ export interface ToolRenderTheme {
   bold?(text: string): string;
 }
 
-export interface ToolResultRenderContext {
-  readonly isError: boolean;
-}
+// Pi 1.5 exposes this context through ToolDefinition, but does not re-export its name.
+export type NativeToolRenderContext<Schema extends TSchema = TSchema> = Parameters<
+  NonNullable<ToolDefinition<Schema>["renderResult"]>
+>[3];
+
+export type ToolResultRenderContext = Pick<
+  NativeToolRenderContext,
+  "isError" | keyof KeybindingHints
+>;
 
 export interface ShortDescriptionOptions {
   readonly limit?: number;
@@ -53,14 +57,13 @@ export class WidthBoundedText implements Component {
   invalidate(): void {}
 }
 
-export function toolExpandKeyHint(description = "to expand"): string {
-  return keyText("app.tools.expand")
-    ? keyHint("app.tools.expand", description)
-    : rawKeyHint("ctrl+o", description);
-}
-
-export function toolExpandHint(theme: ToolRenderTheme, description = "to expand"): string {
-  return `${theme.fg("muted", "(")}${toolExpandKeyHint(description)}${theme.fg("muted", ")")}`;
+export function toolExpandHint(
+  theme: ToolRenderTheme,
+  hints: KeybindingHints,
+  description = "to expand",
+): string {
+  if (!hints.keyText("app.tools.expand")) return "";
+  return `${theme.fg("muted", "(")}${hints.keyHint("app.tools.expand", description)}${theme.fg("muted", ")")}`;
 }
 
 export type PublicPiToolDefinition<
@@ -117,17 +120,18 @@ export function renderTextToolResult(
   result: AgentToolResult<unknown>,
   options: ToolRenderResultOptions,
   theme: ToolRenderTheme,
-  context?: ToolResultRenderContext,
+  context: ToolResultRenderContext,
 ): Component {
   const text = toolResultText(result);
-  const failed = context?.isError === true;
+  const failed = context.isError;
   const icon = theme.fg(failed ? "error" : "success", failed ? "✗" : "✓");
   const header = `${icon} ${theme.fg("toolTitle", bold(theme, name))}`;
   if (options.expanded) {
     return new Text(`${header}${text ? `\n${text}` : ""}`, 0, 0);
   }
   const summary = shortDescription(text || (failed ? "error" : "complete"), { oneLine: true });
+  const hint = toolExpandHint(theme, context);
   return new WidthBoundedText(
-    `${header}\n  ${theme.fg(failed ? "error" : "toolOutput", summary)}\n${toolExpandHint(theme)}`,
+    `${header}\n  ${theme.fg(failed ? "error" : "toolOutput", summary)}${hint ? `\n${hint}` : ""}`,
   );
 }

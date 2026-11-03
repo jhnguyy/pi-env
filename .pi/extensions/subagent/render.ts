@@ -6,11 +6,16 @@
  */
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import {
+  type KeybindingHints,
+  type ToolRenderResultOptions,
+  getMarkdownTheme,
+} from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 
 import * as Types from "./types";
 import * as ToolRender from "../_shared/tool-render";
+import type { TUnsafe } from "typebox";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -148,6 +153,7 @@ function renderCollapsedSubagentResult(
   usage: string,
   tools: string,
   theme: any,
+  hints: KeybindingHints,
 ): Text {
   // The call renderer already shows the truncated task; full output belongs in the expanded view.
   let text = `${icon} ${theme.fg("toolTitle", theme.bold("subagent"))}`;
@@ -162,15 +168,16 @@ function renderCollapsedSubagentResult(
   if (usage) stats.push(usage);
   if (details.sessionName) stats.push(details.sessionName);
   if (stats.length > 0) text += `\n${theme.fg("dim", stats.join(" · "))}`;
-  text += `\n${ToolRender.toolExpandHint(theme)}`;
+  const hint = ToolRender.toolExpandHint(theme, hints);
+  if (hint) text += `\n${hint}`;
   return new Text(text, 0, 0);
 }
 
 export function renderSubagentResult(
   result: AgentToolResult<Types.SubagentDetails>,
-  { expanded }: { expanded: boolean },
+  { expanded }: Pick<ToolRenderResultOptions, "expanded">,
   theme: any,
-  _ctx?: unknown,
+  context: Pick<ToolRender.NativeToolRenderContext, keyof KeybindingHints>,
 ) {
   const details = result.details as Types.SubagentDetails | undefined;
   if (!details) {
@@ -183,12 +190,13 @@ export function renderSubagentResult(
   const tools = toolCallSummary(details);
   return expanded
     ? renderExpandedSubagentResult(details, icon, usage, tools, theme)
-    : renderCollapsedSubagentResult(details, icon, usage, tools, theme);
+    : renderCollapsedSubagentResult(details, icon, usage, tools, theme, context);
 }
 
-interface ToolRenderContext {
-  args?: SubagentCallArgs;
-}
+type SubagentRenderContext = Pick<
+  ToolRender.NativeToolRenderContext<TUnsafe<SubagentCallArgs>>,
+  "args" | keyof KeybindingHints
+>;
 
 const JobStatusPresentation: Partial<
   Record<Types.SubagentJobRenderStatus, { readonly color: string; readonly icon: string }>
@@ -222,7 +230,7 @@ function appendJobStats(parts: string[], details: Types.SubagentJobRenderDetails
 /** Keep accepted background starts out of the tool summary. Their live state appears below the editor. */
 export function renderSubagentStartResult(
   result: AgentToolResult<Types.SubagentJobRenderDetails>,
-  _options: { expanded?: boolean },
+  _options: Pick<ToolRenderResultOptions, "expanded">,
   theme: any,
 ) {
   const details = result.details;
@@ -263,8 +271,9 @@ export function renderSubagentJobCall(
 /** Render async job inspection compactly while preserving full content on expansion. */
 export function renderSubagentJobResult(
   result: AgentToolResult<Types.SubagentJobRenderDetails>,
-  { expanded }: { expanded: boolean },
+  { expanded }: Pick<ToolRenderResultOptions, "expanded">,
   theme: any,
+  context: Pick<ToolRender.NativeToolRenderContext, keyof KeybindingHints>,
 ) {
   const details = result.details ?? {};
   const status = details.status;
@@ -282,7 +291,8 @@ export function renderSubagentJobResult(
     let text = header;
     if (details.task) text += `\n${theme.fg("toolOutput", formatPromptPreview(details.task))}`;
     if (statParts.length > 0) text += `\n${theme.fg("dim", statParts.join(" · "))}`;
-    text += `\n${ToolRender.toolExpandHint(theme)}`;
+    const hint = ToolRender.toolExpandHint(theme, context);
+    if (hint) text += `\n${hint}`;
     return new Text(text, 0, 0);
   }
 
@@ -319,20 +329,20 @@ export function renderSubagentToolCall(
 
 export function renderSubagentToolResult(
   result: AgentToolResult<Types.SubagentDetails | Types.SubagentJobRenderDetails>,
-  options: { expanded?: boolean },
+  options: Pick<ToolRenderResultOptions, "expanded">,
   theme: any,
-  context?: ToolRenderContext,
+  context: SubagentRenderContext,
 ) {
-  const action = context?.args?.action ?? "run";
+  const action = context.args?.action ?? "run";
   if (action === "start") {
     return renderSubagentStartResult(result, options, theme);
   }
   if (JOB_ACTIONS.has(action)) {
-    return renderSubagentJobResult(result, { expanded: options.expanded ?? false }, theme);
+    return renderSubagentJobResult(result, options, theme, context);
   }
   return renderSubagentResult(
     result as AgentToolResult<Types.SubagentDetails>,
-    { expanded: options.expanded ?? false },
+    options,
     theme,
     context,
   );

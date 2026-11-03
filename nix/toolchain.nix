@@ -47,7 +47,10 @@ let
           "@earendil-works/pi-ai"
           "@earendil-works/pi-tui"
         ]) "Pi development dependencies must match the upstream Pi flake";
-        pi.packages.${pkgs.stdenv.hostPlatform.system}.default.override { nodejs_22 = node; };
+        import ./pi-package.nix {
+          inherit pkgs node;
+          source = pi;
+        };
       nubPackage =
         let
           # Reuse Nub's upstream packaging with Pi's supported Intel macOS input.
