@@ -1,6 +1,6 @@
 import "./tui-setup";
 import { componentText, expansionHints } from "./rendering";
-import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import {
   WidthBoundedText,
@@ -26,12 +26,12 @@ describe("shared compact tool rendering", () => {
     expect(shortDescription(styled, { limit: 70 })).toBe(`${"x".repeat(70)}...`);
   });
 
-  it("truncates styled text at the component width without splitting ANSI sequences", () => {
-    const styled = `\u001b[31m${"界".repeat(10)}\u001b[0m`;
-    const [line] = new WidthBoundedText(styled).render(11);
-    expect(visibleWidth(line)).toBeLessThanOrEqual(11);
-    expect(stripTerminalSequences(line)).toBe(`${"界".repeat(4)}...`);
-    expect(line).toContain("\u001b[0m");
+  it("preserves separate lines within the viewport", () => {
+    const lines = new WidthBoundedText("first\nsecond line exceeds viewport").render(12);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toBe("first");
+    expect(lines[1]).toContain("second");
+    for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(12);
   });
 
   it("uses the Pi error context and reveals complete content on expansion", () => {

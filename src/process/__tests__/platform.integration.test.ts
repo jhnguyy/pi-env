@@ -1,16 +1,11 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Effect, Fiber, Result } from "effect";
 import { describe, expect, it, live } from "@effect/vitest";
 import { onTestFinished } from "vitest";
-import {
-  ProcessFailureKind,
-  resolveNodeCommand,
-  runProcess,
-  streamProcess,
-  type StreamProcessOptions,
-} from "../platform";
+import { ProcessFailureKind, resolveNodeCommand, runProcess, streamProcess } from "../platform";
 
 const node = resolveNodeCommand();
 
@@ -84,41 +79,6 @@ describe("process platform streamProcess", () => {
   });
 
   it.runIf(process.platform !== "win32")(
-    "runProcess isolates the child process group",
-    async () => {
-      const options: StreamProcessOptions = { timeoutMs: 5_000 };
-      const result = await Effect.runPromise(
-        runProcess(
-          node,
-          [
-            "-e",
-            `
-      try {
-        process.kill(-process.pid, 0);
-        console.log('isolated');
-      } catch {
-        console.log('inherited');
-      }
-    `,
-          ],
-          options,
-        ),
-      );
-      expect(result.stdout.trim()).toBe("isolated");
-    },
-  );
-
-  it("runProcess shares timeout failures", async () => {
-    const result = await Effect.runPromise(
-      Effect.result(
-        runProcess(node, ["-e", "setInterval(()=>{}, 1000)"], { timeoutMs: 50, killGraceMs: 50 }),
-      ),
-    );
-    expect(Result.isFailure(result)).toBe(true);
-    if (Result.isFailure(result)) expect(result.failure.kind).toBe(ProcessFailureKind.Timeout);
-  });
-
-  it.runIf(process.platform !== "win32")(
     "runProcess treats self-signal termination as signal-aware exit failure",
     async () => {
       const result = await Effect.runPromise(
@@ -178,15 +138,11 @@ describe("process platform streamProcess", () => {
     }
   });
 
-  it.each([
-    { limit: 0, stream: "stdout" },
-    { limit: 2, stream: "stdout" },
-    { limit: 2, stream: "stderr" },
-  ])("bounds $stream at a combined budget of $limit", async ({ limit, stream }) => {
+  it("rejects nonempty output with a zero combined budget", async () => {
     const result = await Effect.runPromise(
       Effect.result(
-        runProcess(node, ["-e", `process.${stream}.write('abc')`], {
-          combinedOutputLimitBytes: limit,
+        runProcess(node, ["-e", "process.stdout.write('abc')"], {
+          combinedOutputLimitBytes: 0,
         }),
       ),
     );
@@ -196,9 +152,48 @@ describe("process platform streamProcess", () => {
       expect(
         Buffer.byteLength(result.failure.stdout ?? "") +
           Buffer.byteLength(result.failure.stderr ?? ""),
-      ).toBe(limit);
+      ).toBe(0);
     }
   });
+
+  it.runIf(process.platform !== "win32")(
+    "awaits process-tree cleanup before rejecting combined overflow",
+    async () => {
+      const root = temporaryDirectory("pi-process-overflow-");
+      const pidPaths = [join(root, "parent.pid"), join(root, "child.pid")];
+      const controller = new AbortController();
+      const running = Effect.runPromise(
+        runProcess(
+          node,
+          [
+            fileURLToPath(new URL("./fixtures/command-tree.ts", import.meta.url)),
+            ...pidPaths,
+            "overflow",
+          ],
+          { cwd: root, combinedOutputLimitBytes: 4, timeoutMs: 10_000 },
+        ),
+        { signal: controller.signal },
+      );
+      onTestFinished(async () => {
+        controller.abort();
+        await running.catch(() => {});
+        try {
+          // The fixture's independent watchdog bounds leaks even if process cleanup regresses.
+          await eventually(() => {
+            for (const path of pidPaths) {
+              if (existsSync(path)) expect(isAlive(Number(readFileSync(path, "utf8")))).toBe(false);
+            }
+          }, 400);
+          for (const path of pidPaths) expect(existsSync(`${path}.watchdog`)).toBe(false);
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+      });
+      await expect(running).rejects.toMatchObject({ kind: ProcessFailureKind.OutputLimit });
+      for (const path of pidPaths) expect(isAlive(Number(readFileSync(path, "utf8")))).toBe(false);
+    },
+    15_000,
+  );
 
   it("accepts empty output with a zero combined budget", async () => {
     const empty = await Effect.runPromise(

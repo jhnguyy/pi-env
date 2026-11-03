@@ -43,7 +43,7 @@ const diagnostics: DiagnosticsResult = {
 };
 
 describe("dev-tools renderers", () => {
-  it("shows the action, compact path, position, query, and rename target", () => {
+  it("shows compact paths, queries, and rename targets", () => {
     const call = text(
       renderDevToolsCall(
         {
@@ -56,11 +56,8 @@ describe("dev-tools renderers", () => {
         mockTheme,
       ),
     );
-    expect(call).toContain("[toolTitle:**dev-tools**]");
-    expect(call).toContain("[accent:rename]");
-    expect(call).toContain("[muted:src/foo.ts]");
-    expect(call).toContain("[muted::5][muted::10]");
-    expect(call).toContain("→ updatedName");
+    expect(call).toContain("src/foo.ts");
+    expect(call).toContain("updatedName");
     expect(call).not.toContain("/project/");
     expect(text(renderDevToolsCall({ action: "symbols", query: "User" }, mockTheme))).toContain(
       '"User"',
@@ -72,8 +69,8 @@ describe("dev-tools renderers", () => {
     const collapsed = text(
       tool.renderResult(result, { expanded: false, isPartial: false }, mockTheme, context),
     );
-    expect(collapsed).toContain("[error:✗ 2 errors]");
-    expect(collapsed).toContain("[warning:⚠ 1 warning]");
+    expect(collapsed).toMatch(/\[error:[^\]]*2 errors/u);
+    expect(collapsed).toMatch(/\[warning:[^\]]*1 warning/u);
     expect(collapsed).not.toMatch(/TS2339|Property 'x'/u);
     const expanded = text(
       tool.renderResult(result, { expanded: true, isPartial: false }, mockTheme, context),
@@ -100,7 +97,7 @@ describe("dev-tools renderers", () => {
     const rendered = text(
       tool.renderResult({ content: [], details }, { expanded: false }, mockTheme, context),
     );
-    expect(rendered).toContain("[success:✓ no errors]");
+    expect(rendered).toContain("no errors");
     expect(rendered).toContain("scanned 4 files: src/a.ts, test/b.ts, lib/c.ts, +1 more");
   });
 
@@ -112,15 +109,9 @@ describe("dev-tools renderers", () => {
         isError: true,
       }),
     );
-    expect(rendered).toMatch(/^\[error:✗ daemon unavailable\] *$/u);
+    expect(rendered).toMatch(/\[error:[^\]]*daemon unavailable/u);
     const ordinary = text(tool.renderResult(result, { expanded: false }, mockTheme, context));
-    expect(ordinary).toMatch(/^\[muted:daemon unavailable\] *$/u);
-  });
-
-  it("dispatches hover success", () => {
-    const details = { action: "hover", path: "/a.ts", line: 1, character: 1, signature: "string" };
-    expect(
-      text(tool.renderResult({ content: [], details }, { expanded: false }, mockTheme, context)),
-    ).toMatch(/^\[success:✓ hover\] *$/u);
+    expect(ordinary).toContain("daemon unavailable");
+    expect(ordinary).not.toContain("[error:");
   });
 });

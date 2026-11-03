@@ -81,7 +81,7 @@ The helper registers one native tool. It does not publish a second AgentTool or 
 
 Pass review-private definitions through the existing [DAG submission authority](../../.pi/extensions/_shared/dag-runtime-service.ts). Do not publish run-bound callbacks globally or serialize functions into graph artifacts. Native child sessions load ordinary extensions and receive only their run's supplied definitions.
 
-Use the [registration contract test](../../.pi/extensions/__tests__/register-contract-tool.test.ts) and representative native tool tests, such as [closeout](../../.pi/extensions/dev-tools/__tests__/closeout.integration.test.ts), for schema, context, cancellation, progress, and rendering metadata. State side effects and operational limits in safety-sensitive descriptions.
+Use the [tool adapter tests](../../.pi/extensions/__tests__/tool-contract.test.ts) for invocation context, cancellation, and progress, and representative native tool tests, such as [closeout](../../.pi/extensions/dev-tools/__tests__/closeout.integration.test.ts), for execution behavior. State side effects and operational limits in safety-sensitive descriptions.
 
 [Child creation context](../../.pi/extensions/_shared/child-context.ts) identifies target cwd and agentDir across native loading and independently bundled extensions. Root orchestration factories return early in that scope. Do not change process cwd or environment variables to identify a child.
 

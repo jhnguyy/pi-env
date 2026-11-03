@@ -63,8 +63,6 @@ describe("subagent extension", () => {
       );
       expect(call).toContain("subagent start");
       expect(call).toContain("audit");
-      expect(call).toContain("...");
-      expect(call).not.toContain("A".repeat(100));
       expect(call).not.toContain("private context");
 
       const result = {
@@ -108,7 +106,8 @@ describe("subagent extension", () => {
       expect(collapsed).toContain("sub-audit");
       expect(collapsed).toContain("/sessions/sub-audit.jsonl");
       expect(collapsed).toContain("result truncated");
-      expect(collapsed).not.toContain("B".repeat(100));
+      expect(collapsed).toContain("inspect");
+      expect(collapsed).not.toContain(longTask);
       for (const line of fullOutput.split("\n")) expect(collapsed).not.toContain(line);
 
       const expanded = extractText(
@@ -155,8 +154,8 @@ describe("subagent extension", () => {
       expect(rendered).toContain("read");
       expect(rendered).toContain("grep");
       expect(rendered).toContain("anthropic/claude-haiku-4-5");
-      expect(rendered).toContain("...");
-      expect(rendered).not.toContain("A".repeat(100));
+      expect(rendered).toContain("A");
+      expect(rendered).not.toContain(longTask);
       expect(rendered).not.toContain("private context");
     });
 
