@@ -19,7 +19,10 @@ it("holds native ownership until close settles and rejects overlapping input", a
   let child: ChildTypes.NativeChildSession | undefined;
   const operations: Promise<unknown>[] = [];
   const { Type } = await import("typebox");
-  const supervisor = new Control.SubagentRunSupervisor("native-test", Config.resolveSubagentRuntimeConfig({}));
+  const supervisor = new Control.SubagentRunSupervisor(
+    "native-test",
+    Config.resolveSubagentRuntimeConfig({}),
+  );
   cleanup(() => supervisor.shutdown());
   const blocker = await supervisor.acquire({
     runId: "blocker",
@@ -39,7 +42,10 @@ it("holds native ownership until close settles and rejects overlapping input", a
     aborted = resolve;
   });
   cleanup(
-    () => { blocker.release(); release(); },
+    () => {
+      blocker.release();
+      release();
+    },
     () => child?.close(),
     () => supervisor.shutdown(),
     () => settleOperations(operations),
@@ -65,39 +71,45 @@ export default function(pi) {
       cwd: root,
       isProjectTrusted: () => true,
     };
-    const owner = ChildContext.withChildContext({ cwd: root, agentDir: join(root, "agent") }, () => new NativeChildOwner(
-      {
-        name: "gated",
-        task: "run gate",
-        cwd: root,
-        modelOverride: "gated-child/faux-1",
-        toolNames: ["gate"],
-        customTools: [
+    const owner = ChildContext.withChildContext(
+      { cwd: root, agentDir: join(root, "agent") },
+      () =>
+        new NativeChildOwner(
           {
-            name: "gate",
-            label: "Gate",
-            description: "Cooperative gated test tool",
-            parameters: Type.Object({}),
-            async execute(_id, _params, signal) {
-              signal?.addEventListener("abort", aborted, { once: true });
-              enter();
-              await gate;
-              return { content: [{ type: "text", text: "settled" }], details: {} };
-            },
+            name: "gated",
+            task: "run gate",
+            cwd: root,
+            modelOverride: "gated-child/faux-1",
+            toolNames: ["gate"],
+            customTools: [
+              {
+                name: "gate",
+                label: "Gate",
+                description: "Cooperative gated test tool",
+                parameters: Type.Object({}),
+                async execute(_id, _params, signal) {
+                  signal?.addEventListener("abort", aborted, { once: true });
+                  enter();
+                  await gate;
+                  return { content: [{ type: "text", text: "settled" }], details: {} };
+                },
+              },
+            ],
           },
-        ],
-      },
-      ctx,
-      SessionManager.create(root, join(root, "children")),
-      supervisor,
-      {},
-    ));
+          ctx,
+          SessionManager.create(root, join(root, "children")),
+          supervisor,
+          {},
+        ),
+    );
     child = owner;
     supervisor.retainChild(owner);
     const running = owner.runInitial();
     operations.push(running);
     expect(child.inspect().state).toBe("queued");
-    await expect(child.input("not yet streaming", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow();
+    await expect(
+      child.input("not yet streaming", ChildTypes.NativeInputMode.Prompt),
+    ).rejects.toThrow();
     blocker.release();
     await entered;
     await expect(child.input("overlap", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow();
@@ -130,6 +142,5 @@ export default function(pi) {
     expect(
       entries.filter((e) => e.type === "custom" && e.customType === "shutdown-hook"),
     ).toHaveLength(1);
-
   }
 }, 30000);

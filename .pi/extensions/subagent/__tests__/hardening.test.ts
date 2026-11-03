@@ -15,10 +15,16 @@ it("cancels explicitly but preserves accepted work and history across parent dis
   cleanup(() => rmSync(root, { recursive: true, force: true }));
   const agentDir = join(root, "agent");
   const service = new RegisteredServiceFixture(agentDir);
-  const runtime = new SessionRuntime.SubagentSessionRuntime({ appendEntry: () => {}, events: { emit: () => {} } } as any);
+  const runtime = new SessionRuntime.SubagentSessionRuntime({
+    appendEntry: () => {},
+    events: { emit: () => {} },
+  } as any);
   const operations: Promise<unknown>[] = [];
   cleanup(
-    () => { writeFileSync(join(root, "release-cancel"), "release"); writeFileSync(join(root, "release-survive"), "release"); },
+    () => {
+      writeFileSync(join(root, "release-cancel"), "release");
+      writeFileSync(join(root, "release-survive"), "release");
+    },
     () => runtime.shutdownSession(),
     () => service.close(),
     () => settleOperations(operations),
@@ -28,7 +34,9 @@ it("cancels explicitly but preserves accepted work and history across parent dis
   {
     mkdirSync(agentDir);
     const extension = join(agentDir, "provider.mjs");
-    writeFileSync(extension, `import { fauxProvider, fauxAssistantMessage, fauxToolCall } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
+    writeFileSync(
+      extension,
+      `import { fauxProvider, fauxAssistantMessage, fauxToolCall } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
 import { existsSync, writeFileSync } from 'node:fs';
 const root = ${JSON.stringify(root)};
 export default function(pi) {
@@ -42,21 +50,45 @@ export default function(pi) {
    if(signal.aborted) writeFileSync(root+'/aborted-'+params.name,'aborted');
    return {content:[{type:'text',text:'settled'}],details:{}};
  }});
-}`);
-    writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ extensions: [extension], defaultProvider: "bounded", defaultModel: "faux-1", retry: { enabled: false } }));
-    writeFileSync(join(agentDir, "models.json"), JSON.stringify({ providers: { bounded: { apiKey: "synthetic-local-only" } } }));
+}`,
+    );
+    writeFileSync(
+      join(agentDir, "settings.json"),
+      JSON.stringify({
+        extensions: [extension],
+        defaultProvider: "bounded",
+        defaultModel: "faux-1",
+        retry: { enabled: false },
+      }),
+    );
+    writeFileSync(
+      join(agentDir, "models.json"),
+      JSON.stringify({ providers: { bounded: { apiKey: "synthetic-local-only" } } }),
+    );
     new ProjectTrustStore(agentDir).set(root, true);
-    const ctx: any = { cwd: root, sessionManager: SessionManager.create(root, join(root, "sessions")), isProjectTrusted: () => true };
+    const ctx: any = {
+      cwd: root,
+      sessionManager: SessionManager.create(root, join(root, "sessions")),
+      isProjectTrusted: () => true,
+    };
     await service.start();
     await runtime.startSession(ctx);
     const params = { name: "bounded", model: "bounded/faux-1", tools: ["wait_for_release"] };
     const controller = new AbortController();
     cleanup(() => controller.abort());
-    const running = runtime.execute("explicit-cancel", { ...params, task: "cancel" }, controller.signal, undefined, ctx);
+    const running = runtime.execute(
+      "explicit-cancel",
+      { ...params, task: "cancel" },
+      controller.signal,
+      undefined,
+      ctx,
+    );
     operations.push(running);
     try {
       await expect.poll(() => existsSync(join(root, "entered-cancel"))).toBe(true);
-    } finally { controller.abort(); }
+    } finally {
+      controller.abort();
+    }
     const cancelled = await running;
     expect(cancelled.details.isError).toBe(true);
     expect(existsSync(join(root, "aborted-cancel"))).toBe(true);
@@ -71,7 +103,10 @@ export default function(pi) {
     expect(existsSync(join(root, "aborted-survive"))).toBe(false);
     writeFileSync(join(root, "release-survive"), "release");
     expect((await runtime.waitJob(id)).job?.status).toBe("completed");
-    expect(await runtime.resultJob(id)).toMatchObject({ text: "settled:survive", truncated: false });
+    expect(await runtime.resultJob(id)).toMatchObject({
+      text: "settled:survive",
+      truncated: false,
+    });
     await runtime.shutdownSession();
     await runtime.startSession(ctx);
     expect(runtime.getJob(id)?.status).toBe("completed");

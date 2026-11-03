@@ -12,6 +12,7 @@ import {
   reconstructDagSession,
   submitDagRun,
   type DagExecutorRegistry,
+  type DagSubagentRuntimeRequest,
   type DagExecutorRegistryService,
   type DagRunHandle,
   type DagRuntimeJournal,
@@ -30,7 +31,7 @@ import {
   type DagRuntimeUsage,
 } from "../_shared/dag-runtime-service";
 import type { SubagentServiceConnection } from "./service-host";
-import { createDagSubagentExecutorRegistry } from "./dag-runtime";
+import { createDagSubagentExecutorRegistry, makeDagSubagentRuntime } from "./dag-runtime";
 import { createDagSessionStore, persistedDagRunIds } from "./dag-session-store";
 import { addUsage, zeroUsage, type SubagentUsageLedger } from "./usage";
 
@@ -64,8 +65,17 @@ export class DagSessionRuntime {
     private readonly parentSessionId: string,
     private readonly sessionGeneration: string,
     ctx: ExtensionContext,
+    telemetryRuntime: ToolingTelemetryRuntime,
   ) {
     const service = Object.freeze({
+      runSubagent: (request: DagSubagentRuntimeRequest, authority: DagRuntimeSubmissionAuthority) =>
+        makeDagSubagentRuntime(ctx, {
+          serviceConnection: this.serviceConnection,
+          ledger: this.ledger,
+          telemetryRuntime,
+          workspaceRootForRun: () => authority.workspaceRoot,
+          capabilityForRun: () => authority.capability,
+        }).run(request),
       submit: <TPayload>(
         graph: ValidatedDagDefinition<TPayload>,
         authority?: DagRuntimeSubmissionAuthority,
@@ -76,9 +86,12 @@ export class DagSessionRuntime {
       },
       usage: (runId: string): DagRuntimeUsage => {
         const prefix = dagUsagePrefix(runId);
-        return Object.freeze(this.ledger.rows()
-          .filter((row) => row.id.startsWith(prefix))
-          .reduce((total, row) => addUsage(total, row.usage), zeroUsage()));
+        return Object.freeze(
+          this.ledger
+            .rows()
+            .filter((row) => row.id.startsWith(prefix))
+            .reduce((total, row) => addUsage(total, row.usage), zeroUsage()),
+        );
       },
     });
     this.registration = registerDagRuntimeService(pi, {
@@ -95,7 +108,7 @@ export class DagSessionRuntime {
   ): Promise<DagSessionRuntime> {
     const parentSessionId = ctx.sessionManager.getSessionId();
     const artifactRoot = path.join(
-      ctx.sessionManager.getSessionDir(),
+      path.resolve(ctx.cwd, ctx.sessionManager.getSessionDir()),
       "dag-artifacts",
       parentSessionId,
     );
@@ -113,13 +126,7 @@ export class DagSessionRuntime {
         dependencies.sessionGeneration,
         {
           workspaceRootForRun: (runId) => authorities.get(runId)?.workspaceRoot,
-          reviewCapabilityForRun: async (runId) => {
-            const descriptor = authorities.get(runId)?.reviewCapability;
-            if (!descriptor) return undefined;
-            const reconstruction = await Effect.runPromise(reconstructDagSession(store, runId));
-            // Replay failures can contain Error instances; transport only their data.
-            return structuredClone({ ...descriptor, reconstruction: JSON.parse(JSON.stringify(reconstruction)) });
-          },
+          capabilityForRun: (runId) => authorities.get(runId)?.capability,
           ledger: dependencies.ledger,
           serviceConnection: dependencies.serviceConnection,
           telemetryRuntime: dependencies.telemetryRuntime,
@@ -139,6 +146,7 @@ export class DagSessionRuntime {
         parentSessionId,
         dependencies.sessionGeneration,
         ctx,
+        dependencies.telemetryRuntime,
       );
     } catch (cause) {
       await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -187,13 +195,16 @@ export class DagSessionRuntime {
           new DagRuntimeNotAccepting({ message: "The session DAG runtime is shutting down." }),
         );
       }
-      if (authority?.customTools?.length) {
-        return Effect.fail(new DagRuntimeNotAccepting({
-          message: "Arbitrary custom ToolDefinitions are unsupported; supply a data-only review capability.",
-        }));
-      }
-      if (authority?.reviewCapability && authority.reviewCapability.runId !== graph.runId) {
-        return Effect.fail(new DagRuntimeNotAccepting({ message: "Review capability does not match the DAG run." }));
+      if (
+        authority &&
+        Object.keys(authority).some((key) => key !== "workspaceRoot" && key !== "capability")
+      ) {
+        return Effect.fail(
+          new DagRuntimeNotAccepting({
+            message:
+              "Unsupported DAG authority; supply only workspaceRoot and data-only capability.",
+          }),
+        );
       }
       if (this.claimedRunIds.has(graph.runId)) {
         return Effect.fail(
@@ -207,7 +218,9 @@ export class DagSessionRuntime {
       try {
         detachedAuthority = authority ? structuredClone(authority) : undefined;
       } catch {
-        return Effect.fail(new DagRuntimeNotAccepting({ message: "DAG authority must be data-only." }));
+        return Effect.fail(
+          new DagRuntimeNotAccepting({ message: "DAG authority must be data-only." }),
+        );
       }
       this.claimedRunIds.add(graph.runId);
       if (detachedAuthority) this.authorities.set(graph.runId, detachedAuthority);
@@ -276,12 +289,16 @@ export class DagSessionRuntime {
             await: removeAfterTerminal(handle.await),
             cancel: removeAfterTerminal(
               handle.cancel.pipe(
-                Effect.tap(() => Effect.tryPromise({
-                  try: () => this.serviceConnection.view.closeRun({ runId: graph.runId }),
-                  catch: (cause) => new DagRuntimeCoordinatorFatal({
-                    message: "Native DAG cancellation could not settle its service run.", cause,
+                Effect.tap(() =>
+                  Effect.tryPromise({
+                    try: () => this.serviceConnection.view.closeRun({ runId: graph.runId }),
+                    catch: (cause) =>
+                      new DagRuntimeCoordinatorFatal({
+                        message: "Native DAG cancellation could not settle its service run.",
+                        cause,
+                      }),
                   }),
-                })),
+                ),
               ),
             ),
           } satisfies DagRunHandle);

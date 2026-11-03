@@ -32,6 +32,7 @@ function createEvents(): DagRuntimeServiceEvents {
 }
 
 const service: ActiveDagRuntimeService = {
+  runSubagent: () => Effect.die("unused"),
   closeChildren: async () => {},
   submit: () => Effect.die("unused"),
   reconstruct: () => Effect.die("unused"),
@@ -52,7 +53,8 @@ afterEach(() => {
       failures.push(error);
     }
   }
-  if (failures.length) throw new AggregateError(failures, "DAG runtime subscriptions failed to stop.");
+  if (failures.length)
+    throw new AggregateError(failures, "DAG runtime subscriptions failed to stop.");
 });
 
 describe("DAG runtime service registration", () => {

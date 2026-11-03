@@ -1,23 +1,42 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { getKeybindings, Input, Key, matchesKey, ScrollView, SelectList, Text, truncateToWidth, type Component, type Focusable, type TUI } from "@earendil-works/pi-tui";
+import {
+  getKeybindings,
+  Input,
+  Key,
+  matchesKey,
+  ScrollView,
+  SelectList,
+  Text,
+  truncateToWidth,
+  type Component,
+  type Focusable,
+  type TUI,
+} from "@earendil-works/pi-tui";
 import * as ChildTypes from "./child-types";
 import type * as SessionRuntime from "./session-runtime";
 import * as Transcript from "./transcript";
 
-type BrowserSource = Pick<SessionRuntime.SubagentSessionRuntime, "listChildren" | "inspectChild" | "cancelChild" | "reopenChild">;
+type BrowserSource = Pick<
+  SessionRuntime.SubagentSessionRuntime,
+  "listChildren" | "inspectChild" | "cancelChild" | "reopenChild"
+>;
 type Child = NonNullable<Awaited<ReturnType<BrowserSource["inspectChild"]>>>;
 type ChildSummary = ReturnType<BrowserSource["listChildren"]>[number];
 export const VIEWS = ["conversation", "instructions", "configuration", "provenance"] as const;
-export type View = typeof VIEWS[number];
+export type View = (typeof VIEWS)[number];
 
 export function childViewText(child: Child, view: View): string {
   switch (view) {
     case "instructions":
       return `Original coordinator task\n${child.task}\n\nNative system prompt\n${child.systemPrompt}`;
     case "configuration":
-      return `Child: ${child.id}\nParent operation: ${child.runId}\nCwd: ${child.cwd}\nModel: ${child.model ?? "unavailable"}\nNative session: ${child.sessionFile ?? "unavailable"}\n\nActive tools\n${child.activeTools.join("\n") || "(none)"}\n\nCallable tools\n${child.callableTools.join("\n") || "(none)"}\n\nInitial result\n${child.initialResult ? child.initialResult.isError ? "Failed" : "Completed" : "Pending"}\n\nHistorical owners require explicit reopen. Only continue with pi --session after this owner closes. The session file is not deleted on eviction.`;
+      return `Child: ${child.id}\nParent operation: ${child.runId}\nCwd: ${child.cwd}\nModel: ${child.model ?? "unavailable"}\nNative session: ${child.sessionFile ?? "unavailable"}\n\nActive tools\n${child.activeTools.join("\n") || "(none)"}\n\nCallable tools\n${child.callableTools.join("\n") || "(none)"}\n\nInitial result\n${child.initialResult ? (child.initialResult.isError ? "Failed" : "Completed") : "Pending"}\n\nHistorical owners require explicit reopen. Only continue with pi --session after this owner closes. The session file is not deleted on eviction.`;
     case "provenance":
-      return child.inputs.map((input) => `${input.source} · ${input.mode} · ${input.at}\n${input.text}`).join("\n\n") || "No recorded inputs.";
+      return (
+        child.inputs
+          .map((input) => `${input.source} · ${input.mode} · ${input.at}\n${input.text}`)
+          .join("\n\n") || "No recorded inputs."
+      );
     case "conversation":
       return `Native conversation (compaction may summarize earlier messages)\n\n${Transcript.childMessagesText(child.messages)}`;
   }
@@ -29,10 +48,14 @@ function oneLine(text: string): string {
 
 function inputMode(data: string): ChildTypes.NativeInputMode | undefined {
   switch (data) {
-    case "p": return ChildTypes.NativeInputMode.Prompt;
-    case "s": return ChildTypes.NativeInputMode.Steer;
-    case "f": return ChildTypes.NativeInputMode.FollowUp;
-    default: return undefined;
+    case "p":
+      return ChildTypes.NativeInputMode.Prompt;
+    case "s":
+      return ChildTypes.NativeInputMode.Steer;
+    case "f":
+      return ChildTypes.NativeInputMode.FollowUp;
+    default:
+      return undefined;
   }
 }
 
@@ -74,7 +97,9 @@ export class SubagentBrowser implements Component, Focusable {
     this.timer.unref();
   }
 
-  get focused(): boolean { return this.hasFocus; }
+  get focused(): boolean {
+    return this.hasFocus;
+  }
   set focused(value: boolean) {
     this.hasFocus = value;
     this.search.focused = value && !this.selectedId;
@@ -82,21 +107,29 @@ export class SubagentBrowser implements Component, Focusable {
 
   private filteredChildren(): ChildSummary[] {
     const query = this.search.getValue().toLowerCase();
-    return this.source.listChildren().filter((child) => oneLine(`${child.name} ${child.id} ${child.state} ${child.model ?? ""}`).toLowerCase().includes(query));
+    return this.source.listChildren().filter((child) =>
+      oneLine(`${child.name} ${child.id} ${child.state} ${child.model ?? ""}`)
+        .toLowerCase()
+        .includes(query),
+    );
   }
 
   private createList(): SelectList {
-    const list = new SelectList(this.filteredChildren().map((child) => ({
-      value: child.id,
-      label: oneLine(child.name),
-      description: `[${child.state}] ${child.id.slice(0, 8)} ${oneLine(child.model ?? "")}`,
-    })), Math.min(8, this.height), {
-      selectedPrefix: (text) => this.theme.fg("accent", text),
-      selectedText: (text) => this.theme.fg("accent", text),
-      description: (text) => this.theme.fg("muted", text),
-      scrollInfo: (text) => this.theme.fg("dim", text),
-      noMatch: (text) => this.theme.fg("warning", text),
-    });
+    const list = new SelectList(
+      this.filteredChildren().map((child) => ({
+        value: child.id,
+        label: oneLine(child.name),
+        description: `[${child.state}] ${child.id.slice(0, 8)} ${oneLine(child.model ?? "")}`,
+      })),
+      Math.min(8, this.height),
+      {
+        selectedPrefix: (text) => this.theme.fg("accent", text),
+        selectedText: (text) => this.theme.fg("accent", text),
+        description: (text) => this.theme.fg("muted", text),
+        scrollInfo: (text) => this.theme.fg("dim", text),
+        noMatch: (text) => this.theme.fg("warning", text),
+      },
+    );
     list.onSelect = (item) => {
       this.selectedId = item.value;
       this.selectionGeneration++;
@@ -114,7 +147,10 @@ export class SubagentBrowser implements Component, Focusable {
 
   private updateRoster(): void {
     const children = this.filteredChildren();
-    const key = JSON.stringify([this.height, children.map((child) => [child.id, child.name, child.state, child.model])]);
+    const key = JSON.stringify([
+      this.height,
+      children.map((child) => [child.id, child.name, child.state, child.model]),
+    ]);
     if (key === this.rosterKey) return;
     const selected = this.list.getSelectedItem()?.value;
     this.rosterKey = key;
@@ -164,7 +200,8 @@ export class SubagentBrowser implements Component, Focusable {
         await this.refreshSelected();
       }
     } catch (error) {
-      if (!this.disposed && generation === this.selectionGeneration) this.showStatus(error instanceof Error ? error.message : String(error));
+      if (!this.disposed && generation === this.selectionGeneration)
+        this.showStatus(error instanceof Error ? error.message : String(error));
     } finally {
       this.reopening = false;
     }
@@ -174,7 +211,12 @@ export class SubagentBrowser implements Component, Focusable {
     if (this.disposed) return;
     try {
       if (this.selectedId) this.handleChildInput(data);
-      else if ((["tui.select.cancel", "tui.select.confirm", "tui.select.up", "tui.select.down"] as const).some((action) => getKeybindings().matches(data, action))) this.list.handleInput(data);
+      else if (
+        (
+          ["tui.select.cancel", "tui.select.confirm", "tui.select.up", "tui.select.down"] as const
+        ).some((action) => getKeybindings().matches(data, action))
+      )
+        this.list.handleInput(data);
       else {
         this.search.handleInput(data);
         this.rosterKey = "";
@@ -207,10 +249,20 @@ export class SubagentBrowser implements Component, Focusable {
     if (mode) {
       const child = this.source.listChildren().find((entry) => entry.id === id);
       if (!child) throw new Error("Child session is no longer retained.");
-      if (mode === ChildTypes.NativeInputMode.Prompt ? child.state !== ChildTypes.NativeChildState.Idle : child.state !== ChildTypes.NativeChildState.Running) {
-        throw new Error(mode === ChildTypes.NativeInputMode.Prompt ? "Use prompt only when idle; use steer or follow-up while running." : "Steer and follow-up require a running child; use prompt when idle.");
+      if (
+        mode === ChildTypes.NativeInputMode.Prompt
+          ? child.state !== ChildTypes.NativeChildState.Idle
+          : child.state !== ChildTypes.NativeChildState.Running
+      ) {
+        throw new Error(
+          mode === ChildTypes.NativeInputMode.Prompt
+            ? "Use prompt only when idle; use steer or follow-up while running."
+            : "Steer and follow-up require a running child; use prompt when idle.",
+        );
       }
-      void this.compose(id, mode).catch((error) => this.showStatus(error instanceof Error ? error.message : String(error)));
+      void this.compose(id, mode).catch((error) =>
+        this.showStatus(error instanceof Error ? error.message : String(error)),
+      );
       return;
     }
     if (data === "r") {
@@ -219,32 +271,73 @@ export class SubagentBrowser implements Component, Focusable {
     }
     if (data === "c") {
       this.showStatus("Cancellation requested; waiting for native settlement.");
-      void this.source.cancelChild(id).then(() => this.showStatus(`${id.slice(0, 8)}: cancellation settled.`), (error) => this.showStatus(error instanceof Error ? error.message : String(error)));
+      void this.source.cancelChild(id).then(
+        () => this.showStatus(`${id.slice(0, 8)}: cancellation settled.`),
+        (error) => this.showStatus(error instanceof Error ? error.message : String(error)),
+      );
       return;
     }
     const actions = [
-      [Key.up, () => this.scroll.scrollBy(-1)], [Key.down, () => this.scroll.scrollBy(1)],
-      [Key.pageUp, () => this.scroll.scrollBy(-this.height)], [Key.pageDown, () => this.scroll.scrollBy(this.height)],
-      [Key.home, () => this.scroll.scrollToStart()], [Key.end, () => this.scroll.scrollToEnd()],
+      [Key.up, () => this.scroll.scrollBy(-1)],
+      [Key.down, () => this.scroll.scrollBy(1)],
+      [Key.pageUp, () => this.scroll.scrollBy(-this.height)],
+      [Key.pageDown, () => this.scroll.scrollBy(this.height)],
+      [Key.home, () => this.scroll.scrollToStart()],
+      [Key.end, () => this.scroll.scrollToEnd()],
     ] as const;
     actions.find(([key]) => matchesKey(data, key))?.[1]();
   }
 
   render(width: number): string[] {
     const budget = Math.max(1, Math.floor(this.tui.terminal.rows * 0.8));
-    if (budget < 6 || width < 8) return ["Terminal too small.", "Esc back"].slice(0, budget).map((line) => truncateToWidth(line, Math.max(1, width)));
+    if (budget < 6 || width < 8)
+      return ["Terminal too small.", "Esc back"]
+        .slice(0, budget)
+        .map((line) => truncateToWidth(line, Math.max(1, width)));
     this.height = Math.max(1, budget - 4);
     try {
       this.updateRoster();
       const child = this.child;
-      const summary = this.selectedId ? this.source.listChildren().find((entry) => entry.id === this.selectedId) : undefined;
-      const text = child ? Transcript.plainChildText(childViewText(child, this.view)) : this.loadError || (this.loading ? "Loading selected child…" : "No live inspection available. Press r to reopen a historical child explicitly. Its native transcript has not been deleted.");
-      if (text !== this.bodyText) { this.bodyText = text; this.text.setText(text); }
-      const body = this.selectedId ? this.renderChild(width) : [...this.search.render(width), ...this.list.render(width)];
-      const title = summary ? `${oneLine(summary.name)} [${summary.state}] · ${this.view}` : `Subagents · ${this.source.listChildren().length} retained sessions`;
-      return [this.theme.fg("accent", title), ...(this.status ? [this.theme.fg("warning", this.status)] : []), ...body, this.theme.fg("dim", this.selectedId ? "Esc roster · Tab view · p prompt · s steer · f follow-up · c cancel · r reopen · ↑↓ scroll" : "Esc parent · Type to search · ↑↓ select · Enter inspect")].slice(0, budget).map((line) => truncateToWidth(line, Math.max(1, width)));
+      const summary = this.selectedId
+        ? this.source.listChildren().find((entry) => entry.id === this.selectedId)
+        : undefined;
+      const text = child
+        ? Transcript.plainChildText(childViewText(child, this.view))
+        : this.loadError ||
+          (this.loading
+            ? "Loading selected child…"
+            : "No live inspection available. Press r to reopen a historical child explicitly. Its native transcript has not been deleted.");
+      if (text !== this.bodyText) {
+        this.bodyText = text;
+        this.text.setText(text);
+      }
+      const body = this.selectedId
+        ? this.renderChild(width)
+        : [...this.search.render(width), ...this.list.render(width)];
+      const title = summary
+        ? `${oneLine(summary.name)} [${summary.state}] · ${this.view}`
+        : `Subagents · ${this.source.listChildren().length} retained sessions`;
+      return [
+        this.theme.fg("accent", title),
+        ...(this.status ? [this.theme.fg("warning", this.status)] : []),
+        ...body,
+        this.theme.fg(
+          "dim",
+          this.selectedId
+            ? "Esc roster · Tab view · p prompt · s steer · f follow-up · c cancel · r reopen · ↑↓ scroll"
+            : "Esc parent · Type to search · ↑↓ select · Enter inspect",
+        ),
+      ]
+        .slice(0, budget)
+        .map((line) => truncateToWidth(line, Math.max(1, width)));
     } catch (error) {
-      return ["Subagent view unavailable.", oneLine(error instanceof Error ? error.message : String(error)), "Esc back"].slice(0, budget).map((line) => truncateToWidth(line, Math.max(1, width)));
+      return [
+        "Subagent view unavailable.",
+        oneLine(error instanceof Error ? error.message : String(error)),
+        "Esc back",
+      ]
+        .slice(0, budget)
+        .map((line) => truncateToWidth(line, Math.max(1, width)));
     }
   }
 
@@ -254,7 +347,23 @@ export class SubagentBrowser implements Component, Focusable {
     return lines.slice(this.scroll.scrollTop, this.scroll.scrollTop + this.height);
   }
 
-  invalidate(): void { this.search.invalidate(); this.list.invalidate(); this.text.invalidate(); }
-  close(): void { if (!this.disposed) { this.dispose(); this.done(); } }
-  dispose(): void { if (!this.disposed) { this.disposed = true; this.child = undefined; this.selectionGeneration++; clearInterval(this.timer); } }
+  invalidate(): void {
+    this.search.invalidate();
+    this.list.invalidate();
+    this.text.invalidate();
+  }
+  close(): void {
+    if (!this.disposed) {
+      this.dispose();
+      this.done();
+    }
+  }
+  dispose(): void {
+    if (!this.disposed) {
+      this.disposed = true;
+      this.child = undefined;
+      this.selectionGeneration++;
+      clearInterval(this.timer);
+    }
+  }
 }

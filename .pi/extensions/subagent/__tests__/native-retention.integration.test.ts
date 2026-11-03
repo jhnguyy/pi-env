@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { Schema } from "effect";
-import { createAgentSessionServices, createAgentSessionFromServices, SessionManager, ProjectTrustStore } from "@earendil-works/pi-coding-agent";
+import {
+  createAgentSessionServices,
+  createAgentSessionFromServices,
+  SessionManager,
+  ProjectTrustStore,
+} from "@earendil-works/pi-coding-agent";
 import initSubagent from "../index";
 import { RegisteredServiceFixture } from "./registered-service.fixture";
 import { testCleanup } from "./cleanup";
@@ -29,19 +34,43 @@ it("pages public results without erasing completed jobs or truncating native his
   {
     await mkdir(agentDir);
     const extension = join(agentDir, "provider.mjs");
-    await writeFile(extension, `import {fauxProvider,fauxAssistantMessage,fauxToolCall} from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
+    await writeFile(
+      extension,
+      `import {fauxProvider,fauxAssistantMessage,fauxToolCall} from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
 export default function(pi) {
  const p=fauxProvider({provider:'retention-native'}); pi.registerProvider(p.provider);
  pi.on('input',event=>{
   p.setResponses(event.text.startsWith('job:') ? [fauxAssistantMessage(fauxToolCall('subagent',JSON.parse(event.text.slice(4))),{stopReason:'toolUse'}),fauxAssistantMessage('Parent settled')] : [fauxAssistantMessage(${JSON.stringify(fullOutput)})]);
  });
-}`);
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ extensions: [extension], defaultProvider: "retention-native", defaultModel: "faux-1", retry: { enabled: false } }));
-    await writeFile(join(agentDir, "models.json"), JSON.stringify({ providers: { "retention-native": { apiKey: "fixture-key" } } }));
+}`,
+    );
+    await writeFile(
+      join(agentDir, "settings.json"),
+      JSON.stringify({
+        extensions: [extension],
+        defaultProvider: "retention-native",
+        defaultModel: "faux-1",
+        retry: { enabled: false },
+      }),
+    );
+    await writeFile(
+      join(agentDir, "models.json"),
+      JSON.stringify({ providers: { "retention-native": { apiKey: "fixture-key" } } }),
+    );
     new ProjectTrustStore(agentDir).set(root, true);
     await service.start();
-    const services = await createAgentSessionServices({ cwd: root, agentDir, resourceLoaderOptions: { extensionFactories: [initSubagent] } });
-    parent = (await createAgentSessionFromServices({ services, tools: ["subagent"], sessionManager: SessionManager.create(root, join(root, "sessions")) })).session;
+    const services = await createAgentSessionServices({
+      cwd: root,
+      agentDir,
+      resourceLoaderOptions: { extensionFactories: [initSubagent] },
+    });
+    parent = (
+      await createAgentSessionFromServices({
+        services,
+        tools: ["subagent"],
+        sessionManager: SessionManager.create(root, join(root, "sessions")),
+      })
+    ).session;
     await parent.bindExtensions({ mode: "print" });
     const session = parent;
     const request = async (params: Record<string, unknown>) => {
@@ -53,23 +82,39 @@ export default function(pi) {
     const ids: string[] = [];
     const completedDetails: unknown[] = [];
     for (let index = 0; index < 3; index++) {
-      const started = await request({ action: "start", name: `bounded-${index}`, task: "bounded output", tools: [] });
-      const { jobId: id } = Schema.decodeUnknownSync(Schema.Struct({ jobId: Schema.String }))(started.details);
+      const started = await request({
+        action: "start",
+        name: `bounded-${index}`,
+        task: "bounded output",
+        tools: [],
+      });
+      const { jobId: id } = Schema.decodeUnknownSync(Schema.Struct({ jobId: Schema.String }))(
+        started.details,
+      );
       ids.push(id);
       const result = await request({ action: "wait", job_id: id, limit: 128 });
       expect(result.isError, JSON.stringify(result)).not.toBe(true);
       expect(result.details).toMatchObject({ resultTruncated: true });
-      const output = result.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
-      expect(output).toBe(`${fullOutput.slice(0, 128)}\n\n[characters 0-128/${fullOutput.length}; next offset=128 ]`);
+      const output = result.content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("\n");
+      expect(output).toBe(
+        `${fullOutput.slice(0, 128)}\n\n[characters 0-128/${fullOutput.length}; next offset=128 ]`,
+      );
       expect(output).not.toContain("\uFFFD");
       expect(output).not.toContain("Complete native transcript ending");
       completedDetails.push(result.details);
       const first = await request({ action: "result", job_id: id });
       expect(first.details).toMatchObject({ resultTruncated: true });
-      expect(first.content[0]).toMatchObject({ text: `${fullOutput.slice(0, 4096)}\n\n[characters 0-4096/${fullOutput.length}; next offset=4096 ]` });
+      expect(first.content[0]).toMatchObject({
+        text: `${fullOutput.slice(0, 4096)}\n\n[characters 0-4096/${fullOutput.length}; next offset=4096 ]`,
+      });
       const rest = await request({ action: "result", job_id: id, offset: 4096, limit: 16384 });
       expect(rest.details).toMatchObject({ resultTruncated: true });
-      expect(rest.content[0]).toMatchObject({ text: `${fullOutput.slice(4096)}\n\n[characters 4096-${fullOutput.length}/${fullOutput.length} ]` });
+      expect(rest.content[0]).toMatchObject({
+        text: `${fullOutput.slice(4096)}\n\n[characters 4096-${fullOutput.length}/${fullOutput.length} ]`,
+      });
       const all = await request({ action: "result", job_id: id, limit: 16384 });
       expect(all.details).toMatchObject({ resultTruncated: false });
       expect(all.content[0]).toMatchObject({ text: expect.stringContaining(fullOutput) });
@@ -90,13 +135,24 @@ export default function(pi) {
       expect(invalid.isError).toBe(true);
     }
     for (const details of completedDetails) {
-      const { sessionFile: file, usage } = Schema.decodeUnknownSync(Schema.Struct({
-        sessionFile: Schema.String,
-        usage: Schema.Struct({ turns: Schema.Number }),
-      }))(details);
+      const { sessionFile: file, usage } = Schema.decodeUnknownSync(
+        Schema.Struct({
+          sessionFile: Schema.String,
+          usage: Schema.Struct({ turns: Schema.Number }),
+        }),
+      )(details);
       expect(usage.turns).toBeGreaterThan(0);
       const persisted = SessionManager.open(file).getEntries();
-      expect(persisted.some((entry) => entry.type === "message" && entry.message.role === "assistant" && entry.message.content.some((block) => block.type === "text" && block.text === fullOutput))).toBe(true);
+      expect(
+        persisted.some(
+          (entry) =>
+            entry.type === "message" &&
+            entry.message.role === "assistant" &&
+            entry.message.content.some(
+              (block) => block.type === "text" && block.text === fullOutput,
+            ),
+        ),
+      ).toBe(true);
       expect(await readFile(file, "utf8")).toContain("Complete native transcript ending");
     }
   }

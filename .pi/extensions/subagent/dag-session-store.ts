@@ -15,13 +15,27 @@ function isDagSessionWrapper(entry: unknown): entry is { readonly data?: unknown
   return wrapper.type === "custom" && wrapper.customType === DagSessionEntryType;
 }
 
+/** Select committed DAG data from the active branch, never the full transcript. */
+export function readDagSessionEntries(
+  manager: Pick<ParentSessionEntryStore, "getBranch">,
+  runId?: string,
+): readonly unknown[] {
+  return manager
+    .getBranch()
+    .filter(isDagSessionWrapper)
+    .map((entry) => entry.data)
+    .filter(
+      (entry) =>
+        runId === undefined ||
+        (typeof entry === "object" &&
+          entry !== null &&
+          (entry as { runId?: unknown }).runId === runId),
+    );
+}
+
 export function createDagSessionStore(manager: ParentSessionEntryStore): DagSessionStore {
   return Object.freeze({
-    read: () =>
-      manager
-        .getBranch()
-        .filter(isDagSessionWrapper)
-        .map((entry) => entry.data),
+    read: () => readDagSessionEntries(manager),
     append: (entry: DagSessionEntry) => {
       manager.appendCustomEntry(DagSessionEntryType, entry);
     },

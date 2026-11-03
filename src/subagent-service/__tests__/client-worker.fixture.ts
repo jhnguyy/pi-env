@@ -1,4 +1,4 @@
-import { connect } from "../client.js";
+import { connect, waitForOperation } from "../client.js";
 import type { Cancel, Input, ResultRequest, Submit } from "../contract.js";
 
 export type Command =
@@ -6,7 +6,7 @@ export type Command =
   | { id: number; action: "input"; input: Input }
   | { id: number; action: "cancel"; input: Cancel }
   | { id: number; action: "result"; input: ResultRequest }
-  | { id: number; action: "resultFull"; input: { operationId: string } }
+  | { id: number; action: "resultFull" | "wait"; input: { operationId: string } }
   | { id: number; action: "inspect" | "reopen"; input: { childId: string } }
   | { id: number; action: "closeRun"; input: { runId: string } };
 
@@ -22,16 +22,38 @@ process.on("message", (command: Command | "shutdown") => {
     try {
       let result: unknown;
       switch (command.action) {
-        case "submit": result = await client.view.submit(command.input); break;
-        case "input": result = await client.view.input(command.input); break;
-        case "cancel": result = await client.view.cancel(command.input); break;
-        case "result": result = await client.view.result(command.input); break;
-        case "resultFull": result = await client.view.resultFull(command.input); break;
-        case "reopen": result = await client.view.reopen(command.input); break;
-        case "closeRun": result = await client.view.closeRun(command.input); break;
+        case "submit":
+          result = await client.view.submit(command.input);
+          break;
+        case "input":
+          result = await client.view.input(command.input);
+          break;
+        case "cancel":
+          result = await client.view.cancel(command.input);
+          break;
+        case "result":
+          result = await client.view.result(command.input);
+          break;
+        case "resultFull":
+          result = await client.view.resultFull(command.input);
+          break;
+        case "wait":
+          await waitForOperation(client, command.input.operationId);
+          result = { settled: true };
+          break;
+        case "reopen":
+          result = await client.view.reopen(command.input);
+          break;
+        case "closeRun":
+          result = await client.view.closeRun(command.input);
+          break;
         case "inspect": {
           const inspection = await client.inspect(command.input.childId);
-          try { result = inspection.snapshot.value; } finally { inspection.release(); }
+          try {
+            result = inspection.snapshot.value;
+          } finally {
+            inspection.release();
+          }
           break;
         }
       }

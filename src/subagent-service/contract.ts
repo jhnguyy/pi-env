@@ -1,88 +1,212 @@
 import { hostNamed, method, remote } from "@earendil-works/chord";
 import type { JsonObject } from "@earendil-works/pi-durable";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import { Type, type Static } from "typebox";
+import {
+  obj,
+  str,
+  num,
+  int,
+  bool,
+  arr,
+  oneOf,
+  opt,
+  nullable,
+  compile,
+  type Static,
+  type Schema,
+} from "@earendil-works/pi-schema";
 import type { NativeChildSnapshot } from "../../.pi/extensions/subagent/child-types.js";
 import type { SubagentDetails } from "../../.pi/extensions/subagent/types.js";
-const UsageSchema = Type.Object({ input: Type.Number(), output: Type.Number(), cacheRead: Type.Number(), cacheWrite: Type.Number(), cost: Type.Number(), turns: Type.Number() }, { additionalProperties: false });
-export type InitialMetadata = Omit<SubagentDetails, "task" | "finalOutput" | "usage" | "modelOverride"> & { modelOverride?: string; usage: Static<typeof UsageSchema> };
+const UsageSchema = obj({
+  input: num(),
+  output: num(),
+  cacheRead: num(),
+  cacheWrite: num(),
+  cost: num(),
+  turns: num(),
+});
+export type InitialMetadata = Omit<
+  SubagentDetails,
+  "task" | "finalOutput" | "usage" | "modelOverride"
+> & { modelOverride?: string; usage: Static<typeof UsageSchema> };
 
-const Id = Type.String({ minLength: 1, maxLength: 256 });
-const Text = Type.String({ maxLength: 16_384 });
-const Prompt = Type.String({ minLength: 1, maxLength: 4 * 1024 * 1024 });
+const Id = str({ minLength: 1, maxLength: 256 });
+const Text = str({ maxLength: 16_384 });
+const Prompt = str({ minLength: 1, maxLength: 4 * 1024 * 1024 });
 export const MaxServiceRequestBytes = 32 * 1024 * 1024;
-const objectOptions = { additionalProperties: false } as const;
-export const ScopeSchema = Type.Object({ parentSessionId: Id }, objectOptions);
-export const SubmitSchema = Type.Object({
-  requestId: Id, runId: Id,
-  name: Type.String({ minLength: 1, maxLength: 128 }),
+// Matches Durable's JsonObject: an object whose values recursively contain only
+// JSON primitives, arrays and objects. Open recursive objects also keep Chord's
+// input cleaning from hiding unknown descriptor fields from the private decoder.
+// Chord cleans a pattern's $ref without compiling it on its own; an
+// additionalProperties $ref would be compiled without its enclosing $defs.
+// Explicit finite bounds exclude NaN/Infinity, which pi-schema's number accepts.
+export const CapabilitySchema: Schema<JsonObject> = {
+  $id: "urn:pi-env:subagent:capability",
+  type: "object",
+  patternProperties: { "^": { $ref: "#/$defs/value" } },
+  additionalProperties: true,
+  $defs: {
+    value: {
+      anyOf: [
+        { type: "null" },
+        { type: "boolean" },
+        { type: "number", minimum: -Number.MAX_VALUE, maximum: Number.MAX_VALUE },
+        { type: "string" },
+        { type: "array", items: { $ref: "#/$defs/value" } },
+        { type: "object", additionalProperties: { $ref: "#/$defs/value" } },
+      ],
+    },
+  },
+};
+const scopeProperties = { parentSessionId: Id };
+export const ScopeSchema = obj(scopeProperties);
+export const SubmitSchema = obj({
+  requestId: Id,
+  runId: Id,
+  name: str({ minLength: 1, maxLength: 128 }),
   task: Prompt,
-  cwd: Type.String({ minLength: 1, maxLength: 4_096 }),
-  model: Type.Optional(Id), tools: Type.Optional(Type.Array(Id, { maxItems: 128 })),
-  systemPrompt: Type.Optional(Type.String({ maxLength: 4 * 1024 * 1024 })),
-  reasoning: Type.Optional(Type.Union([Type.Literal("max"), Type.Literal("minimal"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh")])),
-  maxTurns: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
-  workspaceAccess: Type.Optional(Type.Union([Type.Literal("read"), Type.Literal("write")])),
-  capability: Type.Optional(Type.Unsafe<JsonObject>(Type.Record(Type.String(), Type.Unknown()))),
-}, objectOptions);
+  cwd: str({ minLength: 1, maxLength: 4_096 }),
+  model: opt(Id),
+  tools: opt(arr(Id, { maxItems: 128 })),
+  systemPrompt: opt(str({ maxLength: 4 * 1024 * 1024 })),
+  reasoning: opt(oneOf(["max", "minimal", "low", "medium", "high", "xhigh"])),
+  maxTurns: opt(int({ minimum: 1, maximum: 100_000 })),
+  workspaceAccess: opt(oneOf(["read", "write"])),
+  capability: opt(CapabilitySchema),
+});
 export type Submit = Static<typeof SubmitSchema>;
-export const InputSchema = Type.Object({
-  requestId: Id, childId: Id,
-  mode: Type.Union([Type.Literal("prompt"), Type.Literal("steer"), Type.Literal("followUp")]),
-  source: Type.Union([Type.Literal("coordinator"), Type.Literal("human")]),
-  text: Type.String({ minLength: 1, maxLength: 16_384 }),
-}, objectOptions);
+export const InputSchema = obj({
+  requestId: Id,
+  childId: Id,
+  mode: oneOf(["prompt", "steer", "followUp"]),
+  source: oneOf(["coordinator", "human"]),
+  text: str({ minLength: 1, maxLength: 16_384 }),
+});
 export type Input = Static<typeof InputSchema>;
-export const CancelSchema = Type.Object({ requestId: Id, operationId: Id }, objectOptions);
+export const CancelSchema = obj({ requestId: Id, operationId: Id });
 export type Cancel = Static<typeof CancelSchema>;
-export const ReceiptSchema = Type.Object({ childId: Id, operationId: Id }, objectOptions);
+const receiptProperties = { childId: Id, operationId: Id };
+export const ReceiptSchema = obj(receiptProperties);
 export type Receipt = Static<typeof ReceiptSchema>;
-export const OperationSchema = Type.Object({
-  ...ReceiptSchema.properties, parentSessionId: Id, runId: Id, createdAt: Type.String(),
-  kind: Type.Union([Type.Literal("initial"), Type.Literal("prompt"), Type.Literal("steer"), Type.Literal("followUp")]),
-  status: Type.Union([Type.Literal("accepted"), Type.Literal("dispatched"), Type.Literal("completed"), Type.Literal("failed"), Type.Literal("cancelled"), Type.Literal("interrupted")]),
-  cancelRequested: Type.Boolean(),
-}, objectOptions);
+const OperationStatusSchema = oneOf([
+  "accepted",
+  "dispatched",
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+]);
+export const OperationSchema = obj({
+  ...receiptProperties,
+  parentSessionId: Id,
+  runId: Id,
+  createdAt: str(),
+  kind: oneOf(["initial", "prompt", "steer", "followUp"]),
+  status: OperationStatusSchema,
+  cancelRequested: bool(),
+});
 export type Operation = Static<typeof OperationSchema>;
-export const ChildSchema = Type.Object({
-  childId: Id, parentSessionId: Id, runId: Id, name: Type.String(), task: Type.String(), cwd: Type.String(),
-  createdAt: Type.String(), sessionFile: Type.Union([Type.String(), Type.Null()]),
-  model: Type.Optional(Type.String()),
-  initialDetails: Type.Optional(Type.Unsafe<InitialMetadata>(Type.Object({}, { additionalProperties: true }))),
-  usage: Type.Optional(UsageSchema),
-  state: Type.Union([Type.Literal("historical"), Type.Literal("idle"), Type.Literal("running"), Type.Literal("queued"), Type.Literal("closing"), Type.Literal("closed")]),
-}, objectOptions);
+// Native metadata, results and inspections remain opaque at this boundary.
+// These schemas preserve the existing envelope checks; they do not validate the
+// full native objects, which remain the native owner's responsibility.
+const InitialMetadataSchema: Schema<InitialMetadata> = {
+  type: "object",
+  additionalProperties: true,
+};
+export const ChildSchema = obj({
+  childId: Id,
+  parentSessionId: Id,
+  runId: Id,
+  name: str(),
+  task: str(),
+  cwd: str(),
+  createdAt: str(),
+  sessionFile: nullable(str()),
+  model: opt(str()),
+  initialDetails: opt(InitialMetadataSchema),
+  usage: opt(UsageSchema),
+  state: oneOf(["historical", "idle", "running", "queued", "closing", "closed"]),
+});
 export type Child = Static<typeof ChildSchema>;
-export const SnapshotSchema = Type.Object({
-  serviceId: Id, epoch: Id, bundleId: Type.String({ pattern: "^[a-f0-9]{64}$" }), revision: Type.Integer({ minimum: 0 }),
-  children: Type.Array(ChildSchema), operations: Type.Array(OperationSchema),
-}, objectOptions);
+export const SnapshotSchema = obj({
+  serviceId: Id,
+  epoch: Id,
+  bundleId: str({ pattern: "^[a-f0-9]{64}$" }),
+  revision: int({ minimum: 0 }),
+  children: arr(ChildSchema),
+  operations: arr(OperationSchema),
+});
 export type Snapshot = Static<typeof SnapshotSchema>;
-export const ResultRequestSchema = Type.Object({ operationId: Id, offset: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 16_384 })) }, objectOptions);
+export const ResultRequestSchema = obj({
+  operationId: Id,
+  offset: opt(int({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+  limit: opt(int({ minimum: 1, maximum: 16_384 })),
+});
 export type ResultRequest = Static<typeof ResultRequestSchema>;
-export const ResultSchema = Type.Object({
-  operationId: Id, status: OperationSchema.properties.status, text: Text, offset: Type.Integer(),
-  nextOffset: Type.Union([Type.Integer(), Type.Null()]), total: Type.Integer(), truncated: Type.Boolean(), disposition: Type.String(),
-}, objectOptions);
+export const ResultSchema = obj({
+  operationId: Id,
+  status: OperationStatusSchema,
+  text: Text,
+  offset: int(),
+  nextOffset: nullable(int()),
+  total: int(),
+  truncated: bool(),
+  disposition: str(),
+});
 export type ResultPage = Static<typeof ResultSchema>;
 export type FullResult = AgentToolResult<SubagentDetails>;
-export const FullResultSchema = Type.Unsafe<FullResult | null>(Type.Union([Type.Object({ content: Type.Array(Type.Unknown()), details: Type.Unknown() }, { additionalProperties: true }), Type.Null()]));
-export const InspectionSchema = Type.Unsafe<NativeChildSnapshot | null>(Type.Union([Type.Object({}, { additionalProperties: true }), Type.Null()]));
-const ChildRequest = Type.Object({ childId: Id }, objectOptions);
+export const FullResultSchema: Schema<FullResult | null> = {
+  anyOf: [
+    {
+      type: "object",
+      properties: { content: { type: "array", items: {} }, details: {} },
+      required: ["content", "details"],
+      additionalProperties: true,
+    },
+    { type: "null" },
+  ],
+};
+export const InspectionSchema: Schema<NativeChildSnapshot | null> = {
+  anyOf: [{ type: "object", additionalProperties: true }, { type: "null" }],
+};
+const ChildRequest = obj({ childId: Id });
+export const ServiceChecks = {
+  scope: compile(ScopeSchema).check,
+  submit: compile(SubmitSchema).check,
+  input: compile(InputSchema).check,
+  cancel: compile(CancelSchema).check,
+  result: compile(ResultRequestSchema).check,
+};
 export type Principal = { kind: "owner" };
 export const SubagentService = remote("pi-env.subagent.service", {
-  version: 2, host: hostNamed("pi-env-subagents"), input: ScopeSchema,
-  variants: { owner: { state: { snapshot: SnapshotSchema }, methods: {
-    submit: method(SubmitSchema, ReceiptSchema), input: method(InputSchema, ReceiptSchema), cancel: method(CancelSchema),
-    result: method(ResultRequestSchema, ResultSchema), resultFull: method(Type.Object({ operationId: Id }, objectOptions), FullResultSchema),
-    reopen: method(ChildRequest), closeRun: method(Type.Object({ runId: Id }, objectOptions)),
-  } } },
+  version: 2,
+  host: hostNamed("pi-env-subagents"),
+  input: ScopeSchema,
+  variants: {
+    owner: {
+      state: { snapshot: SnapshotSchema },
+      methods: {
+        submit: method(SubmitSchema, ReceiptSchema),
+        input: method(InputSchema, ReceiptSchema),
+        cancel: method(CancelSchema),
+        result: method(ResultRequestSchema, ResultSchema),
+        resultFull: method(obj({ operationId: Id }), FullResultSchema),
+        reopen: method(ChildRequest),
+        closeRun: method(obj({ runId: Id })),
+      },
+    },
+  },
 });
 export const SubagentInspection = remote("pi-env.subagent.inspection", {
-  version: 1, host: hostNamed("pi-env-subagents"), input: Type.Object({ ...ScopeSchema.properties, childId: Id }, objectOptions),
-  variants: { owner: { state: { snapshot: InspectionSchema }, methods: { refresh: method(Type.Object({}, objectOptions)) } } },
+  version: 1,
+  host: hostNamed("pi-env-subagents"),
+  input: obj({ ...scopeProperties, childId: Id }),
+  variants: {
+    owner: { state: { snapshot: InspectionSchema }, methods: { refresh: method(obj({})) } },
+  },
 });
 export interface ServiceRuntime {
+  readonly failure: AbortSignal;
   snapshot(parentSessionId: string): Snapshot;
   subscribe(parentSessionId: string, listener: (snapshot: Snapshot) => void): () => void;
   submit(parentSessionId: string, input: Submit): Promise<Receipt>;

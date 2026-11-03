@@ -73,12 +73,45 @@ const SUBAGENT_PARAMETERS = Type.Object(
           "Existing absolute working directory for run/start. Defaults to the parent cwd.",
       }),
     ),
-    child_id: Type.Optional(Type.String({ description: "Child ID from job metadata. Required for input, inspect, and reopen." })),
-    text: Type.Optional(Type.String({ minLength: 1, description: "Coordinator input text. Required for input; native input hooks still apply." })),
-    mode: Type.Optional(Type.Enum(Object.values(ChildTypes.NativeInputMode), { type: "string", description: "Required for input. prompt requires idle; steer/followUp require running. Historical children require explicit reopen first." })),
-    view: Type.Optional(Type.Enum([...Browser.VIEWS], { type: "string", description: "Select one inspect view (default conversation). Conversation shows bounded native context; sessionFile retains history." })),
-    offset: Type.Optional(Type.Integer({ minimum: 0, description: "UTF-16 character offset for result, wait, or inspect (default 0)." })),
-    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 16384, description: "Maximum output characters for result, wait, or inspect (default 4096, max 16384)." })),
+    child_id: Type.Optional(
+      Type.String({
+        description: "Child ID from job metadata. Required for input, inspect, and reopen.",
+      }),
+    ),
+    text: Type.Optional(
+      Type.String({
+        minLength: 1,
+        description: "Coordinator input text. Required for input; native input hooks still apply.",
+      }),
+    ),
+    mode: Type.Optional(
+      Type.Enum(Object.values(ChildTypes.NativeInputMode), {
+        type: "string",
+        description:
+          "Required for input. prompt requires idle; steer/followUp require running. Historical children require explicit reopen first.",
+      }),
+    ),
+    view: Type.Optional(
+      Type.Enum([...Browser.VIEWS], {
+        type: "string",
+        description:
+          "Select one inspect view (default conversation). Conversation shows bounded native context; sessionFile retains history.",
+      }),
+    ),
+    offset: Type.Optional(
+      Type.Integer({
+        minimum: 0,
+        description: "UTF-16 character offset for result, wait, or inspect (default 0).",
+      }),
+    ),
+    limit: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 16384,
+        description:
+          "Maximum output characters for result, wait, or inspect (default 4096, max 16384).",
+      }),
+    ),
     job_id: Type.Optional(
       Type.String({
         description: "Job ID. Required for status, wait, result, and cancel.",
@@ -106,12 +139,19 @@ function requireRunParams(params: SubagentToolParams): Resolver.SubagentParams {
 function pageOptions(params: SubagentToolParams): { offset: number; limit: number } {
   const offset = params.offset ?? 0;
   const limit = params.limit ?? 4096;
-  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("offset must be a nonnegative safe integer.");
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 16384) throw new Error("limit must be an integer from 1 to 16384.");
+  if (!Number.isSafeInteger(offset) || offset < 0)
+    throw new Error("offset must be a nonnegative safe integer.");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 16384)
+    throw new Error("limit must be an integer from 1 to 16384.");
   return { offset, limit };
 }
 
-function pageText(page: { text: string; offset: number; nextOffset: number | null; total: number }): string {
+function pageText(page: {
+  text: string;
+  offset: number;
+  nextOffset: number | null;
+  total: number;
+}): string {
   return `${page.text}\n\n[characters ${page.offset}-${page.offset + page.text.length}/${page.total}${page.nextOffset === null ? "" : `; next offset=${page.nextOffset}`} ]`;
 }
 
@@ -221,7 +261,9 @@ export default function (
                   .then(
                     ({ outcome, cancelled }) => {
                       if (drafts.get(key) === submitted) drafts.delete(key);
-                      const feedback = cancelled ? "cancellation settled." : inputOutcomeFeedback(outcome, mode);
+                      const feedback = cancelled
+                        ? "cancellation settled."
+                        : inputOutcomeFeedback(outcome, mode);
                       component.showStatus(`${name}: ${feedback}`);
                     },
                     (error) =>
@@ -248,42 +290,80 @@ export default function (
     },
   });
 
-  const inspectChildAction = async (id: string, params: SubagentToolParams): Promise<AgentToolResult<Types.SubagentJobRenderDetails>> => {
+  const inspectChildAction = async (
+    id: string,
+    params: SubagentToolParams,
+  ): Promise<AgentToolResult<Types.SubagentJobRenderDetails>> => {
     const { offset, limit } = pageOptions(params);
     const child = await runtime.inspectChild(id);
-    if (!child) return { content: [{ type: "text", text: `${id}: no live inspection available. Use reopen explicitly for a historical child; reopening never replays inputs.` }], details: {} };
+    if (!child)
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${id}: no live inspection available. Use reopen explicitly for a historical child; reopening never replays inputs.`,
+          },
+        ],
+        details: {},
+      };
     const view = params.view ?? "conversation";
     const text = Transcript.plainChildText(Browser.childViewText(child, view));
     const start = Math.min(offset, text.length);
     const end = Math.min(start + limit, text.length);
     return {
-      content: [{ type: "text", text: `${id} · ${view}\n${pageText({ text: text.slice(start, end), offset: start, nextOffset: end < text.length ? end : null, total: text.length })}` }],
-      details: { name: child.name, sessionFile: child.sessionFile, resultTruncated: end < text.length },
+      content: [
+        {
+          type: "text",
+          text: `${id} · ${view}\n${pageText({ text: text.slice(start, end), offset: start, nextOffset: end < text.length ? end : null, total: text.length })}`,
+        },
+      ],
+      details: {
+        name: child.name,
+        sessionFile: child.sessionFile,
+        resultTruncated: end < text.length,
+      },
     };
   };
 
-  const executeChildAction = async (params: SubagentToolParams): Promise<AgentToolResult<Types.SubagentJobRenderDetails>> => {
+  const executeChildAction = async (
+    params: SubagentToolParams,
+  ): Promise<AgentToolResult<Types.SubagentJobRenderDetails>> => {
     if (!params.child_id) throw new Error(`child_id is required for subagent ${params.action}.`);
     const id = params.child_id;
     if (params.action === SubagentAction.Input) {
-      if (!params.text || !params.mode) throw new Error("text and mode are required for subagent input.");
+      if (!params.text || !params.mode)
+        throw new Error("text and mode are required for subagent input.");
       const input = await runtime.inputChild(id, params.text, params.mode, "coordinator");
-      const feedback = input.cancelled ? "cancellation settled." : inputOutcomeFeedback(input.outcome, params.mode);
-      const answer = params.mode === "prompt" && input.result.total > 0 ? `\n${pageText(input.result)}` : "";
+      const feedback = input.cancelled
+        ? "cancellation settled."
+        : inputOutcomeFeedback(input.outcome, params.mode);
+      const answer =
+        params.mode === "prompt" && input.result.total > 0 ? `\n${pageText(input.result)}` : "";
       return {
-        content: [{ type: "text", text: `${id}: ${feedback}\nOperation: ${input.operationId}${answer}` }],
+        content: [
+          { type: "text", text: `${id}: ${feedback}\nOperation: ${input.operationId}${answer}` },
+        ],
         details: { jobId: input.operationId, childId: id, resultTruncated: input.result.truncated },
       };
     }
     if (params.action === SubagentAction.Reopen) {
       await runtime.reopenChild(id);
-      return { content: [{ type: "text", text: `${id}: child reopened without replaying inputs.` }], details: {} };
+      return {
+        content: [{ type: "text", text: `${id}: child reopened without replaying inputs.` }],
+        details: {},
+      };
     }
     return inspectChildAction(id, params);
   };
 
-  const resultResponse = async (job: Jobs.SubagentJob, options: ReturnType<typeof pageOptions>): Promise<AgentToolResult<Types.SubagentJobRenderDetails>> => {
-    const page = job.status === Types.SubagentJobStatus.Completed ? await runtime.resultJob(job.id, options) : undefined;
+  const resultResponse = async (
+    job: Jobs.SubagentJob,
+    options: ReturnType<typeof pageOptions>,
+  ): Promise<AgentToolResult<Types.SubagentJobRenderDetails>> => {
+    const page =
+      job.status === Types.SubagentJobStatus.Completed
+        ? await runtime.resultJob(job.id, options)
+        : undefined;
     return {
       content: [{ type: "text", text: page ? pageText(page) : Jobs.formatJobMetadata(job) }],
       details: { ...getJobRenderDetails(job), resultTruncated: page?.truncated },
@@ -291,19 +371,35 @@ export default function (
     };
   };
 
-  const waitJobAction = async (jobId: string, params: SubagentToolParams, signal?: AbortSignal): Promise<AgentToolResult<Types.SubagentJobRenderDetails>> => {
+  const waitJobAction = async (
+    jobId: string,
+    params: SubagentToolParams,
+    signal?: AbortSignal,
+  ): Promise<AgentToolResult<Types.SubagentJobRenderDetails>> => {
     const options = pageOptions(params);
     const waited = await runtime.waitJob(jobId, signal);
-    if (waited.interrupted) return {
-      content: [{ type: "text", text: `Stopped waiting for subagent job ${jobId}; it is still running.` }],
-      details: waited.job ? getJobRenderDetails(waited.job) : { jobId, status: Types.SubagentJobStatus.Running },
-    };
+    if (waited.interrupted)
+      return {
+        content: [
+          { type: "text", text: `Stopped waiting for subagent job ${jobId}; it is still running.` },
+        ],
+        details: waited.job
+          ? getJobRenderDetails(waited.job)
+          : { jobId, status: Types.SubagentJobStatus.Running },
+      };
     if (!waited.job) throw new Error(`Unknown subagent job: ${jobId}`);
     return resultResponse(waited.job, options);
   };
 
-  const childActions = new Set<SubagentAction>([SubagentAction.Input, SubagentAction.Inspect, SubagentAction.Reopen]);
-  const executeJobAction = async (params: SubagentToolParams, signal?: AbortSignal): Promise<AgentToolResult<Types.SubagentJobRenderDetails>> => {
+  const childActions = new Set<SubagentAction>([
+    SubagentAction.Input,
+    SubagentAction.Inspect,
+    SubagentAction.Reopen,
+  ]);
+  const executeJobAction = async (
+    params: SubagentToolParams,
+    signal?: AbortSignal,
+  ): Promise<AgentToolResult<Types.SubagentJobRenderDetails>> => {
     if (runtime.state === Types.SubagentSessionState.Active) runtime.assertConnected();
     if (childActions.has(params.action)) return executeChildAction(params);
     if (params.action === SubagentAction.Usage) {

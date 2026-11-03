@@ -14,7 +14,14 @@ describe("subagent extension inactive lifecycle", () => {
       modelRegistry: { getAvailable: () => [] },
       scopedModels: [],
     } as any;
-    const start = () => subagent.execute("start", { action: "start", name: "audit", task: "x" }, undefined, undefined, ctx);
+    const start = () =>
+      subagent.execute(
+        "start",
+        { action: "start", name: "audit", task: "x" },
+        undefined,
+        undefined,
+        ctx,
+      );
 
     await expect(start()).rejects.toThrow("Parent subagent session is not active.");
     const shutdown = harness.handlers.get("session_shutdown")!({}, ctx);

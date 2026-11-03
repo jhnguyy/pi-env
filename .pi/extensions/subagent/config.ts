@@ -51,9 +51,13 @@ export function resolveSubagentRuntimeConfig(
 }
 
 export function loadSubagentRuntimeConfig(cwd: string, agentDir?: string): SubagentRuntimeConfig {
-  const env = agentDir === undefined ? defaultSettingsEnv : {
-    ...defaultSettingsEnv, globalSettingsPath: () => join(agentDir, "settings.json"),
-  };
+  const env =
+    agentDir === undefined
+      ? defaultSettingsEnv
+      : {
+          ...defaultSettingsEnv,
+          globalSettingsPath: () => join(agentDir, "settings.json"),
+        };
   const settings = decodeSettingsBlockSync("subagent", SubagentSettingsSchema, cwd, env);
   return resolveSubagentRuntimeConfig(settings);
 }

@@ -4,65 +4,110 @@ import { createConnection, type Socket } from "node:net";
 import { join } from "node:path";
 import { createHost, webSocketLink } from "@earendil-works/chord";
 import { WebSocketServer } from "ws";
-import { MaxServiceRequestBytes, InspectionSchema, SnapshotSchema, SubagentInspection, SubagentService, type Principal, type ServiceRuntime } from "./contract.ts";
+import {
+  MaxServiceRequestBytes,
+  InspectionSchema,
+  SnapshotSchema,
+  SubagentInspection,
+  SubagentService,
+  type Principal,
+  type ServiceRuntime,
+} from "./contract.ts";
 
 /** The entry owns the process lock, private directory, and runtime throughout this lifetime. */
-export async function serve(directory: string, runtime: ServiceRuntime): Promise<{ close(): Promise<void> }> {
+export async function serve(
+  directory: string,
+  runtime: ServiceRuntime,
+): Promise<{ close(): Promise<void> }> {
   if (process.platform !== "linux") throw new Error("Subagent service requires Linux Unix sockets");
   const socketPath = join(directory, "service.sock");
   await removeStaleSocket(socketPath);
   const host = createHost<Principal>({ name: "pi-env-subagents", self: { kind: "owner" } });
-  const http = createServer((_request, response) => { response.writeHead(404).end(); });
+  const http = createServer((_request, response) => {
+    response.writeHead(404).end();
+  });
   const sockets = new Set<Socket>();
   http.on("connection", (socket) => {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
   });
-  const ws = new WebSocketServer({ noServer: true, maxPayload: MaxServiceRequestBytes + 65_536, perMessageDeflate: false });
+  const ws = new WebSocketServer({
+    noServer: true,
+    maxPayload: MaxServiceRequestBytes + 65_536,
+    perMessageDeflate: false,
+  });
   let accepting = false;
   let ownedSocket: Awaited<ReturnType<typeof lstat>> | undefined;
   let closing: Promise<void> | undefined;
-  const close = (): Promise<void> => closing ??= (async () => {
-    accepting = false;
-    const failures: unknown[] = [];
-    const attempt = async (action: () => void | Promise<void>) => {
-      try { await action(); } catch (error) { failures.push(error); }
-    };
-    await attempt(() => host.close());
-    await attempt(async () => {
-      const stopped = new Promise<void>((resolve, reject) => ws.close((error) => error ? reject(error) : resolve()));
+  const onRuntimeFailure = () => {
+    void close().catch((error: unknown) =>
+      console.error("Subagent failed transport cleanup", error),
+    );
+  };
+  const close = (): Promise<void> =>
+    (closing ??= (async () => {
+      accepting = false;
+      runtime.failure.removeEventListener("abort", onRuntimeFailure);
+      // Disconnect observers before joining callbacks, which may still await native settlement.
       for (const client of ws.clients) client.terminate();
-      await stopped;
-    });
-    await attempt(async () => {
-      const stopped = new Promise<void>((resolve, reject) => {
-        http.close((error: NodeJS.ErrnoException | undefined) => error && error.code !== "ERR_SERVER_NOT_RUNNING" ? reject(error) : resolve());
-      });
       for (const socket of sockets) socket.destroy();
-      await stopped;
-    });
-    await attempt(async () => {
-      if (!ownedSocket) return;
-      const entry = await socketEntry(socketPath);
-      if (!entry) return; // Node normally removes its Unix socket on server close.
-      if (entry.dev !== ownedSocket.dev || entry.ino !== ownedSocket.ino) {
-        throw new Error("Service socket changed during shutdown; refusing to unlink it");
-      }
-      await unlink(socketPath);
-    });
-    if (failures.length) throw new AggregateError(failures, "Subagent transport cleanup failed");
-  })();
+      const failures: unknown[] = [];
+      const attempt = async (action: () => void | Promise<void>) => {
+        try {
+          await action();
+        } catch (error) {
+          failures.push(error);
+        }
+      };
+      await attempt(() => host.close());
+      await attempt(async () => {
+        const stopped = new Promise<void>((resolve, reject) =>
+          ws.close((error) => (error ? reject(error) : resolve())),
+        );
+        for (const client of ws.clients) client.terminate();
+        await stopped;
+      });
+      await attempt(async () => {
+        const stopped = new Promise<void>((resolve, reject) => {
+          http.close((error: NodeJS.ErrnoException | undefined) =>
+            error && error.code !== "ERR_SERVER_NOT_RUNNING" ? reject(error) : resolve(),
+          );
+        });
+        for (const socket of sockets) socket.destroy();
+        await stopped;
+      });
+      await attempt(async () => {
+        if (!ownedSocket) return;
+        const entry = await socketEntry(socketPath);
+        if (!entry) return; // Node normally removes its Unix socket on server close.
+        if (entry.dev !== ownedSocket.dev || entry.ino !== ownedSocket.ino) {
+          throw new Error("Service socket changed during shutdown; refusing to unlink it");
+        }
+        await unlink(socketPath);
+      });
+      if (failures.length) throw new AggregateError(failures, "Subagent transport cleanup failed");
+    })());
 
   try {
     host.serve(SubagentService, ({ parentSessionId }, _principal, self) => {
-      const snapshot = self.state("snapshot", SnapshotSchema, { init: () => runtime.snapshot(parentSessionId) });
+      const snapshot = self.state("snapshot", SnapshotSchema, {
+        init: () => runtime.snapshot(parentSessionId),
+      });
       // Subscribe first, then reconcile: activation may have yielded since init captured its value.
       const source = {
         subscribe(listener: Parameters<ServiceRuntime["subscribe"]>[1]) {
           const stop = runtime.subscribe(parentSessionId, listener);
-          try { listener(runtime.snapshot(parentSessionId)); } catch (error) {
-            try { stop(); } catch (cleanup) {
-              throw new AggregateError([error, cleanup], "Runtime subscription and cleanup failed", { cause: cleanup });
+          try {
+            listener(runtime.snapshot(parentSessionId));
+          } catch (error) {
+            try {
+              stop();
+            } catch (cleanup) {
+              throw new AggregateError(
+                [error, cleanup],
+                "Runtime subscription and cleanup failed",
+                { cause: cleanup },
+              );
             }
             throw error;
           }
@@ -86,20 +131,41 @@ export async function serve(directory: string, runtime: ServiceRuntime): Promise
       };
     });
     host.serve(SubagentInspection, ({ parentSessionId, childId }, _principal, self) => {
-      const snapshot = self.state("snapshot", InspectionSchema, { init: () => runtime.inspect(parentSessionId, childId) });
-      return { variant: "owner", snapshot, refresh: (_input, ctx) => { snapshot.replace(ctx, runtime.inspect(parentSessionId, childId)); } };
+      const snapshot = self.state("snapshot", InspectionSchema, {
+        init: () => runtime.inspect(parentSessionId, childId),
+      });
+      return {
+        variant: "owner",
+        snapshot,
+        refresh: (_input, ctx) => {
+          snapshot.replace(ctx, runtime.inspect(parentSessionId, childId));
+        },
+      };
     });
     http.on("upgrade", (request, socket, head) => {
-      if (!accepting) { socket.destroy(); return; }
+      if (!accepting) {
+        socket.destroy();
+        return;
+      }
       ws.handleUpgrade(request, socket, head, (client) => {
         // Protocol/payload failures also emit error; Chord observes the resulting close.
         client.on("error", () => {});
-        host.accept(webSocketLink(client, { acceptPacked: false }), { principal: { kind: "owner" }, kind: "client", maxCalls: 128 });
+        host.accept(webSocketLink(client, { acceptPacked: false }), {
+          principal: { kind: "owner" },
+          kind: "client",
+          maxCalls: 128,
+        });
       });
     });
     await new Promise<void>((resolve, reject) => {
-      const failed = (error: Error) => { http.off("listening", ready); reject(error); };
-      const ready = () => { http.off("error", failed); resolve(); };
+      const failed = (error: Error) => {
+        http.off("listening", ready);
+        reject(error);
+      };
+      const ready = () => {
+        http.off("error", failed);
+        resolve();
+      };
       http.once("error", failed);
       http.once("listening", ready);
       http.listen(socketPath);
@@ -107,11 +173,17 @@ export async function serve(directory: string, runtime: ServiceRuntime): Promise
     ownedSocket = await socketEntry(socketPath);
     if (!ownedSocket) throw new Error("Service socket disappeared during startup");
     await chmod(socketPath, 0o600);
+    runtime.failure.addEventListener("abort", onRuntimeFailure, { once: true });
+    runtime.failure.throwIfAborted();
     accepting = true;
     return { close };
   } catch (error) {
-    try { await close(); } catch (cleanup) {
-      throw new AggregateError([error, cleanup], "Subagent transport startup and cleanup failed", { cause: cleanup });
+    try {
+      await close();
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], "Subagent transport startup and cleanup failed", {
+        cause: cleanup,
+      });
     }
     throw error;
   }
@@ -119,7 +191,8 @@ export async function serve(directory: string, runtime: ServiceRuntime): Promise
 
 async function socketEntry(path: string) {
   const entry = await lstat(path).catch((error: unknown) => {
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return undefined;
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT")
+      return undefined;
     throw error;
   });
   if (entry && (!entry.isSocket() || entry.uid !== process.getuid?.())) {
@@ -133,8 +206,14 @@ async function removeStaleSocket(path: string): Promise<void> {
   if (!before) return;
   await new Promise<void>((resolve, reject) => {
     const probe = createConnection(path);
-    probe.setTimeout(10_000, () => { probe.destroy(); reject(new Error("Service socket stale check timed out")); });
-    probe.once("connect", () => { probe.destroy(); reject(new Error("Subagent service socket is already active")); });
+    probe.setTimeout(10_000, () => {
+      probe.destroy();
+      reject(new Error("Service socket stale check timed out"));
+    });
+    probe.once("connect", () => {
+      probe.destroy();
+      reject(new Error("Subagent service socket is already active"));
+    });
     probe.once("error", (error: NodeJS.ErrnoException) => {
       probe.destroy();
       if (error.code === "ECONNREFUSED" || error.code === "ENOENT") resolve();
@@ -143,6 +222,7 @@ async function removeStaleSocket(path: string): Promise<void> {
   });
   const after = await socketEntry(path);
   if (!after) return;
-  if (before.dev !== after.dev || before.ino !== after.ino) throw new Error("Service socket changed during stale check");
+  if (before.dev !== after.dev || before.ino !== after.ino)
+    throw new Error("Service socket changed during stale check");
   await unlink(path);
 }

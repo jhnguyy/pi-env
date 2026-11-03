@@ -12,6 +12,8 @@ import {
   type DagSessionStore,
 } from "../index.js";
 import * as Fixtures from "./shared.js";
+import * as Codec from "../session/codec.js";
+import { createDagSessionWriter, dagAttemptStatus, DagExecutorFailed } from "../index.js";
 
 function node(id: string) {
   return {
@@ -32,6 +34,64 @@ function failureTag(effect: Effect.Effect<unknown, { readonly _tag: string }>) {
 }
 
 describe("DAG session codec", () => {
+  it("round-trips native writer records including tagged failed outcomes into detached JSON", () => {
+    const graph = Fixtures.graph([node("a")], 1);
+    const store = Fixtures.sessionStore();
+    const writer = createDagSessionWriter(store, graph, graph);
+    Effect.runSync(writer.appendGraph(graph));
+    Effect.runSync(
+      writer.appendTransition(
+        { runId: graph.runId, nodeId: "a", type: "start" },
+        dagAttemptStatus(graph.runId, "a", DagNodeStatus.Running),
+      ),
+    );
+    Effect.runSync(
+      writer.appendTransition(
+        {
+          runId: graph.runId,
+          nodeId: "a",
+          type: "complete",
+          result: {
+            _tag: "failed",
+            failure: new DagExecutorFailed({
+              message: "controlled failure",
+              error: { code: "controlled" },
+            }),
+          },
+        },
+        dagAttemptStatus(graph.runId, "a", DagNodeStatus.Failed),
+      ),
+    );
+    Effect.runSync(writer.appendFinal(DagRunOutcome.Failed));
+    const encoded = store.entries.map((entry) =>
+      Codec.encodeDagSessionEntry(entry as DagSessionEntry),
+    );
+    for (const entry of encoded) {
+      expect(Object.getPrototypeOf(entry)).toBe(Object.prototype);
+      expect(Codec.decodeEntry(entry, Codec.validateLimits())).toEqual(entry);
+    }
+    expect(encoded[2]).toMatchObject({
+      event: {
+        transition: {
+          result: {
+            _tag: "failed",
+            failure: {
+              _tag: "DagExecutorFailed",
+              message: "controlled failure",
+              error: { code: "controlled" },
+            },
+          },
+        },
+      },
+    });
+    const original = Effect.runSync(reconstructDagSession(store, graph.runId));
+    const detached = Effect.runSync(
+      reconstructDagSession(Fixtures.sessionStore(encoded), graph.runId),
+    );
+    expect(JSON.parse(JSON.stringify(detached))).toEqual(JSON.parse(JSON.stringify(original)));
+    encoded[0].seq = 99;
+    expect((store.entries[0] as DagSessionEntry).seq).toBe(0);
+  });
   it("wraps store read failures without classifying them as malformed", () => {
     const def = Fixtures.definition([node("a")], 1);
     const store: DagSessionStore = {
@@ -165,7 +225,10 @@ describe("DAG session codec", () => {
     expect(
       failureTag(
         reconstructDagSession(
-          Fixtures.sessionStore([storedEntry(graphEntry), storedEntry({ ...graphEntry, v: 2 as never, seq: 1 })]),
+          Fixtures.sessionStore([
+            storedEntry(graphEntry),
+            storedEntry({ ...graphEntry, v: 2 as never, seq: 1 }),
+          ]),
           def.runId,
           { limits: { totalMatchingEntries: 1 } },
         ),
@@ -215,7 +278,12 @@ describe("DAG session codec", () => {
     };
 
     expect(
-      failureTag(reconstructDagSession(Fixtures.sessionStore([storedEntry(graphEntry), storedEntry(wrongRun)]), def.runId)),
+      failureTag(
+        reconstructDagSession(
+          Fixtures.sessionStore([storedEntry(graphEntry), storedEntry(wrongRun)]),
+          def.runId,
+        ),
+      ),
     ).toBe("run-mismatch");
     expect(
       failureTag(
@@ -262,9 +330,13 @@ describe("DAG session codec", () => {
     ).toBe("ordering");
     expect(
       failureTag(
-        reconstructDagSession(Fixtures.sessionStore([storedEntry(graphEntry), storedEntry(start)]), def.runId, {
-          limits: { transitions: 1 },
-        }),
+        reconstructDagSession(
+          Fixtures.sessionStore([storedEntry(graphEntry), storedEntry(start)]),
+          def.runId,
+          {
+            limits: { transitions: 1 },
+          },
+        ),
       ),
     ).toBe("limit");
     expect(

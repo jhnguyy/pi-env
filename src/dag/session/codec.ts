@@ -25,7 +25,10 @@ function assertJson(value: unknown): void {
       for (const item of Object.values(value)) assertJson(item);
       return;
   }
-  throw new SessionContracts.DagSessionMalformed({ message: "entry contains non-JSON data", entry: value });
+  throw new SessionContracts.DagSessionMalformed({
+    message: "entry contains non-JSON data",
+    entry: value,
+  });
 }
 
 function canonicalJson(value: unknown): string {
@@ -38,6 +41,15 @@ function canonicalJson(value: unknown): string {
       (key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`,
     )
     .join(",")}}`;
+}
+
+/** Detach a native journal record through the same canonical JSON contract as persistence. */
+export function encodeDagSessionEntry(
+  entry: SessionContracts.DagSessionEntry,
+): Record<string, unknown> {
+  // Native persistence uses JSON.stringify, including tagged failures' toJSON.
+  // Canonicalize that wire value, not the Error object's enumerable fields.
+  return JSON.parse(canonicalJson(JSON.parse(JSON.stringify(entry)))) as Record<string, unknown>;
 }
 
 export function byteSize(value: unknown): number {
@@ -69,10 +81,14 @@ function requireStringArray(value: unknown, name: string, entry: unknown): reado
 }
 
 function decodeGraph(raw: unknown, entry: unknown): DagContracts.DagDefinition<unknown> {
-  if (!isRecord(raw)) throw new SessionContracts.DagSessionMalformed({ message: "malformed graph event", entry });
+  if (!isRecord(raw))
+    throw new SessionContracts.DagSessionMalformed({ message: "malformed graph event", entry });
   const runId = requireString(raw.runId, "graph runId", entry);
   if (typeof raw.concurrency !== "number" || !Number.isSafeInteger(raw.concurrency))
-    throw new SessionContracts.DagSessionMalformed({ message: "malformed graph concurrency", entry });
+    throw new SessionContracts.DagSessionMalformed({
+      message: "malformed graph concurrency",
+      entry,
+    });
   if (!Array.isArray(raw.nodes))
     throw new SessionContracts.DagSessionMalformed({ message: "malformed graph nodes", entry });
   return {
@@ -83,26 +99,46 @@ function decodeGraph(raw: unknown, entry: unknown): DagContracts.DagDefinition<u
         throw new SessionContracts.DagSessionMalformed({ message: "malformed graph node", entry });
       const executor = node.executor;
       if (!isRecord(executor))
-        throw new SessionContracts.DagSessionMalformed({ message: "malformed node executor", entry });
+        throw new SessionContracts.DagSessionMalformed({
+          message: "malformed node executor",
+          entry,
+        });
       const dependencies = node.dependencies;
       if (!Array.isArray(dependencies))
-        throw new SessionContracts.DagSessionMalformed({ message: "malformed node dependencies", entry });
+        throw new SessionContracts.DagSessionMalformed({
+          message: "malformed node dependencies",
+          entry,
+        });
       const completionGuard = node.completionGuard;
       if (completionGuard !== undefined && !isRecord(completionGuard))
-        throw new SessionContracts.DagSessionMalformed({ message: "malformed completion guard", entry });
+        throw new SessionContracts.DagSessionMalformed({
+          message: "malformed completion guard",
+          entry,
+        });
       return {
         id: requireString(node.id, "node id", entry),
         executor: {
-          kind: requireString(executor.kind, "executor kind", entry) as DagContracts.DagExecutorKind,
+          kind: requireString(
+            executor.kind,
+            "executor kind",
+            entry,
+          ) as DagContracts.DagExecutorKind,
           key: requireString(executor.key, "executor key", entry),
           payload: executor.payload,
         },
         dependencies: dependencies.map((dependency) => {
           if (!isRecord(dependency))
-            throw new SessionContracts.DagSessionMalformed({ message: "malformed dependency", entry });
+            throw new SessionContracts.DagSessionMalformed({
+              message: "malformed dependency",
+              entry,
+            });
           return {
             nodeId: requireString(dependency.nodeId, "dependency nodeId", entry),
-            mode: requireString(dependency.mode, "dependency mode", entry) as DagContracts.DagDependencyMode,
+            mode: requireString(
+              dependency.mode,
+              "dependency mode",
+              entry,
+            ) as DagContracts.DagDependencyMode,
           };
         }),
         ...(completionGuard
@@ -132,16 +168,25 @@ function decodeResult(raw: unknown, entry: unknown) {
   switch (raw._tag) {
     case DagContracts.DagNodeResultTag.Succeeded:
       if (!isRecord(raw.outputs))
-        throw new SessionContracts.DagSessionMalformed({ message: "malformed succeeded result", entry });
+        throw new SessionContracts.DagSessionMalformed({
+          message: "malformed succeeded result",
+          entry,
+        });
       return { _tag: DagContracts.DagNodeResultTag.Succeeded, outputs: raw.outputs } as const;
     case DagContracts.DagNodeResultTag.Failed:
       if (!("failure" in raw))
-        throw new SessionContracts.DagSessionMalformed({ message: "malformed failed result", entry });
+        throw new SessionContracts.DagSessionMalformed({
+          message: "malformed failed result",
+          entry,
+        });
       return { _tag: DagContracts.DagNodeResultTag.Failed, failure: raw.failure } as const;
     case DagContracts.DagNodeResultTag.Cancelled:
     case DagContracts.DagNodeResultTag.Interrupted:
       if (raw.reason !== undefined && typeof raw.reason !== "string")
-        throw new SessionContracts.DagSessionMalformed({ message: "malformed terminal reason", entry });
+        throw new SessionContracts.DagSessionMalformed({
+          message: "malformed terminal reason",
+          entry,
+        });
       return raw.reason === undefined
         ? ({ _tag: raw._tag } as const)
         : ({ _tag: raw._tag, reason: raw.reason } as const);
@@ -155,7 +200,8 @@ export function decodeTransition(
   expectedRunId: string,
   entry: unknown,
 ): DagContracts.DagTransition<unknown, unknown> {
-  if (!isRecord(raw)) throw new SessionContracts.DagSessionMalformed({ message: "malformed transition", entry });
+  if (!isRecord(raw))
+    throw new SessionContracts.DagSessionMalformed({ message: "malformed transition", entry });
   const runId = requireString(raw.runId, "transition runId", entry);
   if (runId !== expectedRunId)
     throw new SessionContracts.DagSessionRunMismatch({ expectedRunId, actualRunId: runId });
@@ -175,7 +221,10 @@ export function decodeTransition(
         raw.reason !== DagContracts.DagBlockedReason.RequiredDependency &&
         raw.reason !== DagContracts.DagBlockedReason.CompletionGuard
       )
-        throw new SessionContracts.DagSessionMalformed({ message: "malformed block reason", entry });
+        throw new SessionContracts.DagSessionMalformed({
+          message: "malformed block reason",
+          entry,
+        });
       return {
         runId,
         nodeId,
@@ -185,28 +234,31 @@ export function decodeTransition(
       };
     case DagContracts.DagTransitionType.Cancel:
       if (raw.reason !== undefined && typeof raw.reason !== "string")
-        throw new SessionContracts.DagSessionMalformed({ message: "malformed cancel reason", entry });
+        throw new SessionContracts.DagSessionMalformed({
+          message: "malformed cancel reason",
+          entry,
+        });
       return raw.reason === undefined
         ? { runId, nodeId, type: DagContracts.DagTransitionType.Cancel }
         : { runId, nodeId, type: DagContracts.DagTransitionType.Cancel, reason: raw.reason };
     default:
-      throw new SessionContracts.DagSessionMalformed({ message: "unknown transition variant", entry });
+      throw new SessionContracts.DagSessionMalformed({
+        message: "unknown transition variant",
+        entry,
+      });
   }
 }
-
 
 function decodeAttempt(
   raw: unknown,
   expectedRunId: string,
   entry: unknown,
 ): SessionContracts.DagSessionAttemptStatus {
-  if (!isRecord(raw)) throw new SessionContracts.DagSessionMalformed({ message: "malformed attempt", entry });
+  if (!isRecord(raw))
+    throw new SessionContracts.DagSessionMalformed({ message: "malformed attempt", entry });
   const nodeId = requireString(raw.nodeId, "attempt nodeId", entry);
   const expectedAttemptId = DagAttempt.dagAttemptId(expectedRunId, nodeId);
-  if (
-    raw.attemptId !== expectedAttemptId ||
-    raw.ordinal !== DagAttempt.DagAttemptOrdinal
-  )
+  if (raw.attemptId !== expectedAttemptId || raw.ordinal !== DagAttempt.DagAttemptOrdinal)
     throw new SessionContracts.DagSessionAttemptInconsistent({
       message: "attempt identity is not deterministic",
       nodeId,
@@ -235,7 +287,11 @@ export function decodeOutcome(raw: unknown, entry: unknown): DagContracts.DagRun
   throw new SessionContracts.DagSessionMalformed({ message: "malformed final outcome", entry });
 }
 
-function decodeEvent(raw: unknown, runId: string, entry: unknown): SessionContracts.DagSessionEvent {
+function decodeEvent(
+  raw: unknown,
+  runId: string,
+  entry: unknown,
+): SessionContracts.DagSessionEvent {
   if (!isRecord(raw) || typeof raw._tag !== "string")
     throw new SessionContracts.DagSessionMalformed({ message: "malformed event", entry });
   switch (raw._tag) {
@@ -243,7 +299,10 @@ function decodeEvent(raw: unknown, runId: string, entry: unknown): SessionContra
       return SessionContracts.DagSessionEvent.graph({ graph: decodeGraph(raw.graph, entry) });
     case "transition":
       if (!("transition" in raw))
-        throw new SessionContracts.DagSessionMalformed({ message: "malformed transition event", entry });
+        throw new SessionContracts.DagSessionMalformed({
+          message: "malformed transition event",
+          entry,
+        });
       return raw.attempt !== undefined
         ? SessionContracts.DagSessionEvent.transition({
             transition: decodeTransition(raw.transition, runId, entry),
@@ -270,13 +329,18 @@ export function decodeEntry(
       : limits.eventBytes;
   const limitName = sizeLimit === limits.graphBytes ? "graphBytes" : "eventBytes";
   if (size > sizeLimit)
-    throw new SessionContracts.DagSessionLimitExceeded({ limit: limitName, actual: size, max: sizeLimit });
+    throw new SessionContracts.DagSessionLimitExceeded({
+      limit: limitName,
+      actual: size,
+      max: sizeLimit,
+    });
   if (!isRecord(data))
     throw new SessionContracts.DagSessionMalformed({
       message: "malformed DAG session entry",
       entry: data,
     });
-  if (data.v !== SessionContracts.DagSessionWireVersion) throw new SessionContracts.DagSessionUnsupportedVersion({ version: data.v });
+  if (data.v !== SessionContracts.DagSessionWireVersion)
+    throw new SessionContracts.DagSessionUnsupportedVersion({ version: data.v });
   const runId = requireString(data.runId, "runId", data);
   const graphId = requireString(data.graphId, "graphId", data);
   if (typeof data.seq !== "number" || !Number.isSafeInteger(data.seq) || data.seq < 0)
@@ -291,8 +355,13 @@ export function decodeEntry(
   };
 }
 
-export function validateLimits(options?: Partial<SessionContracts.DagSessionLimits>): SessionContracts.DagSessionLimits {
-  const limits = { ...SessionContracts.DagSessionDefaultLimits, ...options } as SessionContracts.DagSessionLimits;
+export function validateLimits(
+  options?: Partial<SessionContracts.DagSessionLimits>,
+): SessionContracts.DagSessionLimits {
+  const limits = {
+    ...SessionContracts.DagSessionDefaultLimits,
+    ...options,
+  } as SessionContracts.DagSessionLimits;
   for (const key of ["graphBytes", "eventBytes", "transitions", "totalMatchingEntries"] as const) {
     const value = limits[key];
     if (!Number.isSafeInteger(value) || value <= 0)
@@ -325,7 +394,10 @@ export function validateGraph(
     });
   const actualId = computeDagSessionGraphId(graph);
   if (actualId !== graphId)
-    throw new SessionContracts.DagSessionGraphMismatch({ expectedGraphId: graphId, actualGraphId: actualId });
+    throw new SessionContracts.DagSessionGraphMismatch({
+      expectedGraphId: graphId,
+      actualGraphId: actualId,
+    });
   const result = DagValidation.validateDagDefinition(graph);
   if (result._tag === DagValidation.DagValidationResultTag.Invalid)
     throw new SessionContracts.DagSessionGraphValidation({ errors: result.errors });
@@ -336,7 +408,8 @@ function deriveTransitionAttemptStatus(
   transition: DagContracts.DagTransition<unknown, unknown>,
   wasRunning: boolean,
 ): SessionContracts.DagSessionAttemptStatus["status"] | undefined {
-  if (transition.type === DagContracts.DagTransitionType.Start) return DagContracts.DagNodeStatus.Running;
+  if (transition.type === DagContracts.DagTransitionType.Start)
+    return DagContracts.DagNodeStatus.Running;
   if (transition.type === DagContracts.DagTransitionType.Cancel)
     return wasRunning ? DagContracts.DagNodeStatus.Cancelled : undefined;
   if (transition.type === DagContracts.DagTransitionType.Complete)

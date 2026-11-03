@@ -19,17 +19,29 @@ export interface SubagentJob {
 
 export function jobStatus(operation: Operation): SubagentJobStatus {
   if (operation.status === "accepted") return operation.cancelRequested ? "cancelling" : "queued";
-  if (operation.status === "dispatched") return operation.cancelRequested ? "cancelling" : "running";
+  if (operation.status === "dispatched")
+    return operation.cancelRequested ? "cancelling" : "running";
   return operation.status;
 }
 
 export function projectJob(operation: Operation, child: Child): SubagentJob {
   const initial = operation.kind === "initial" ? child.initialDetails : undefined;
   return {
-    id: operation.operationId, childId: child.childId, name: child.name, task: child.task,
-    cwd: child.cwd, status: jobStatus(operation), createdAt: operation.createdAt,
-    sessionFile: child.sessionFile ?? undefined, errorMessage: initial?.errorMessage,
-    latestDetails: initial && { ...initial, modelOverride: initial.modelOverride, task: child.task, finalOutput: "" },
+    id: operation.operationId,
+    childId: child.childId,
+    name: child.name,
+    task: child.task,
+    cwd: child.cwd,
+    status: jobStatus(operation),
+    createdAt: operation.createdAt,
+    sessionFile: child.sessionFile ?? undefined,
+    errorMessage: initial?.errorMessage,
+    latestDetails: initial && {
+      ...initial,
+      modelOverride: initial.modelOverride,
+      task: child.task,
+      finalOutput: "",
+    },
   };
 }
 

@@ -16,7 +16,7 @@ import {
 import * as Control from "./control";
 import * as Execute from "./execute";
 import * as Resolver from "./resolver";
-import type { ReviewCapability } from "../../../src/subagent-service/review-capability";
+import type { JsonObject } from "@earendil-works/pi-durable";
 import * as Usage from "./usage";
 
 export const DagSubagentExecutorKey = "pi/subagent-v1" as const;
@@ -46,7 +46,10 @@ function resolveContainedCwd(
   );
   if (!Resolver.isResolutionOk(resolved))
     throw new DagSubagentAdapterFailure({ phase: "resolution", message: resolved.error.message });
-  if (!Resolver.isResolutionOk(root) || !PathContainment.isPathContained(root.value, resolved.value))
+  if (
+    !Resolver.isResolutionOk(root) ||
+    !PathContainment.isPathContained(root.value, resolved.value)
+  )
     throw new DagSubagentAdapterFailure({
       phase: "resolution",
       message: "DAG subagent cwd must be contained in the parent workspace.",
@@ -57,32 +60,39 @@ function resolveContainedCwd(
 function resolveRun(
   request: DagSubagentRuntimeRequest,
   ctx: ExtensionContext,
-  reviewCapability: ReviewCapability | undefined,
+  capability: JsonObject | undefined,
   workspaceRoot?: string,
 ): Execute.ResolvedSubagentRun {
   const cwd = resolveContainedCwd(request, ctx, workspaceRoot);
   const systemPrompt = request.prompt.system;
-  const promptBytes = Buffer.byteLength(systemPrompt, "utf8") + Buffer.byteLength(request.prompt.user, "utf8");
+  const promptBytes =
+    Buffer.byteLength(systemPrompt, "utf8") + Buffer.byteLength(request.prompt.user, "utf8");
   if (promptBytes > DagSubagentPromptMaxBytes) {
-    throw new DagSubagentAdapterFailure({ phase: "resolution", message: "DAG subagent prompt exceeds the absolute prompt byte limit." });
+    throw new DagSubagentAdapterFailure({
+      phase: "resolution",
+      message: "DAG subagent prompt exceeds the absolute prompt byte limit.",
+    });
   }
   return {
     name: request.payload.name,
     task: request.prompt.user,
     toolNames: [...request.payload.tools],
-    reviewCapability,
+    capability,
     modelOverride: request.payload.model,
     systemPrompt,
     cwd,
     maxTurns: request.payload.maxTurns,
     reasoning: request.payload.reasoning,
-    workspaceAccess: request.payload.workspace.access === "write" ? Control.WorkspaceAccess.Write : Control.WorkspaceAccess.Read,
+    workspaceAccess:
+      request.payload.workspace.access === "write"
+        ? Control.WorkspaceAccess.Write
+        : Control.WorkspaceAccess.Read,
   };
 }
 
 interface DagSubagentRuntimeOptions extends Execute.RunSubagentOptions {
   readonly workspaceRootForRun?: (runId: string) => string | undefined;
-  readonly reviewCapabilityForRun?: (runId: string) => Promise<ReviewCapability | undefined>;
+  readonly capabilityForRun?: (runId: string) => JsonObject | undefined;
   readonly executeResolved?: typeof Execute.runResolvedSubagentEffect;
 }
 export function makeDagSubagentRuntime(
@@ -92,16 +102,12 @@ export function makeDagSubagentRuntime(
   return {
     run: (request) =>
       Effect.gen(function* () {
-        const reviewCapability = yield* Effect.tryPromise({
-          try: async () => options.reviewCapabilityForRun?.(request.runId),
-          catch: (cause) => new DagSubagentRuntimeFailure({ phase: "resolution", message: "Review capability reconstruction failed.", cause }),
-        });
         const run = yield* Effect.try({
           try: () =>
             resolveRun(
               request,
               ctx,
-              reviewCapability,
+              options.capabilityForRun?.(request.runId),
               options.workspaceRootForRun?.(request.runId),
             ),
           catch: (cause) =>

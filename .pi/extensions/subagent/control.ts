@@ -53,7 +53,6 @@ interface ActiveRun {
   timeout?: ReturnType<typeof setTimeout>;
 }
 
-
 function cloneUsage(usage: UsageStats): UsageStats {
   return { ...usage };
 }
@@ -81,7 +80,6 @@ function addUsageDelta(total: UsageStats, previous: UsageStats, next: UsageStats
   total.turns += Math.max(0, next.turns - previous.turns);
 }
 
-
 export class SubagentRunSupervisor {
   private readonly active = new Map<string, ActiveRun>();
   private readonly pending: PendingAdmission[] = [];
@@ -108,9 +106,7 @@ export class SubagentRunSupervisor {
       try: (effectSignal) =>
         this.acquire({
           ...request,
-          signal: request.signal
-            ? AbortSignal.any([request.signal, effectSignal])
-            : effectSignal,
+          signal: request.signal ? AbortSignal.any([request.signal, effectSignal]) : effectSignal,
         }),
       catch: (cause) =>
         cause instanceof SubagentAdmissionError
@@ -158,7 +154,10 @@ export class SubagentRunSupervisor {
     );
   }
 
-  retainChild(child: ChildTypes.NativeChildSession, retention?: { scopeId: string; maxRetained: number }): void {
+  retainChild(
+    child: ChildTypes.NativeChildSession,
+    retention?: { scopeId: string; maxRetained: number },
+  ): void {
     if (this.closed) throw new Error("Subagent supervisor is shutting down.");
     this.children.delete(child.id);
     this.children.set(child.id, child);
@@ -170,7 +169,9 @@ export class SubagentRunSupervisor {
     if (this.closed) return;
     let excess = this.children.size - this.evicting.size - this.config.maxRetainedJobs;
     const counts = new Map<string, number>();
-    for (const [id, retention] of this.childRetention) if (this.children.has(id) && !this.evicting.has(id)) counts.set(retention.scopeId, (counts.get(retention.scopeId) ?? 0) + 1);
+    for (const [id, retention] of this.childRetention)
+      if (this.children.has(id) && !this.evicting.has(id))
+        counts.set(retention.scopeId, (counts.get(retention.scopeId) ?? 0) + 1);
     for (const child of this.children.values()) {
       if (!this.canEvict(child, excess, counts)) continue;
       const retention = this.childRetention.get(child.id);
@@ -178,12 +179,18 @@ export class SubagentRunSupervisor {
       if (retention) counts.set(retention.scopeId, (counts.get(retention.scopeId) ?? 1) - 1);
       this.evicting.add(child.id);
       void child.close().then(
-        () => { this.forgetClosedChild(child); this.evicting.delete(child.id); },
+        () => {
+          this.forgetClosedChild(child);
+          this.evicting.delete(child.id);
+        },
         (cause) => {
           if (this.evictionFailures.length < this.config.maxRetainedJobs) {
-            this.evictionFailures.push(new Error(`Child ${child.id} eviction cleanup failed.`, { cause }));
+            this.evictionFailures.push(
+              new Error(`Child ${child.id} eviction cleanup failed.`, { cause }),
+            );
           } else this.omittedEvictionFailures++;
-          if (child.summary().state === ChildTypes.NativeChildState.Closed) this.forgetClosedChild(child);
+          if (child.summary().state === ChildTypes.NativeChildState.Closed)
+            this.forgetClosedChild(child);
           this.evicting.delete(child.id);
         },
       );
@@ -197,16 +204,23 @@ export class SubagentRunSupervisor {
     this.childRetention.delete(child.id);
   }
 
-  private canEvict(child: ChildTypes.NativeChildSession, globalExcess: number, counts: ReadonlyMap<string, number>): boolean {
+  private canEvict(
+    child: ChildTypes.NativeChildSession,
+    globalExcess: number,
+    counts: ReadonlyMap<string, number>,
+  ): boolean {
     const retention = this.childRetention.get(child.id);
-    const scopeExcess = retention ? (counts.get(retention.scopeId) ?? 0) > retention.maxRetained : false;
+    const scopeExcess = retention
+      ? (counts.get(retention.scopeId) ?? 0) > retention.maxRetained
+      : false;
     const state = child.summary().state;
-    const settled = state === ChildTypes.NativeChildState.Idle || state === ChildTypes.NativeChildState.Closed;
+    const settled =
+      state === ChildTypes.NativeChildState.Idle || state === ChildTypes.NativeChildState.Closed;
     return (globalExcess > 0 || scopeExcess) && settled && !this.evicting.has(child.id);
   }
 
   shutdown(): Promise<void> {
-    return this.shutdownPromise ??= this.shutdownOwnedRuns();
+    return (this.shutdownPromise ??= this.shutdownOwnedRuns());
   }
 
   private async shutdownOwnedRuns(): Promise<void> {
@@ -221,7 +235,9 @@ export class SubagentRunSupervisor {
     }
     for (const active of this.active.values()) active.controller.abort(error);
     const activeRuns = [...this.active.entries()];
-    const closingChildren = Promise.allSettled([...this.children.values()].map((child) => child.close()));
+    const closingChildren = Promise.allSettled(
+      [...this.children.values()].map((child) => child.close()),
+    );
     // Abort requests do not prove that tools or remote effects have settled.
     await Promise.all(activeRuns.map(([, active]) => active.done));
     const outcomes = await closingChildren;
@@ -229,10 +245,15 @@ export class SubagentRunSupervisor {
     this.childRetention.clear();
     const failures = [
       ...this.evictionFailures,
-      ...outcomes.filter((outcome) => outcome.status === "rejected").map((failure) => failure.reason),
+      ...outcomes
+        .filter((outcome) => outcome.status === "rejected")
+        .map((failure) => failure.reason),
     ];
     if (failures.length) {
-      const omitted = this.omittedEvictionFailures > 0 ? ` ${this.omittedEvictionFailures} additional eviction failure causes omitted.` : "";
+      const omitted =
+        this.omittedEvictionFailures > 0
+          ? ` ${this.omittedEvictionFailures} additional eviction failure causes omitted.`
+          : "";
       throw new AggregateError(failures, `Child shutdown failed.${omitted}`);
     }
   }
@@ -250,13 +271,17 @@ export class SubagentRunSupervisor {
         message: "Subagent admission aborted.",
       });
     }
-    const scoped = request.scopeId === undefined ? undefined : [
-      ...[...this.active.values()].map((run) => run.request),
-      ...this.pending.map((run) => run.request),
-    ].filter((run) => run.scopeId === request.scopeId);
+    const scoped =
+      request.scopeId === undefined
+        ? undefined
+        : [
+            ...[...this.active.values()].map((run) => run.request),
+            ...this.pending.map((run) => run.request),
+          ].filter((run) => run.scopeId === request.scopeId);
     const limits = request.limits ?? this.config;
     if (
-      this.active.size + this.pending.length >= this.config.maxPendingRuns + this.config.maxConcurrentRuns ||
+      this.active.size + this.pending.length >=
+        this.config.maxPendingRuns + this.config.maxConcurrentRuns ||
       (scoped !== undefined && scoped.length >= limits.maxPendingRuns + limits.maxConcurrentRuns)
     ) {
       return new SubagentAdmissionError({
@@ -269,7 +294,12 @@ export class SubagentRunSupervisor {
 
   private canStart(pending: PendingAdmission): boolean {
     if (this.active.size >= this.config.maxConcurrentRuns) return false;
-    if (pending.request.scopeId !== undefined && [...this.active.values()].filter((run) => run.request.scopeId === pending.request.scopeId).length >= (pending.request.limits ?? this.config).maxConcurrentRuns) return false;
+    if (
+      pending.request.scopeId !== undefined &&
+      [...this.active.values()].filter((run) => run.request.scopeId === pending.request.scopeId)
+        .length >= (pending.request.limits ?? this.config).maxConcurrentRuns
+    )
+      return false;
     return (
       pending.request.workspaceAccess !== WorkspaceAccess.Write ||
       !this.activeWorkspaceWriters.has(pending.request.cwd)

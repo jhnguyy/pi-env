@@ -64,7 +64,8 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
     try {
       await Promise.all(runtimes.splice(0).map((runtime) => runtime.shutdownSession()));
     } finally {
-      for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+      for (const directory of directories.splice(0))
+        rmSync(directory, { recursive: true, force: true });
     }
   });
 
@@ -80,7 +81,10 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
       serviceConnectionFactory: async () => serviceClientFixture(transport),
     });
     testCleanup()(
-      () => { runtimeState.blocked = false; runtimeState.release?.(); },
+      () => {
+        runtimeState.blocked = false;
+        runtimeState.release?.();
+      },
       () => runtime.shutdownSession(),
     );
     return runtime;
@@ -146,7 +150,8 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
     expect([...runtimeState.disposed.values()]).toEqual([1]);
     expect(runtime.state).toBe("inactive");
 
-    await expect(runtime.startJob({ name: "job", task: "task" }, { cwd: "/tmp" } as any))
-      .rejects.toThrow("Parent subagent session is not active.");
+    await expect(
+      runtime.startJob({ name: "job", task: "task" }, { cwd: "/tmp" } as any),
+    ).rejects.toThrow("Parent subagent session is not active.");
   });
 });

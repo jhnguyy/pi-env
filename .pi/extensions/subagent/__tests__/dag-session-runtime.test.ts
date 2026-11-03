@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serviceClientFixture } from "./service-client.fixture";
 
 // Native child execution belongs to registered-native; these scenarios inject client failures.
-const transport = { close: vi.fn(async () => {}), closeRun: vi.fn(async (_run: { runId: string }) => undefined) };
+const transport = {
+  close: vi.fn(async () => {}),
+  closeRun: vi.fn(async (_run: { runId: string }) => undefined),
+};
 
 const state = {
   adapterCalls: [] as Array<{
@@ -313,25 +316,47 @@ describe("session-owned DAG runtime composition", () => {
     const pi = makePi();
     const runtime = makeRuntime(pi);
     let registration: DagRuntimeServiceRegistration | undefined;
-    listenForDagRuntimeService(pi, (active) => { registration = active; });
+    listenForDagRuntimeService(pi, (active) => {
+      registration = active;
+    });
     let entered!: () => void;
-    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
     state.executor = () => Effect.sync(entered).pipe(Effect.andThen(Effect.never));
     await runtime.startSession(makeContext(cwd));
     const handle = await Effect.runPromise(registration!.service.submit(graph("explicit-cancel")));
     await started;
     let closing!: () => void;
     let release!: () => void;
-    const closeStarted = new Promise<void>((resolve) => { closing = resolve; });
-    const settled = new Promise<void>((resolve) => { release = resolve; });
-    transport.closeRun.mockImplementationOnce(async () => { closing(); await settled; return undefined; });
+    const closeStarted = new Promise<void>((resolve) => {
+      closing = resolve;
+    });
+    const settled = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    transport.closeRun.mockImplementationOnce(async () => {
+      closing();
+      await settled;
+      return undefined;
+    });
     let finished = false;
-    const cancel = Effect.runPromise(handle.cancel).then(() => { finished = true; });
+    const cancel = Effect.runPromise(handle.cancel).then(() => {
+      finished = true;
+    });
     try {
-      await Promise.race([closeStarted, cancel.then(() => { throw new Error("DAG cancellation returned before native settlement"); })]);
+      await Promise.race([
+        closeStarted,
+        cancel.then(() => {
+          throw new Error("DAG cancellation returned before native settlement");
+        }),
+      ]);
       expect(finished).toBe(false);
       expect(transport.closeRun).toHaveBeenCalledWith({ runId: "explicit-cancel" });
-    } finally { release(); await cancel; }
+    } finally {
+      release();
+      await cancel;
+    }
     await runtime.shutdownSession();
     expect(transport.closeRun).toHaveBeenCalledTimes(1);
   });

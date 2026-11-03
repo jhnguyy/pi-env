@@ -5,9 +5,16 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { processLock } from "@earendil-works/chord/node";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { ProjectTrustStore, SessionManager, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { Harness, createRegistry, defineDoc, defineExtension, defineTask, type TaskId } from "@earendil-works/pi-durable";
+import {
+  Harness,
+  createRegistry,
+  defineDoc,
+  defineExtension,
+  defineTask,
+  type JsonObject,
+  type TaskId,
+} from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { Check } from "typebox/value";
 import { withChildContext } from "../../.pi/extensions/_shared/child-context.js";
 import { loadSubagentRuntimeConfig } from "../../.pi/extensions/subagent/config.js";
 import { SubagentRunSupervisor } from "../../.pi/extensions/subagent/control.js";
@@ -16,10 +23,37 @@ import { NativeInputMode } from "../../.pi/extensions/subagent/child-types.js";
 import { addUsage, getFinalOutput, zeroUsage } from "../../.pi/extensions/subagent/usage.js";
 import type { ResolvedSubagentRun } from "../../.pi/extensions/subagent/execution-types.js";
 import type { NativeChildSnapshot } from "../../.pi/extensions/subagent/child-types.js";
-import { MaxServiceRequestBytes, CancelSchema, InputSchema, SubmitSchema, ResultRequestSchema, ScopeSchema, type FullResult, type Child, type Input, type Operation, type Receipt, type ServiceRuntime, type Snapshot, type Submit } from "./contract.js";
+import {
+  MaxServiceRequestBytes,
+  ServiceChecks,
+  type FullResult,
+  type Child,
+  type Input,
+  type Operation,
+  type Receipt,
+  type ServiceRuntime,
+  type Snapshot,
+  type Submit,
+} from "./contract.js";
 
-export type PrivateCapabilityResolver = (request: { capability: NonNullable<Submit["capability"]>; parentSessionId: string; runId: string; childId: string; cwd: string }) => Promise<Pick<ResolvedSubagentRun, "customTools" | "toolNames" | "systemPrompt">>;
-type StoredResult = { text: string; preview: { text: string; truncated: boolean }; disposition: string; originalJson: string | null };
+export interface CapabilityRequest {
+  readonly capability: JsonObject;
+  readonly parentSessionId: string;
+  readonly runId: string;
+  readonly cwd: string;
+}
+export interface PrivateCapabilityAdapter {
+  parse(request: CapabilityRequest): JsonObject | Promise<JsonObject>;
+  resolve(
+    request: CapabilityRequest & { childId: string },
+  ): Promise<Pick<ResolvedSubagentRun, "customTools" | "toolNames" | "systemPrompt">>;
+}
+type StoredResult = {
+  text: string;
+  preview: { text: string; truncated: boolean };
+  disposition: string;
+  originalJson: string | null;
+};
 
 type StoredOperation = Operation & {
   requestId: string;
@@ -42,14 +76,26 @@ type Store = {
   cancellations: { requestId: string; operationId: string; parentSessionId: string }[];
 };
 const StoreDoc = defineDoc<{ store: Store | null }>({
-  kind: "pi-env.subagent.service", version: 2, scope: "session",
-  initial: () => ({ store: null }), checkpointWhen: () => true,
+  kind: "pi-env.subagent.service",
+  version: 2,
+  scope: "session",
+  initial: () => ({ store: null }),
+  checkpointWhen: () => true,
 });
 const terminal = (op: Operation) => op.status !== "accepted" && op.status !== "dispatched";
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 function bounded(text: string, limit = 4_096): { text: string; truncated: boolean } {
   const bytes = Buffer.from(text);
-  return { text: bytes.length > limit ? bytes.subarray(0, limit - 4).toString("utf8").replace(/\uFFFD$/, "") + "…" : text, truncated: bytes.length > limit };
+  return {
+    text:
+      bytes.length > limit
+        ? bytes
+            .subarray(0, limit - 4)
+            .toString("utf8")
+            .replace(/\uFFFD$/, "") + "…"
+        : text,
+    truncated: bytes.length > limit,
+  };
 }
 function required(store: Store | null | undefined): Store {
   if (!store) throw new Error("invalid_store");
@@ -80,29 +126,50 @@ type ServiceOptions = {
   agentDir?: string;
   maxRetainedOperations?: number;
   maxOutstandingOperations?: number;
-  resolveCapability?: PrivateCapabilityResolver;
+  capabilityAdapter?: PrivateCapabilityAdapter;
+  openStorage?: typeof openNodeSqliteStorage;
 };
 
 function serviceCapacity(options: ServiceOptions) {
   if (!/^[a-f0-9]{64}$/.test(options.bundleId)) throw new Error("executable_digest_required");
   const maxRetained = options.maxRetainedOperations ?? 100_000;
   const maxOutstanding = options.maxOutstandingOperations ?? 20;
-  if (![maxRetained, maxOutstanding].every((n) => Number.isSafeInteger(n) && n > 0)) throw new Error("invalid_capacity");
+  if (![maxRetained, maxOutstanding].every((n) => Number.isSafeInteger(n) && n > 0))
+    throw new Error("invalid_capacity");
   return { maxRetained, maxOutstanding };
 }
 
 function executionFailure(record: StoredOperation, error: unknown): StoredResult {
-  const text = error instanceof Error ? error.message : "Native execution failed; inspect the retained child when available.";
+  const text =
+    error instanceof Error
+      ? error.message
+      : "Native execution failed; inspect the retained child when available.";
   const spec = record.spec;
-  const original: FullResult | null = spec ? {
-    content: [{ type: "text", text }],
-    details: {
-      name: spec.name, task: spec.task, cwd: spec.cwd, modelOverride: spec.model,
-      toolNames: spec.tools ?? [], finalOutput: "", toolCallCount: 0, usage: zeroUsage(),
-      stopReason: "startup", errorMessage: text, isError: true, turnLimitExceeded: false,
-    },
-  } : null;
-  return { text, preview: bounded(text), originalJson: original && JSON.stringify(original), disposition: "failed" };
+  const original: FullResult | null = spec
+    ? {
+        content: [{ type: "text", text }],
+        details: {
+          name: spec.name,
+          task: spec.task,
+          cwd: spec.cwd,
+          modelOverride: spec.model,
+          toolNames: spec.tools ?? [],
+          finalOutput: "",
+          toolCallCount: 0,
+          usage: zeroUsage(),
+          stopReason: "startup",
+          errorMessage: text,
+          isError: true,
+          turnLimitExceeded: false,
+        },
+      }
+    : null;
+  return {
+    text,
+    preview: bounded(text),
+    originalJson: original && JSON.stringify(original),
+    disposition: "failed",
+  };
 }
 
 /** Promise compatibility boundary for native Pi, Chord and Durable. The service owns every execution signal. */
@@ -128,15 +195,51 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
   let harness: Harness | undefined;
   let storage: Awaited<ReturnType<typeof openNodeSqliteStorage>> | undefined;
   let closing = false;
+  const failure = new AbortController();
+  let closeRuntime: (() => Promise<void>) | undefined;
+  const fail = (cause: unknown) => {
+    if (closing || failure.signal.aborted) return;
+    failure.abort(
+      new Error("Subagent durable Harness failed; operation outcomes may be unknown.", { cause }),
+    );
+    void closeRuntime?.().catch((error: unknown) =>
+      console.error("Subagent failure cleanup failed", error),
+    );
+  };
   let summaryObserver: ReturnType<typeof setInterval> | undefined;
   let observingSummary = false;
   let publishedNativeStates = new Map<string, Child["state"]>();
   let closePromise: Promise<void> | undefined;
-  let current: Snapshot = { serviceId: "opening", epoch, bundleId: options.bundleId, revision: 0, children: [], operations: [] };
-  const summarizeChild = (child: Child): Child => ({ ...child, model: ownerFor(child.childId)?.summary().model ?? child.model, state: child.state === "closed" ? "closed" : ownerFor(child.childId)?.summary().state ?? "historical" });
-  const scoped = (parentSessionId: string): Snapshot => JSON.parse(JSON.stringify({ ...current, children: current.children.filter((child) => child.parentSessionId === parentSessionId).map(summarizeChild), operations: current.operations.filter((op) => op.parentSessionId === parentSessionId) })) as Snapshot;
+  let current: Snapshot = {
+    serviceId: "opening",
+    epoch,
+    bundleId: options.bundleId,
+    revision: 0,
+    children: [],
+    operations: [],
+  };
+  const summarizeChild = (child: Child): Child => ({
+    ...child,
+    model: ownerFor(child.childId)?.summary().model ?? child.model,
+    state:
+      child.state === "closed"
+        ? "closed"
+        : (ownerFor(child.childId)?.summary().state ?? "historical"),
+  });
+  const scoped = (parentSessionId: string): Snapshot =>
+    JSON.parse(
+      JSON.stringify({
+        ...current,
+        children: current.children
+          .filter((child) => child.parentSessionId === parentSessionId)
+          .map(summarizeChild),
+        operations: current.operations.filter((op) => op.parentSessionId === parentSessionId),
+      }),
+    ) as Snapshot;
   const findChild = (parentSessionId: string, childId: string) => {
-    const child = current.children.find((child) => child.childId === childId && child.parentSessionId === parentSessionId);
+    const child = current.children.find(
+      (child) => child.childId === childId && child.parentSessionId === parentSessionId,
+    );
     if (!child) throw new Error("child_not_found");
     return child;
   };
@@ -145,12 +248,20 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
     if (op.parentSessionId !== parentSessionId) throw new Error("operation_not_found");
     return op;
   };
-  const closedRun = (store: Store, parent: string, run: string) => closingRuns.has(runKey(parent, run)) || store.closedRuns.some((item) => item.parentSessionId === parent && item.runId === run);
+  const closedRun = (store: Store, parent: string, run: string) =>
+    closingRuns.has(runKey(parent, run)) ||
+    store.closedRuns.some((item) => item.parentSessionId === parent && item.runId === run);
   const publish = async () => {
     const store = required((await harness!.snapshot(StoreDoc, context))?.store);
     const latestInspections = new Map<string, StoredOperation>();
     for (const op of store.operations) {
-      if (op.inspectionJson && op.inspectionJson !== "null" && (op.inspectionRevision ?? 0) >= (latestInspections.get(op.childId)?.inspectionRevision ?? -1)) latestInspections.set(op.childId, op);
+      if (
+        op.inspectionJson &&
+        op.inspectionJson !== "null" &&
+        (op.inspectionRevision ?? 0) >=
+          (latestInspections.get(op.childId)?.inspectionRevision ?? -1)
+      )
+        latestInspections.set(op.childId, op);
     }
     for (const [childId, op] of latestInspections) {
       if (inspectionVersions.get(childId) === op.inspectionJson) continue;
@@ -158,31 +269,102 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
       inspectionVersions.set(childId, op.inspectionJson!);
     }
     const next: Snapshot = {
-      serviceId: store.serviceId, epoch, bundleId: store.bundleId, revision: store.revision,
+      serviceId: store.serviceId,
+      epoch,
+      bundleId: store.bundleId,
+      revision: store.revision,
       children: store.children.map(summarizeChild),
-      operations: store.operations.map(({ childId, operationId, parentSessionId, runId, createdAt, kind, status, cancelRequested }) => ({ childId, operationId, parentSessionId, runId, createdAt, kind, status, cancelRequested })),
+      operations: store.operations.map(
+        ({
+          childId,
+          operationId,
+          parentSessionId,
+          runId,
+          createdAt,
+          kind,
+          status,
+          cancelRequested,
+        }) => ({
+          childId,
+          operationId,
+          parentSessionId,
+          runId,
+          createdAt,
+          kind,
+          status,
+          cancelRequested,
+        }),
+      ),
     };
     if (next.revision < current.revision) return;
     current = next;
-    publishedNativeStates = new Map([...supervisor.children].map(([id, owner]) => [id, owner.summary().state]));
+    publishedNativeStates = new Map(
+      [...supervisor.children].map(([id, owner]) => [id, owner.summary().state]),
+    );
     for (const entry of listeners) {
-      try { entry.listener(scoped(entry.parentSessionId)); }
-      catch { listeners.delete(entry); }
+      try {
+        entry.listener(scoped(entry.parentSessionId));
+      } catch {
+        listeners.delete(entry);
+      }
     }
   };
-  const makeOwner = async (record: StoredOperation, manager: ReturnType<typeof SessionManager.create>, signal?: AbortSignal, reopened = false) => {
+  const makeOwner = async (
+    record: StoredOperation,
+    manager: ReturnType<typeof SessionManager.create>,
+    signal?: AbortSignal,
+    reopened = false,
+  ) => {
     const spec = record.spec!;
-    const overrides = spec.capability ? await options.resolveCapability!({ capability: spec.capability, parentSessionId: record.parentSessionId, runId: record.runId, childId: record.childId, cwd: spec.cwd }) : {};
+    const overrides = spec.capability
+      ? await options.capabilityAdapter!.resolve({
+          capability: spec.capability,
+          parentSessionId: record.parentSessionId,
+          runId: record.runId,
+          childId: record.childId,
+          cwd: spec.cwd,
+        })
+      : {};
     // Logical run IDs group many children. Native supervisor lease IDs must be
     // unique per child, including when siblings execute in different workspaces.
     const limits = loadSubagentRuntimeConfig(spec.cwd, agentDir);
-    const owner = withChildContext({ cwd: spec.cwd, agentDir }, () => new NativeChildOwner({
-      name: spec.name, task: spec.task, cwd: spec.cwd, modelOverride: spec.model,
-      toolNames: spec.tools, systemPrompt: spec.systemPrompt, reasoning: spec.reasoning,
-      maxTurns: spec.maxTurns, workspaceAccess: spec.workspaceAccess, ...overrides,
-    }, { cwd: spec.cwd, isProjectTrusted: () => new ProjectTrustStore(agentDir).get(spec.cwd) === true }, manager, supervisor, { runId: reopened ? `${record.operationId}:reopen:${randomUUID()}` : record.operationId, signal, workspaceAccess: spec.workspaceAccess, admission: { scopeId: record.parentSessionId, limits } }));
-    usageOffsets.set(record.childId, { ...current.children.find((child) => child.childId === record.childId)?.usage ?? zeroUsage() });
-    supervisor.retainChild(owner, { scopeId: record.parentSessionId, maxRetained: limits.maxRetainedJobs });
+    const owner = withChildContext(
+      { cwd: spec.cwd, agentDir },
+      () =>
+        new NativeChildOwner(
+          {
+            name: spec.name,
+            task: spec.task,
+            cwd: spec.cwd,
+            modelOverride: spec.model,
+            toolNames: spec.tools,
+            systemPrompt: spec.systemPrompt,
+            reasoning: spec.reasoning,
+            maxTurns: spec.maxTurns,
+            workspaceAccess: spec.workspaceAccess,
+            ...overrides,
+          },
+          {
+            cwd: spec.cwd,
+            isProjectTrusted: () => new ProjectTrustStore(agentDir).get(spec.cwd) === true,
+          },
+          manager,
+          supervisor,
+          {
+            runId: reopened ? `${record.operationId}:reopen:${randomUUID()}` : record.operationId,
+            signal,
+            workspaceAccess: spec.workspaceAccess,
+            admission: { scopeId: record.parentSessionId, limits },
+          },
+        ),
+    );
+    usageOffsets.set(record.childId, {
+      ...(current.children.find((child) => child.childId === record.childId)?.usage ?? zeroUsage()),
+    });
+    supervisor.retainChild(owner, {
+      scopeId: record.parentSessionId,
+      maxRetained: limits.maxRetainedJobs,
+    });
     nativeIds.set(record.childId, owner.id);
     return owner;
   };
@@ -191,15 +373,27 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
     if (!(await lstat(spec.cwd)).isDirectory()) throw new Error("invalid_cwd");
     const manager = SessionManager.create(spec.cwd, join(local.directory, "sessions"));
     manager.appendSessionInfo(`sub-${spec.name}`);
-    const owner = await makeOwner({ ...record, spec }, manager, controllers.get(record.operationId)?.signal);
+    const owner = await makeOwner(
+      { ...record, spec },
+      manager,
+      controllers.get(record.operationId)?.signal,
+    );
     await harness!.commit(async (tx) => {
       const store = required((await tx.doc(StoreDoc)).store);
-      store.children.find((child) => child.childId === record.childId)!.sessionFile = manager.getSessionFile() ?? null;
+      store.children.find((child) => child.childId === record.childId)!.sessionFile =
+        manager.getSessionFile() ?? null;
       store.revision++;
     }, context);
     const result = await owner.runInitial();
-    const failed = result.details.isError || ["error", "aborted", "length"].includes(result.details.stopReason ?? "");
-    return { text: result.details.finalOutput, preview: bounded(result.details.finalOutput), originalJson: JSON.stringify(result), disposition: failed ? "failed" : "settled" };
+    const failed =
+      result.details.isError ||
+      ["error", "aborted", "length"].includes(result.details.stopReason ?? "");
+    return {
+      text: result.details.finalOutput,
+      preview: bounded(result.details.finalOutput),
+      originalJson: JSON.stringify(result),
+      disposition: failed ? "failed" : "settled",
+    };
   };
   const execute = async (record: StoredOperation): Promise<StoredResult> => {
     if (record.kind === "initial") return executeInitial(record);
@@ -207,15 +401,35 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
     if (!owner || owner.summary().state === "closed") throw new Error("native_owner_unavailable");
     const input = record.input!;
     if (controllers.get(record.operationId)?.signal.aborted) throw new Error("operation_cancelled");
-    const result = await owner.input(input.text, NativeInputMode[input.mode === "followUp" ? "FollowUp" : input.mode === "steer" ? "Steer" : "Prompt"], input.source);
-    if (input.mode !== "prompt" || result.outcome === "handled") return { text: "", preview: bounded(""), originalJson: null, disposition: result.outcome };
+    const result = await owner.input(
+      input.text,
+      NativeInputMode[
+        input.mode === "followUp" ? "FollowUp" : input.mode === "steer" ? "Steer" : "Prompt"
+      ],
+      input.source,
+    );
+    if (input.mode !== "prompt" || result.outcome === "handled")
+      return { text: "", preview: bounded(""), originalJson: null, disposition: result.outcome };
     const messages = [...owner.inspect().messages];
-    const answer = messages.slice().reverse().find((message) => message.role === "assistant");
-    const failed = answer?.role === "assistant" && ["error", "aborted", "length"].includes(answer.stopReason);
+    const answer = messages
+      .slice()
+      .reverse()
+      .find((message) => message.role === "assistant");
+    const failed =
+      answer?.role === "assistant" && ["error", "aborted", "length"].includes(answer.stopReason);
     const text = getFinalOutput(messages);
-    return { text, preview: bounded(text), originalJson: null, disposition: failed ? "failed" : result.outcome };
+    return {
+      text,
+      preview: bounded(text),
+      originalJson: null,
+      disposition: failed ? "failed" : result.outcome,
+    };
   };
-  const executeDispatched = async (record: StoredOperation, signal: AbortSignal, latest: () => Promise<StoredOperation>) => {
+  const executeDispatched = async (
+    record: StoredOperation,
+    signal: AbortSignal,
+    latest: () => Promise<StoredOperation>,
+  ) => {
     const isPrompt = record.kind === "initial" || record.kind === "prompt";
     const controller = new AbortController();
     controllers.set(record.operationId, controller);
@@ -239,38 +453,68 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
     } finally {
       signal.removeEventListener("abort", abort);
       controllers.delete(record.operationId);
-      if (isPrompt && active.get(record.childId) === record.operationId) active.delete(record.childId);
+      if (isPrompt && active.get(record.childId) === record.operationId)
+        active.delete(record.childId);
     }
     return { result, failed };
   };
-  const settleOperation = (store: Store, record: StoredOperation, result: StoredResult | null, failed: boolean) => {
+  const settleOperation = (
+    store: Store,
+    record: StoredOperation,
+    result: StoredResult | null,
+    failed: boolean,
+  ) => {
     const op = operation(store, record.operationId);
-    op.status = closing ? "interrupted" : op.cancelRequested ? "cancelled" : failed || result?.disposition === "failed" ? "failed" : "completed";
+    op.status = closing
+      ? "interrupted"
+      : op.cancelRequested
+        ? "cancelled"
+        : failed || result?.disposition === "failed"
+          ? "failed"
+          : "completed";
     op.result = result;
     const child = store.children.find((child) => child.childId === record.childId)!;
     const owner = ownerFor(record.childId);
     if (owner) {
       child.model = owner.summary().model;
-      child.usage = addUsage(usageOffsets.get(record.childId) ?? zeroUsage(), supervisor.usage(owner.runId));
+      child.usage = addUsage(
+        usageOffsets.get(record.childId) ?? zeroUsage(),
+        supervisor.usage(owner.runId),
+      );
     }
     if (record.kind === "initial" && result?.originalJson) {
-      const { task: _task, finalOutput: _output, ...metadata } = (JSON.parse(result.originalJson) as FullResult).details;
-      child.initialDetails = { ...metadata, sessionFile: child.sessionFile ?? metadata.sessionFile };
+      const {
+        task: _task,
+        finalOutput: _output,
+        ...metadata
+      } = (JSON.parse(result.originalJson) as FullResult).details;
+      child.initialDetails = {
+        ...metadata,
+        sessionFile: child.sessionFile ?? metadata.sessionFile,
+      };
     }
     op.inspectionJson = JSON.stringify(ownerFor(record.childId)?.inspect() ?? null);
     op.inspectionRevision = ++store.revision;
   };
   try {
     for (const suffix of ["", "-wal", "-shm"]) {
-      const file = await lstat(join(local.directory, `service.sqlite${suffix}`)).catch((error: unknown) => {
-        if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
-        throw error;
-      });
-      if (file && (!file.isFile() || file.nlink !== 1 || file.uid !== process.getuid?.())) throw new Error("unsafe_database_file");
+      const file = await lstat(join(local.directory, `service.sqlite${suffix}`)).catch(
+        (error: unknown) => {
+          if (error instanceof Error && "code" in error && error.code === "ENOENT")
+            return undefined;
+          throw error;
+        },
+      );
+      if (file && (!file.isFile() || file.nlink !== 1 || file.uid !== process.getuid?.()))
+        throw new Error("unsafe_database_file");
     }
-    storage = await openNodeSqliteStorage(join(local.directory, "service.sqlite"));
+    storage = await (options.openStorage ?? openNodeSqliteStorage)(
+      join(local.directory, "service.sqlite"),
+    );
     const NativeOperation = defineTask<{ operationId: string }, { phase: "execute" }, null>({
-      name: "pi-env.subagent.native-operation", version: 1, initial: () => ({ phase: "execute" }),
+      name: "pi-env.subagent.native-operation",
+      version: 1,
+      initial: () => ({ phase: "execute" }),
       phases: {
         execute: async (task, runtime, taskContext) => {
           let dispatched = false;
@@ -290,61 +534,141 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
           }, taskContext);
           await publish();
           if (dispatched) {
-            const record = structuredClone(operation(required((await runtime.snapshot(StoreDoc, taskContext))?.store), task.input.operationId));
+            const record = structuredClone(
+              operation(
+                required((await runtime.snapshot(StoreDoc, taskContext))?.store),
+                task.input.operationId,
+              ),
+            );
             const { result, failed } = await executeDispatched(record, runtime.signal, async () =>
-              operation(required((await runtime.snapshot(StoreDoc, taskContext))?.store), record.operationId));
+              operation(
+                required((await runtime.snapshot(StoreDoc, taskContext))?.store),
+                record.operationId,
+              ),
+            );
             await runtime.commit(async (tx) => {
               const store = required((await tx.doc(StoreDoc)).store);
               settleOperation(store, record, result, failed);
               return { status: "terminal", outcome: { status: "completed", result: null } };
             }, taskContext);
           } else {
-            await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), taskContext);
+            await runtime.commit(
+              () => ({ status: "terminal", outcome: { status: "completed", result: null } }),
+              taskContext,
+            );
           }
           await publish();
         },
       },
-      abort: (_task, runtime, ctx) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+      abort: (_task, runtime, ctx) =>
+        runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
     });
     const Cancellation = defineTask<{ operationId: string }, { phase: "cancel" }, null>({
-      name: "pi-env.subagent.cancel", version: 1, initial: () => ({ phase: "cancel" }),
-      phases: { cancel: async (task, runtime, ctx) => {
-        const store = required((await runtime.snapshot(StoreDoc, ctx))?.store);
-        const op = operation(store, task.input.operationId);
-        controllers.get(op.operationId)?.abort();
-        if (active.get(op.childId) === op.operationId) await ownerFor(op.childId)?.cancel();
-        await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), ctx);
-      } },
-      abort: (_task, runtime, ctx) => runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
+      name: "pi-env.subagent.cancel",
+      version: 1,
+      initial: () => ({ phase: "cancel" }),
+      phases: {
+        cancel: async (task, runtime, ctx) => {
+          const store = required((await runtime.snapshot(StoreDoc, ctx))?.store);
+          const op = operation(store, task.input.operationId);
+          controllers.get(op.operationId)?.abort();
+          if (active.get(op.childId) === op.operationId) await ownerFor(op.childId)?.cancel();
+          await runtime.commit(
+            () => ({ status: "terminal", outcome: { status: "completed", result: null } }),
+            ctx,
+          );
+        },
+      },
+      abort: (_task, runtime, ctx) =>
+        runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx),
     });
     const registry = createRegistry();
-    registry.install(defineExtension({ name: "pi-env.subagent.service", tasks: [NativeOperation, Cancellation] }));
-    harness = await Harness.open(storage, { models: createModels(), registry }, context);
+    registry.install(
+      defineExtension({ name: "pi-env.subagent.service", tasks: [NativeOperation, Cancellation] }),
+    );
+    harness = await Harness.open(
+      storage,
+      {
+        models: createModels(),
+        registry,
+        onReport: (report) => {
+          if (report.kind === "storage_failed") fail(report.error);
+        },
+      },
+      context,
+    );
     const opened = harness;
+    void opened.closed.then((end) => {
+      if (end.kind === "failed") fail(end.error);
+    });
     await opened.commit(async (tx) => {
       const doc = await tx.doc(StoreDoc);
-      doc.store ??= { serviceId: randomUUID(), bundleId: options.bundleId, agentDir, revision: 0, operations: [], children: [], closedRuns: [], cancellations: [] };
+      doc.store ??= {
+        serviceId: randomUUID(),
+        bundleId: options.bundleId,
+        agentDir,
+        revision: 0,
+        operations: [],
+        children: [],
+        closedRuns: [],
+        cancellations: [],
+      };
       const store = doc.store;
-      if (store.bundleId !== options.bundleId || store.agentDir !== agentDir) throw new Error("incompatible_service_bundle");
+      // No cross-version service migration or native replay. Drain and use fresh
+      // state for a changed executable. Harness/storage open precedes this
+      // application fence, so refusal does not prove an older DB was untouched.
+      if (store.bundleId !== options.bundleId || store.agentDir !== agentDir)
+        throw new Error("incompatible_service_bundle");
       for (const op of store.operations) {
         if (op.status === "dispatched") {
           op.status = "interrupted";
-          op.result = { text: "Native execution interrupted; effects may have occurred.", preview: bounded("Native execution interrupted"), originalJson: null, disposition: "unknown" };
+          op.result = {
+            text: "Native execution interrupted; effects may have occurred.",
+            preview: bounded("Native execution interrupted"),
+            originalJson: null,
+            disposition: "unknown",
+          };
         }
       }
       store.revision++;
     }, context);
     await publish();
-    const ensureOpen = () => { if (closing) throw new Error("service_closing"); };
-    const admissionTarget = (store: Store, parentSessionId: string, request: Submit | Input, kind: Operation["kind"]) => {
+    const ensureOpen = () => {
+      failure.signal.throwIfAborted();
+      if (closing) throw new Error("service_closing");
+    };
+    const admissionTarget = (
+      store: Store,
+      parentSessionId: string,
+      request: Submit | Input,
+      kind: Operation["kind"],
+    ) => {
       const childId = "childId" in request ? request.childId : randomUUID();
-      const child = kind === "initial" ? null : store.children.find((child) => child.childId === childId && child.parentSessionId === parentSessionId);
+      const child =
+        kind === "initial"
+          ? null
+          : store.children.find(
+              (child) => child.childId === childId && child.parentSessionId === parentSessionId,
+            );
       if (kind !== "initial" && !child) throw new Error("child_not_found");
       const runId = "task" in request ? request.runId : child!.runId;
       if (closedRun(store, parentSessionId, runId)) throw new Error("run_closed");
       if (child?.state === "closed") throw new Error("child_closed");
-      if (kind !== "initial" && (!ownerFor(childId) || ownerFor(childId)!.summary().state === "closed")) throw new Error("explicit_reopen_required");
-      if (kind === "prompt" && store.operations.some((op) => op.childId === childId && !terminal(op) && (op.kind === "initial" || op.kind === "prompt"))) throw new Error("child_busy");
+      if (
+        kind !== "initial" &&
+        (!ownerFor(childId) || ownerFor(childId)!.summary().state === "closed")
+      )
+        throw new Error("explicit_reopen_required");
+      if (
+        kind === "prompt" &&
+        store.operations.some(
+          (op) =>
+            op.childId === childId &&
+            !terminal(op) &&
+            (op.kind === "initial" || op.kind === "prompt"),
+        )
+      )
+        throw new Error("child_busy");
       return { childId, runId };
     };
     const restoreChild = async (store: Store, child: Child, key: string) => {
@@ -352,42 +676,107 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
       const retained = ownerFor(childId);
       if (retained && retained.summary().state !== "closed") return;
       if (!child.sessionFile) throw new Error("historical_session_unavailable");
-      const initial = store.operations.find((op) => op.childId === childId && op.kind === "initial")!;
-      if (initial.spec?.capability && !options.resolveCapability) throw new Error("private_capability_resolver_required");
-      const owner = await makeOwner(initial, SessionManager.open(child.sessionFile), undefined, true);
+      const initial = store.operations.find(
+        (op) => op.childId === childId && op.kind === "initial",
+      )!;
+      if (initial.spec?.capability && !options.capabilityAdapter)
+        throw new Error("private_capability_adapter_required");
+      const owner = await makeOwner(
+        initial,
+        SessionManager.open(child.sessionFile),
+        undefined,
+        true,
+      );
       try {
-        await owner.reopen({ inputs: historicalInspections.get(childId)?.inputs, initialResult: initial.result?.originalJson ? (JSON.parse(initial.result.originalJson) as FullResult).details : undefined });
+        await owner.reopen({
+          inputs: historicalInspections.get(childId)?.inputs,
+          initialResult: initial.result?.originalJson
+            ? (JSON.parse(initial.result.originalJson) as FullResult).details
+            : undefined,
+        });
         if (closing || closingRuns.has(key)) {
           await owner.close();
           throw new Error(closing ? "service_closing" : "run_closed");
         }
-      } catch (error) { await owner.close(); throw error; }
-      await opened.commit(async (tx) => { required((await tx.doc(StoreDoc)).store).revision++; }, context);
+      } catch (error) {
+        await owner.close();
+        throw error;
+      }
+      await opened.commit(async (tx) => {
+        required((await tx.doc(StoreDoc)).store).revision++;
+      }, context);
       await publish();
     };
-    const admit = async (parentSessionId: string, request: Submit | Input, kind: Operation["kind"]): Promise<Receipt> => {
+    const admit = async (
+      parentSessionId: string,
+      request: Submit | Input,
+      kind: Operation["kind"],
+    ): Promise<Receipt> => {
       ensureOpen();
-      if (Buffer.byteLength(JSON.stringify(request)) > MaxServiceRequestBytes) throw new Error("request_too_large");
+      if (Buffer.byteLength(JSON.stringify(request)) > MaxServiceRequestBytes)
+        throw new Error("request_too_large");
       const fingerprint = hash([kind, request]);
       const receipt = await opened.commit(async (tx) => {
         const store = required((await tx.doc(StoreDoc)).store);
-        if (store.cancellations.some((req) => req.parentSessionId === parentSessionId && req.requestId === request.requestId)) throw new Error("request_conflict");
-        const prior = store.operations.find((op) => op.parentSessionId === parentSessionId && op.requestId === request.requestId);
+        if (
+          store.cancellations.some(
+            (req) => req.parentSessionId === parentSessionId && req.requestId === request.requestId,
+          )
+        )
+          throw new Error("request_conflict");
+        const prior = store.operations.find(
+          (op) => op.parentSessionId === parentSessionId && op.requestId === request.requestId,
+        );
         if (prior) {
           if (prior.fingerprint !== fingerprint) throw new Error("request_conflict");
           return { childId: prior.childId, operationId: prior.operationId };
         }
-        if (store.operations.length >= maxRetained || store.operations.filter((op) => !terminal(op)).length >= maxOutstanding) throw new Error("service_capacity");
+        if (
+          store.operations.length >= maxRetained ||
+          store.operations.filter((op) => !terminal(op)).length >= maxOutstanding
+        )
+          throw new Error("service_capacity");
         const { childId, runId } = admissionTarget(store, parentSessionId, request, kind);
         const operationId = randomUUID();
         const conversation = await tx.createConversation({ ownership: { kind: "ownerless" } });
-        const taskId = await tx.createTask(NativeOperation, { operationId }, { conversationId: conversation.id, ownership: { kind: "conversation" } });
+        const taskId = await tx.createTask(
+          NativeOperation,
+          { operationId },
+          { conversationId: conversation.id, ownership: { kind: "conversation" } },
+        );
         const createdAt = new Date().toISOString();
         if (kind === "initial") {
           const spec = request as Submit;
-          store.children.push({ childId, parentSessionId, runId, name: spec.name, task: spec.task, cwd: spec.cwd, createdAt, sessionFile: null, state: "historical" });
+          store.children.push({
+            childId,
+            parentSessionId,
+            runId,
+            name: spec.name,
+            task: spec.task,
+            cwd: spec.cwd,
+            createdAt,
+            sessionFile: null,
+            state: "historical",
+          });
         }
-        store.operations.push({ childId, operationId, parentSessionId, runId, createdAt, requestId: request.requestId, fingerprint, kind, status: "accepted", cancelRequested: false, result: null, taskId, spec: kind === "initial" ? request as Submit : null, input: kind !== "initial" ? request as Input : null, inspectionJson: null, inspectionRevision: null });
+        store.operations.push({
+          childId,
+          operationId,
+          parentSessionId,
+          runId,
+          createdAt,
+          requestId: request.requestId,
+          fingerprint,
+          kind,
+          status: "accepted",
+          cancelRequested: false,
+          result: null,
+          taskId,
+          spec: kind === "initial" ? (request as Submit) : null,
+          input: kind !== "initial" ? (request as Input) : null,
+          inspectionJson: null,
+          inspectionRevision: null,
+        });
         store.revision++;
         return { childId, operationId };
       }, context);
@@ -396,37 +785,70 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
       return receipt;
     };
     const api: ServiceRuntime = {
+      failure: failure.signal,
       snapshot: scoped,
-      subscribe(parentSessionId, listener) { const entry = { parentSessionId, listener }; listeners.add(entry); return () => { listeners.delete(entry); }; },
+      subscribe(parentSessionId, listener) {
+        const entry = { parentSessionId, listener };
+        listeners.add(entry);
+        return () => {
+          listeners.delete(entry);
+        };
+      },
       async submit(parentSessionId, raw) {
-        if (!Check(ScopeSchema, { parentSessionId }) || !Check(SubmitSchema, raw)) throw new Error("invalid_submit");
+        if (!ServiceChecks.scope({ parentSessionId }) || !ServiceChecks.submit(raw))
+          throw new Error("invalid_submit");
         if (!isAbsolute(raw.cwd)) throw new Error("absolute_cwd_required");
-        if (raw.capability && !options.resolveCapability) throw new Error("private_capability_resolver_required");
-        return admit(parentSessionId, structuredClone(raw), "initial");
+        const request = structuredClone(raw);
+        if (request.capability) {
+          if (!options.capabilityAdapter) throw new Error("private_capability_adapter_required");
+          request.capability = await options.capabilityAdapter.parse({
+            capability: request.capability,
+            parentSessionId,
+            runId: request.runId,
+            cwd: request.cwd,
+          });
+        }
+        return admit(parentSessionId, request, "initial");
       },
       async input(parentSessionId, raw) {
-        if (!Check(InputSchema, raw)) throw new Error("invalid_input");
+        if (!ServiceChecks.input(raw)) throw new Error("invalid_input");
         return admit(parentSessionId, structuredClone(raw), raw.mode);
       },
       async cancel(parentSessionId, raw) {
         ensureOpen();
-        if (!Check(CancelSchema, raw)) throw new Error("invalid_cancel");
+        if (!ServiceChecks.cancel(raw)) throw new Error("invalid_cancel");
         await opened.commit(async (tx) => {
           const store = required((await tx.doc(StoreDoc)).store);
-          if (store.operations.some((op) => op.parentSessionId === parentSessionId && op.requestId === raw.requestId)) throw new Error("request_conflict");
-          const prior = store.cancellations.find((req) => req.parentSessionId === parentSessionId && req.requestId === raw.requestId);
+          if (
+            store.operations.some(
+              (op) => op.parentSessionId === parentSessionId && op.requestId === raw.requestId,
+            )
+          )
+            throw new Error("request_conflict");
+          const prior = store.cancellations.find(
+            (req) => req.parentSessionId === parentSessionId && req.requestId === raw.requestId,
+          );
           if (prior) {
             if (prior.operationId !== raw.operationId) throw new Error("request_conflict");
             return;
           }
           if (store.cancellations.length >= maxRetained) throw new Error("service_capacity");
           const op = scopedOperation(store, parentSessionId, raw.operationId);
-          if (op.status === "dispatched" && (op.kind === "steer" || op.kind === "followUp")) throw new Error("input_already_dispatched");
-          store.cancellations.push({ requestId: raw.requestId, operationId: raw.operationId, parentSessionId });
+          if (op.status === "dispatched" && (op.kind === "steer" || op.kind === "followUp"))
+            throw new Error("input_already_dispatched");
+          store.cancellations.push({
+            requestId: raw.requestId,
+            operationId: raw.operationId,
+            parentSessionId,
+          });
           if (!terminal(op)) {
             op.cancelRequested = true;
             const conversation = await tx.createConversation({ ownership: { kind: "ownerless" } });
-            await tx.createTask(Cancellation, { operationId: op.operationId }, { conversationId: conversation.id, ownership: { kind: "conversation" } });
+            await tx.createTask(
+              Cancellation,
+              { operationId: op.operationId },
+              { conversationId: conversation.id, ownership: { kind: "conversation" } },
+            );
           }
           store.revision++;
         }, context);
@@ -434,22 +856,41 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
         opened.resume();
       },
       async result(parentSessionId, input) {
-        if (!Check(ResultRequestSchema, input)) throw new Error("invalid_result_request");
-        const op = scopedOperation(required((await opened.snapshot(StoreDoc, context))?.store), parentSessionId, input.operationId);
+        if (!ServiceChecks.result(input)) throw new Error("invalid_result_request");
+        const op = scopedOperation(
+          required((await opened.snapshot(StoreDoc, context))?.store),
+          parentSessionId,
+          input.operationId,
+        );
         const text = op.result?.text ?? "";
         const offset = Math.min(input.offset ?? 0, text.length);
         const end = Math.min(text.length, offset + (input.limit ?? 4096));
-        return { operationId: op.operationId, status: op.status, text: text.slice(offset, end), offset, nextOffset: end < text.length ? end : null, total: text.length, truncated: offset > 0 || end < text.length, disposition: op.result?.disposition ?? (terminal(op) ? "unknown" : "pending") };
+        return {
+          operationId: op.operationId,
+          status: op.status,
+          text: text.slice(offset, end),
+          offset,
+          nextOffset: end < text.length ? end : null,
+          total: text.length,
+          truncated: offset > 0 || end < text.length,
+          disposition: op.result?.disposition ?? (terminal(op) ? "unknown" : "pending"),
+        };
       },
       async resultFull(parentSessionId, operationId) {
-        const json = scopedOperation(required((await opened.snapshot(StoreDoc, context))?.store), parentSessionId, operationId).result?.originalJson;
-        return json ? JSON.parse(json) as FullResult : null;
+        const json = scopedOperation(
+          required((await opened.snapshot(StoreDoc, context))?.store),
+          parentSessionId,
+          operationId,
+        ).result?.originalJson;
+        return json ? (JSON.parse(json) as FullResult) : null;
       },
       inspect(parentSessionId, childId) {
         const child = findChild(parentSessionId, childId);
         const owner = ownerFor(childId);
         const saved = historicalInspections.get(childId);
-        const snapshot = owner ? owner.inspect() : saved && { ...saved, state: child.state === "closed" ? "closed" : "historical" };
+        const snapshot = owner
+          ? owner.inspect()
+          : saved && { ...saved, state: child.state === "closed" ? "closed" : "historical" };
         return JSON.parse(JSON.stringify(snapshot ?? null)) as NativeChildSnapshot | null;
       },
       async reopen(parentSessionId, childId) {
@@ -461,11 +902,16 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
         const pending = (async () => {
           const store = required((await opened.snapshot(StoreDoc, context))?.store);
           if (closedRun(store, parentSessionId, child.runId)) throw new Error("run_closed");
-          if (store.operations.some((op) => op.childId === childId && !terminal(op))) throw new Error("child_busy");
+          if (store.operations.some((op) => op.childId === childId && !terminal(op)))
+            throw new Error("child_busy");
           await restoreChild(store, child, key);
         })();
         reopening.set(childId, pending);
-        try { await pending; } finally { reopening.delete(childId); }
+        try {
+          await pending;
+        } finally {
+          reopening.delete(childId);
+        }
       },
       async closeRun(runId, parentSessionId) {
         ensureOpen();
@@ -474,25 +920,38 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
         try {
           await opened.commit(async (tx) => {
             const store = required((await tx.doc(StoreDoc)).store);
-            if (!store.closedRuns.some((run) => run.runId === runId && run.parentSessionId === parentSessionId)) store.closedRuns.push({ runId, parentSessionId });
+            if (
+              !store.closedRuns.some(
+                (run) => run.runId === runId && run.parentSessionId === parentSessionId,
+              )
+            )
+              store.closedRuns.push({ runId, parentSessionId });
             for (const op of store.operations) {
-              if (op.parentSessionId !== parentSessionId || op.runId !== runId || terminal(op)) continue;
-              if (op.status === "dispatched" && (op.kind === "steer" || op.kind === "followUp")) continue;
+              if (op.parentSessionId !== parentSessionId || op.runId !== runId || terminal(op))
+                continue;
+              if (op.status === "dispatched" && (op.kind === "steer" || op.kind === "followUp"))
+                continue;
               op.cancelRequested = true;
               if (op.status === "accepted") op.status = "cancelled";
             }
             store.revision++;
           }, context);
           await publish();
-          const belongs = (op: Operation) => op.parentSessionId === parentSessionId && op.runId === runId;
-          for (const op of current.operations.filter(belongs)) controllers.get(op.operationId)?.abort();
-          const children = current.children.filter((child) => child.parentSessionId === parentSessionId && child.runId === runId);
+          const belongs = (op: Operation) =>
+            op.parentSessionId === parentSessionId && op.runId === runId;
+          for (const op of current.operations.filter(belongs))
+            controllers.get(op.operationId)?.abort();
+          const children = current.children.filter(
+            (child) => child.parentSessionId === parentSessionId && child.runId === runId,
+          );
           // A failed reopen already closes its partial owner; it must not skip
           // settlement and closure of the other children in this run.
-          await Promise.allSettled(children.flatMap((child) => {
-            const pending = reopening.get(child.childId);
-            return pending ? [pending] : [];
-          }));
+          await Promise.allSettled(
+            children.flatMap((child) => {
+              const pending = reopening.get(child.childId);
+              return pending ? [pending] : [];
+            }),
+          );
           const owners = children.flatMap((child) => {
             const owner = ownerFor(child.childId);
             return owner ? [owner] : [];
@@ -500,28 +959,43 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
           await Promise.all(owners.map((owner) => owner.cancel()));
           await new Promise<void>((resolve) => {
             const settled = () => !current.operations.some((op) => belongs(op) && !terminal(op));
-            if (settled()) { resolve(); return; }
-            const stop = api.subscribe(parentSessionId, () => { if (settled()) { stop(); resolve(); } });
+            if (settled()) {
+              resolve();
+              return;
+            }
+            const stop = api.subscribe(parentSessionId, () => {
+              if (settled()) {
+                stop();
+                resolve();
+              }
+            });
           });
           await Promise.all(owners.map((owner) => owner.close()));
           await opened.commit(async (tx) => {
             const store = required((await tx.doc(StoreDoc)).store);
-            for (const child of store.children) if (child.parentSessionId === parentSessionId && child.runId === runId) child.state = "closed";
+            for (const child of store.children)
+              if (child.parentSessionId === parentSessionId && child.runId === runId)
+                child.state = "closed";
             store.revision++;
           }, context);
           await publish();
-        } finally { closingRuns.delete(key); }
+        } finally {
+          closingRuns.delete(key);
+        }
       },
       close() {
-        return closePromise ??= (async () => {
+        return (closePromise ??= (async () => {
           closing = true;
           clearInterval(summaryObserver);
           const outcomes = await Promise.allSettled([opened.close(context), supervisor.shutdown()]);
           listeners.clear();
           await release();
-          const failures = outcomes.flatMap((outcome) => outcome.status === "rejected" ? [outcome.reason] : []);
-          if (failures.length) throw new AggregateError(failures, "Subagent service shutdown failed");
-        })();
+          const failures = outcomes.flatMap((outcome) =>
+            outcome.status === "rejected" ? [outcome.reason] : [],
+          );
+          if (failures.length)
+            throw new AggregateError(failures, "Subagent service shutdown failed");
+        })());
       },
     };
     // Native owners expose summary reads, not state-change subscriptions. Observe
@@ -529,22 +1003,42 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
     // a native hook or tool blocks. Never subscribe clients to native transcripts.
     summaryObserver = setInterval(() => {
       if (closing || observingSummary || listeners.size === 0) return;
-      const changed = supervisor.children.size !== publishedNativeStates.size || [...supervisor.children].some(([id, owner]) => publishedNativeStates.get(id) !== owner.summary().state);
+      const changed =
+        supervisor.children.size !== publishedNativeStates.size ||
+        [...supervisor.children].some(
+          ([id, owner]) => publishedNativeStates.get(id) !== owner.summary().state,
+        );
       if (!changed) return;
       observingSummary = true;
-      void opened.commit(async (tx) => { required((await tx.doc(StoreDoc)).store).revision++; }, context)
+      void opened
+        .commit(async (tx) => {
+          required((await tx.doc(StoreDoc)).store).revision++;
+        }, context)
         .then(publish)
-        .catch((error: unknown) => { if (!closing) console.error("Subagent summary publication failed", error); })
-        .finally(() => { observingSummary = false; });
+        .catch((error: unknown) => {
+          if (!closing) console.error("Subagent summary publication failed", error);
+        })
+        .finally(() => {
+          observingSummary = false;
+        });
     }, 25);
     summaryObserver.unref();
+    closeRuntime = () => api.close();
     opened.resume();
     return api;
   } catch (error) {
-    const outcomes = await Promise.allSettled([supervisor.shutdown(), harness ? harness.close(context) : storage?.close(context)]);
+    const outcomes = await Promise.allSettled([
+      supervisor.shutdown(),
+      harness ? harness.close(context) : storage?.close(context),
+    ]);
     await release();
-    const failures = outcomes.flatMap((outcome) => outcome.status === "rejected" ? [outcome.reason] : []);
-    if (failures.length) throw new AggregateError([error, ...failures], "Service startup and cleanup failed", { cause: error });
+    const failures = outcomes.flatMap((outcome) =>
+      outcome.status === "rejected" ? [outcome.reason] : [],
+    );
+    if (failures.length)
+      throw new AggregateError([error, ...failures], "Service startup and cleanup failed", {
+        cause: error,
+      });
     throw error;
   }
 }

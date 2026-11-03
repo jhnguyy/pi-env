@@ -8,9 +8,12 @@ import type * as Control from "./control";
 import type * as Types from "./types";
 import type * as Usage from "./usage";
 import type { SubagentServiceConnection } from "./service-host";
-import type { ReviewCapability } from "../../../src/subagent-service/review-capability";
+import type { JsonObject } from "@earendil-works/pi-durable";
 
-export type SubagentParentContext = Pick<ExtensionContext, "cwd" | "sessionManager" | "isProjectTrusted">;
+export type SubagentParentContext = Pick<
+  ExtensionContext,
+  "cwd" | "sessionManager" | "isProjectTrusted"
+>;
 
 export interface RunSubagentOptions {
   onUpdate?: AgentToolUpdateCallback<Types.SubagentDetails>;
@@ -37,7 +40,7 @@ export interface ResolvedSubagentRun {
   systemPrompt?: string;
   toolNames?: readonly string[];
   customTools?: readonly ToolDefinition[];
-  reviewCapability?: ReviewCapability;
+  capability?: JsonObject;
   reasoning?: ThinkingLevel;
   maxTurns?: number;
   workspaceAccess?: Control.WorkspaceAccess;
