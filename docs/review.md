@@ -32,6 +32,6 @@ Use tool parameters, not slash-command arguments, for pagination. Neither interf
 
 The managed review workflow has been retired. Create, DAG orchestration, walkthrough and decision UI, posting, recovery, and managed cleanup are no longer available. Retired actions are rejected; they are not translated into new work. Legacy `prReview` configuration is unused.
 
-Historical artifacts and worktrees below `<agent-dir>/pr-review/` and historical review session entries remain untouched. The extension does not restore or migrate those entries or delete private artifacts. Shared DAG and subagent infrastructure remains available for other callers; see [subagents](subagents.md) for native owner lifetimes.
+Historical artifacts and worktrees below `<agent-dir>/pr-review/` and historical review session entries remain untouched. The extension does not restore or migrate those entries or delete private artifacts. The unused shared DAG runtime is also retired; historical DAG entries and artifacts remain untouched, without semantic restoration. See [subagents](subagents.md) for native owner lifetimes.
 
 Before rebuilding and reloading an active installation, let existing managed work settle and reconcile any uncertain remote operations. Then follow the [extension build/reload guidance](../CONTRIBUTING.md#develop). Reloading is not evidence that a remote operation stopped or that an uncertain post was undone. There is no replacement managed cleanup or posting command; any later manual action needs its own scope and authorization.

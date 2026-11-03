@@ -1,6 +1,8 @@
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getSubagentRunSupervisor } from "../control";
+import { SubagentJobManager } from "../jobs";
 import { noopToolingDiagnostics } from "../../../../src/telemetry/tooling";
 import { testCleanup } from "./cleanup";
 import {
@@ -57,7 +59,10 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
     };
     const runtime = new SubagentSessionRuntime(pi as any, { telemetryRuntimeFactory });
     testCleanup()(
-      () => { runtimeState.blocked = false; runtimeState.release?.(); },
+      () => {
+        runtimeState.blocked = false;
+        runtimeState.release?.();
+      },
       () => runtime.shutdownSession(),
     );
     return runtime;
@@ -69,6 +74,64 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
       sessionManager: SessionManager.inMemory("/tmp"),
     } as any;
   }
+
+  it.each([false, true])(
+    "waits for retained owners before disposing telemetry, including job shutdown failure=%s",
+    async (failJobs) => {
+      const runtime = makeRuntime();
+      const ctx = sessionContext();
+      await runtime.startSession(ctx);
+      let markClosing!: () => void;
+      const closing = new Promise<void>((resolve) => {
+        markClosing = resolve;
+      });
+      let release!: () => void;
+      const settled = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let closed = false;
+      getSubagentRunSupervisor(ctx.sessionManager.getSessionId())!.retainChild({
+        id: "retained",
+        close: async () => {
+          markClosing();
+          await settled;
+          closed = true;
+        },
+      } as any);
+      const failure = new Error("job shutdown failed");
+      const shutdownSpy = failJobs
+        ? vi.spyOn(SubagentJobManager.prototype, "shutdown").mockRejectedValueOnce(failure)
+        : undefined;
+      testCleanup()(() => {
+        release();
+        shutdownSpy?.mockRestore();
+      });
+
+      const shutdown = runtime.shutdownSession();
+      // Attach the rejection observer before allowing cleanup to finish.
+      const outcome = shutdown.then(
+        () => undefined,
+        (cause) => cause,
+      );
+      await closing;
+      expect(runtime.state).toBe("shutting-down");
+      expect([...runtimeState.disposed.values()]).toEqual([0]);
+      expect(runtime.startJob({ name: "late", task: "late" }, ctx).details.status).toBe(
+        "shutting-down",
+      );
+      expect(
+        (await runtime.execute("late", { name: "late", task: "late" }, undefined, undefined, ctx))
+          .details.isError,
+      ).toBe(true);
+      expect(() => runtime.inputChild("retained", "late", "prompt")).toThrow(/not active/);
+      release();
+      expect(await outcome).toBe(failJobs ? failure : undefined);
+      expect(closed).toBe(true);
+      expect(getSubagentRunSupervisor(ctx.sessionManager.getSessionId())).toBeUndefined();
+      expect([...runtimeState.disposed.values()]).toEqual([1]);
+      expect(runtime.state).toBe("inactive");
+    },
+  );
 
   it("disposes replaced telemetry exactly once and ignores repeated shutdown", async () => {
     const runtime = makeRuntime();
