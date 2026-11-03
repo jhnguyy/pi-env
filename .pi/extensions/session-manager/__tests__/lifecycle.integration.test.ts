@@ -7,6 +7,7 @@ import { CloseSource } from "../domain.js";
 import type { CurrentWindow, SessionHostShape } from "../host.js";
 import {
   SessionAlreadyClosed,
+  SessionNameInvalid,
   createSessionLifecycle,
   type SessionStartInput,
 } from "../lifecycle.js";
@@ -177,8 +178,26 @@ describe("session lifecycle", () => {
     );
     expect(refreshed.record.persistence.state).toBe("materialized");
     expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.persistence).toEqual({
-      state: "materialized", sessionFile: input.sessionFile,
+      state: "materialized",
+      sessionFile: input.sessionFile,
     });
+  });
+
+  it("rejects a whitespace rename with an identifiable error without changing the catalog", async () => {
+    const { cwd, catalog, lifecycle, input } = await fixture();
+    const started = await Effect.runPromise(lifecycle.start(input));
+    if (started.state !== "managed") throw new Error("expected managed session");
+    const before = await Effect.runPromise(catalog.read(cwd));
+
+    const error = await failureOf(lifecycle.rename(started.session, " \t "));
+
+    expect(error).toBeInstanceOf(SessionNameInvalid);
+    expect(String(error)).toBe("SessionNameInvalid");
+    expect(error).toMatchObject({
+      _tag: "SessionNameInvalid",
+      requestedName: " \t ",
+    });
+    expect(await Effect.runPromise(catalog.read(cwd))).toEqual(before);
   });
 
   it("writes the closure source without changing history persistence", async () => {

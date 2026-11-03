@@ -23,7 +23,7 @@ export class SessionIdentityConflict extends Data.TaggedError("SessionIdentityCo
   reason: string;
 }> {}
 export class SessionNameInvalid extends Data.TaggedError("SessionNameInvalid")<{
-  name: string;
+  requestedName: string;
 }> {}
 export class SessionBindingFailed extends Data.TaggedError("SessionBindingFailed")<{
   session: ManagedSession;
@@ -316,7 +316,7 @@ export function createSessionLifecycle(options: {
   const rename = (session: ManagedSession, name: string) =>
     Effect.gen(function* () {
       const normalized = name.trim();
-      if (!normalized) return yield* new SessionNameInvalid({ name });
+      if (!normalized) return yield* new SessionNameInvalid({ requestedName: name });
       if (normalized === session.record.name && session.record.explicitName) return session;
       let selected: OpenSessionRecord | undefined;
       const committed = yield* catalog
