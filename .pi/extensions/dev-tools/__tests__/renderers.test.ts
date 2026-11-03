@@ -1,163 +1,117 @@
 import "../../__tests__/tui-setup";
 import { describe, expect, it } from "vitest";
-import { renderDevToolsResult, renderDevToolsCall, type RenderTheme } from "../renderers";
-import type { DiagnosticsResult, HoverResult } from "../protocol";
-import "../register-actions"; // side-effect: populates the action registry for renderer dispatch
-
-// ─── Mock theme ──────────────────────────────────────────────────────────────
+import { componentText as text, expansionHints } from "../../__tests__/rendering";
+import { renderDevToolsCall, type RenderTheme } from "../renderers";
+import { registerDevTools } from "../index";
+import type { DiagnosticsResult } from "../protocol";
 
 const mockTheme: RenderTheme = {
-  fg: (color: string, text: string) => `[${color}:${text}]`,
-  bold: (text: string) => `**${text}**`,
+  fg: (color, value) => `[${color}:${value}]`,
+  bold: (value) => `**${value}**`,
 };
 
-function text(rendered: unknown): string {
-  if (
-    typeof rendered !== "object" ||
-    rendered === null ||
-    !("text" in rendered) ||
-    typeof rendered.text !== "string"
-  ) {
-    throw new TypeError("Expected a rendered text component");
-  }
-  return rendered.text;
-}
+const tools: any[] = [];
+registerDevTools({
+  registerCommand() {},
+  registerTool: (tool: any) => tools.push(tool),
+} as any);
+const tool = tools.find((entry) => entry.name === "dev-tools");
+const context = { ...expansionHints, isError: false };
 
-describe("Renderers", () => {
-  // ─── renderDevToolsCall ───────────────────────────────────────────────────────
+const diagnostics: DiagnosticsResult = {
+  action: "diagnostics",
+  path: "/a.ts",
+  errorCount: 2,
+  warnCount: 1,
+  items: [
+    {
+      line: 5,
+      character: 3,
+      severity: "error",
+      code: "TS2339",
+      message: "Property 'x' does not exist.",
+    },
+    {
+      line: 7,
+      character: 1,
+      severity: "error",
+      code: "TS2322",
+      message: "Type 'number' not assignable.",
+    },
+    { line: 12, character: 8, severity: "warning", code: "TS7006", message: "Implicit any." },
+  ],
+};
 
-  describe("renderDevToolsCall", () => {
-    it("includes tool title and action", () => {
-      const t = text(renderDevToolsCall({ action: "diagnostics", path: "/project/src/foo.ts" }, mockTheme));
-      expect(t).toContain("[toolTitle:**dev-tools**]");
-      expect(t).toContain("[accent:diagnostics]");
-    });
-
-    it("shows last 2 path segments", () => {
-      const t = text(renderDevToolsCall({ action: "hover", path: "/project/src/foo.ts", line: 5, character: 10 }, mockTheme));
-      expect(t).toContain("[muted:src/foo.ts]");
-      expect(t).toContain("[muted::5][muted::10]");
-      expect(t).not.toContain("/project/");
-    });
-
-    it("shows query for workspace symbols", () => {
-      const t = text(renderDevToolsCall({ action: "symbols", query: "User" }, mockTheme));
-      expect(t).toContain('"User"');
-    });
-
-    it("shows the rename target", () => {
-      const t = text(
-        renderDevToolsCall(
-          {
-            action: "rename",
-            path: "/project/src/foo.ts",
-            line: 5,
-            character: 10,
-            newName: "updatedName",
-          },
-          mockTheme,
-        ),
-      );
-      expect(t).toContain("→ updatedName");
-    });
+describe("dev-tools renderers", () => {
+  it("shows compact paths, queries, and rename targets", () => {
+    const call = text(
+      renderDevToolsCall(
+        {
+          action: "rename",
+          path: "/project/src/foo.ts",
+          line: 5,
+          character: 10,
+          newName: "updatedName",
+        },
+        mockTheme,
+      ),
+    );
+    expect(call).toContain("src/foo.ts");
+    expect(call).toContain("updatedName");
+    expect(call).not.toContain("/project/");
+    expect(text(renderDevToolsCall({ action: "symbols", query: "User" }, mockTheme))).toContain(
+      '"User"',
+    );
   });
 
-  // ─── renderDevToolsResult — diagnostics ──────────────────────────────────────
+  it("dispatches diagnostics, hiding details until expanded", () => {
+    const result = { content: [], details: diagnostics };
+    const collapsed = text(
+      tool.renderResult(result, { expanded: false, isPartial: false }, mockTheme, context),
+    );
+    expect(collapsed).toMatch(/\[error:[^\]]*2 errors/u);
+    expect(collapsed).toMatch(/\[warning:[^\]]*1 warning/u);
+    expect(collapsed).not.toMatch(/TS2339|Property 'x'/u);
+    const expanded = text(
+      tool.renderResult(result, { expanded: true, isPartial: false }, mockTheme, context),
+    );
+    expect(expanded).toContain('"line": 5');
+    expect(expanded).toContain('"code": "TS2339"');
+  });
 
-  describe("renderDevToolsResult diagnostics", () => {
-    const noDiags: DiagnosticsResult = {
-      action: "diagnostics", path: "/a.ts", errorCount: 0, warnCount: 0, items: [],
-    };
-
-    const withErrors: DiagnosticsResult = {
-      action: "diagnostics", path: "/a.ts", errorCount: 2, warnCount: 1,
-      items: [
-        { line: 5, character: 3, severity: "error", code: "TS2339", message: "Property 'x' does not exist." },
-        { line: 7, character: 1, severity: "error", code: "TS2322", message: "Type 'number' not assignable." },
-        { line: 12, character: 8, severity: "warning", code: "TS7006", message: "Implicit any." },
-      ],
-    };
-
-    it("shows success and scanned file summary for no errors", () => {
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: noDiags }, {}, mockTheme));
-      expect(t).toContain("no errors");
-      expect(t).toContain("[success:✓ no errors]");
-      expect(t).toContain("scanned 1 file: a.ts");
-    });
-
-    it("shows error count with error color", () => {
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: withErrors }, {}, mockTheme));
-      expect(t).toContain("[error:✗ 2 errors]");
-      expect(t).toContain("[warning:⚠ 1 warning]");
-    });
-
-    it("expanded=true shows pretty-printed diagnostics JSON", () => {
-      const t = text(renderDevToolsResult(
-        { isError: false, content: [], details: withErrors },
-        { expanded: true },
-        mockTheme,
-      ));
-      expect(t).toContain('{\n  "action": "diagnostics"');
-      expect(t).toContain('"line": 5');
-      expect(t).toContain('"code": "TS2339"');
-    });
-
-    it("expanded=false does not show individual diagnostics", () => {
-      const t = text(renderDevToolsResult(
-        { isError: false, content: [], details: withErrors },
-        { expanded: false },
-        mockTheme,
-      ));
-      expect(t).not.toContain("L5:3");
-    });
-
-    it("shows warning color when warnings present", () => {
-      const r: DiagnosticsResult = { action: "diagnostics", path: "/a.ts", errorCount: 0, warnCount: 2, items: [
-        { line: 1, character: 1, severity: "warning", code: "TS7006", message: "Implicit any." },
-        { line: 2, character: 1, severity: "warning", code: "TS7006", message: "Implicit any." },
-      ]};
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
-      expect(t).toContain("[warning:⚠ 2 warnings]");
-    });
-
-    it("shows scanned files for bulk diagnostics", () => {
-      const r: DiagnosticsResult = {
+  it("shows success and the bounded scanned-file summary", () => {
+    const details: DiagnosticsResult = {
+      action: "diagnostics",
+      path: "(bulk)",
+      errorCount: 0,
+      warnCount: 0,
+      items: [],
+      files: ["src/a.ts", "test/b.ts", "lib/c.ts", "lib/d.ts"].map((path) => ({
         action: "diagnostics",
-        path: "(bulk)",
+        path: `/repo/${path}`,
         errorCount: 0,
         warnCount: 0,
         items: [],
-        files: [
-          { action: "diagnostics", path: "/repo/src/a.ts", errorCount: 0, warnCount: 0, items: [] },
-          { action: "diagnostics", path: "/repo/test/b.ts", errorCount: 0, warnCount: 0, items: [] },
-          { action: "diagnostics", path: "/repo/lib/c.ts", errorCount: 0, warnCount: 0, items: [] },
-          { action: "diagnostics", path: "/repo/lib/d.ts", errorCount: 0, warnCount: 0, items: [] },
-        ],
-      };
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
-      expect(t).toContain("scanned 4 files: src/a.ts, test/b.ts, lib/c.ts, +1 more");
-    });
+      })),
+    };
+    const rendered = text(
+      tool.renderResult({ content: [], details }, { expanded: false }, mockTheme, context),
+    );
+    expect(rendered).toContain("no errors");
+    expect(rendered).toContain("scanned 4 files: src/a.ts, test/b.ts, lib/c.ts, +1 more");
   });
 
-  // ─── renderDevToolsResult — error state ───────────────────────────────────────
-
-  describe("renderDevToolsResult error state", () => {
-    it("shows error text on tool error", () => {
-      const t = text(renderDevToolsResult({
+  it("uses host context error authority for a native result without isError", () => {
+    const result = { content: [{ type: "text", text: "daemon unavailable" }], details: null };
+    const rendered = text(
+      tool.renderResult(result, { expanded: false, isPartial: false }, mockTheme, {
+        ...context,
         isError: true,
-        content: [{ type: "text", text: "No hover information" }],
-      }, {}, mockTheme));
-      expect(t).toBe("[error:✗ No hover information]");
-    });
-  });
-
-  // ─── renderDevToolsResult — other actions ────────────────────────────────────
-
-  describe("renderDevToolsResult other actions", () => {
-    it("renders hover success", () => {
-      const r: HoverResult = { action: "hover", path: "/a.ts", line: 1, character: 1, signature: "string" };
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
-      expect(t).toBe("[success:✓ hover]");
-    });
+      }),
+    );
+    expect(rendered).toMatch(/\[error:[^\]]*daemon unavailable/u);
+    const ordinary = text(tool.renderResult(result, { expanded: false }, mockTheme, context));
+    expect(ordinary).toContain("daemon unavailable");
+    expect(ordinary).not.toContain("[error:");
   });
 });

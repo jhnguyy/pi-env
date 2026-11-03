@@ -10,14 +10,8 @@
     "MPL-2.0",
     "Unlicense"
   ],
-  "prohibitedLicensePrefixes": [
-    "AGPL-",
-    "GPL-",
-    "SSPL-"
-  ],
-  "sourceRequiredLicenseIds": [
-    "MPL-2.0"
-  ],
+  "prohibitedLicensePrefixes": ["AGPL-", "GPL-", "SSPL-"],
+  "sourceRequiredLicenseIds": ["MPL-2.0"],
   "overrides": [
     {
       "repository": "https://github.com/redis/node-redis",
@@ -34,7 +28,7 @@
     {
       "repository": "https://github.com/earendil-works/pi",
       "license": "MIT",
-      "versions": ["1.4.0"],
+      "versions": ["1.5.0"],
       "file": "compliance/npm-missing-license-notices.txt"
     },
     {

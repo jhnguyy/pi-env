@@ -10,6 +10,7 @@
  * 6. Add registerAction() call here
  */
 
+import type { KeybindingHints, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { registerAction } from "./action-registry";
 import { actionHandlers } from "./action-handlers";
 import {
@@ -54,8 +55,9 @@ function diagnosticsFileSummary(d: DiagnosticsResult): string {
 
 function renderDiagnostics(
   d: DiagnosticsResult,
-  opts: { expanded?: boolean },
+  opts: Pick<ToolRenderResultOptions, "expanded">,
   theme: RenderTheme,
+  hints: KeybindingHints,
 ): Text {
   if (opts.expanded) {
     return new Text(JSON.stringify(d, null, 2), 0, 0);
@@ -75,14 +77,15 @@ function renderDiagnostics(
 
   const fileSummary = diagnosticsFileSummary(d);
   if (fileSummary) text += ` ${theme.fg("muted", `scanned ${fileSummary}`)}`;
-  text += ` ${toolExpandHint(theme, "for JSON")}`;
+  const hint = toolExpandHint(theme, hints, "for JSON");
+  if (hint) text += ` ${hint}`;
 
   return new Text(text, 0, 0);
 }
 
 function renderCallHierarchy(
   d: IncomingCallsResult | OutgoingCallsResult,
-  _opts: { expanded?: boolean },
+  _opts: Pick<ToolRenderResultOptions, "expanded">,
   theme: RenderTheme,
 ): Text {
   const direction = d.action === "incoming-calls" ? "caller" : "callee";
@@ -94,7 +97,11 @@ function renderCallHierarchy(
   return new Text(text, 0, 0);
 }
 
-function renderSymbols(d: SymbolsResult, _opts: { expanded?: boolean }, theme: RenderTheme): Text {
+function renderSymbols(
+  d: SymbolsResult,
+  _opts: Pick<ToolRenderResultOptions, "expanded">,
+  theme: RenderTheme,
+): Text {
   const label = d.query ? `"${d.query}"` : (d.path?.split("/").pop() ?? "");
   const text =
     theme.fg("success", `✓ ${d.total} symbol${d.total !== 1 ? "s" : ""}`) +
@@ -102,7 +109,11 @@ function renderSymbols(d: SymbolsResult, _opts: { expanded?: boolean }, theme: R
   return new Text(text, 0, 0);
 }
 
-function renderStatus(d: StatusResult, _opts: { expanded?: boolean }, theme: RenderTheme): Text {
+function renderStatus(
+  d: StatusResult,
+  _opts: Pick<ToolRenderResultOptions, "expanded">,
+  theme: RenderTheme,
+): Text {
   const text = d.running
     ? theme.fg("success", "✓ daemon running") + theme.fg("muted", ` PID:${d.pid ?? "?"}`)
     : theme.fg("muted", "— daemon stopped");
@@ -112,7 +123,8 @@ function renderStatus(d: StatusResult, _opts: { expanded?: boolean }, theme: Ren
 // ─── Simple one-liner renderers ───────────────────────────────────────────────
 
 const successRenderer =
-  (label: string) => (r: any, _opts: { expanded?: boolean }, theme: RenderTheme) =>
+  (label: string) =>
+  (r: any, _opts: Pick<ToolRenderResultOptions, "expanded">, theme: RenderTheme) =>
     new Text(theme.fg("success", `✓ ${label}`), 0, 0);
 
 // ─── Register all actions ─────────────────────────────────────────────────────

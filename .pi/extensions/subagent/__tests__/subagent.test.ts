@@ -6,9 +6,9 @@
  */
 
 import "../../__tests__/tui-setup";
-import { describe, expect, it } from "vitest";
-import { Container, type Text } from "@earendil-works/pi-tui";
-import initSubagent from "../index";
+import { beforeEach, describe, expect, it } from "vitest";
+import { componentText as extractText, expansionHints } from "../../__tests__/rendering";
+import { createSubagentHarness } from "./harness";
 
 // ─── Mock theme ───────────────────────────────────────────────────────────────
 
@@ -17,34 +17,19 @@ const mockTheme = {
   bold: (text: string) => text,
 };
 
+const hints = { ...expansionHints, args: {}, isError: false };
+
 // ─── Mock ExtensionAPI ────────────────────────────────────────────────────────
 
 let registeredTool: any;
 
-const mockPi = {
-  getAllTools: () => [],
-  registerCommand: () => {},
-  registerTool: (tool: any) => {
-    if (tool.name === "subagent") registeredTool = tool;
-  },
-  on: () => {},
-  events: { on: () => {}, emit: () => {} },
-} as any;
-
-// Initialize once — captures the tool registration and event listeners
-initSubagent(mockPi);
+beforeEach(() => {
+  registeredTool = createSubagentHarness().tools.get("subagent");
+});
 
 // ─── Mock ctx for execute ─────────────────────────────────────────────────────
 
 const mockCtx = { cwd: "/tmp/test" } as any;
-
-/** Extract text string from a Text or Container component. */
-function extractText(component: Text | Container): string {
-  if (component instanceof Container) {
-    return component.children.map((c: any) => extractText(c as Text | Container)).join("\n");
-  }
-  return (component as any).text ?? "";
-}
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -78,15 +63,13 @@ describe("subagent extension", () => {
       );
       expect(call).toContain("subagent start");
       expect(call).toContain("audit");
-      expect(call).toContain("...");
-      expect(call).not.toContain("A".repeat(100));
       expect(call).not.toContain("private context");
 
       const result = {
         content: [{ type: "text", text: "Started subagent job job-1 (audit)." }],
         details: { jobId: "job-1", status: "queued", name: "audit" },
       };
-      const context = { args: { action: "start", task: longTask } };
+      const context = { ...hints, args: { action: "start", task: longTask } };
       expect(extractText(registeredTool.renderResult(result, {}, mockTheme, context))).toBe("");
       expect(
         extractText(registeredTool.renderResult(result, { expanded: true }, mockTheme, context)),
@@ -112,7 +95,10 @@ describe("subagent extension", () => {
         },
       };
 
-      const context = { args: { action: "result", job_id: "job-1" } };
+      const context = {
+        ...hints,
+        args: { action: "result", job_id: "job-1" },
+      };
       const collapsed = extractText(registeredTool.renderResult(result, {}, mockTheme, context));
       expect(collapsed).toContain("completed");
       expect(collapsed).toContain("6 tool calls");
@@ -120,14 +106,15 @@ describe("subagent extension", () => {
       expect(collapsed).toContain("sub-audit");
       expect(collapsed).toContain("/sessions/sub-audit.jsonl");
       expect(collapsed).toContain("result truncated");
-      expect(collapsed).not.toContain("B".repeat(100));
-      expect(collapsed).not.toContain(fullOutput);
+      expect(collapsed).toContain("inspect");
+      expect(collapsed).not.toContain(longTask);
+      for (const line of fullOutput.split("\n")) expect(collapsed).not.toContain(line);
 
       const expanded = extractText(
         registeredTool.renderResult(result, { expanded: true }, mockTheme, context),
       );
       expect(expanded).toContain(longTask);
-      expect(expanded).toContain(fullOutput);
+      for (const line of fullOutput.split("\n")) expect(expanded).toContain(line);
     });
   });
 
@@ -167,21 +154,23 @@ describe("subagent extension", () => {
       expect(rendered).toContain("read");
       expect(rendered).toContain("grep");
       expect(rendered).toContain("anthropic/claude-haiku-4-5");
-      expect(rendered).toContain("...");
-      expect(rendered).not.toContain("A".repeat(100));
+      expect(rendered).toContain("A");
+      expect(rendered).not.toContain(longTask);
       expect(rendered).not.toContain("private context");
     });
 
     it("keeps delegated content out of the collapsed result summary", () => {
       const rendered = extractText(
-        registeredTool.renderResult({ content: [], details: successDetails }, {}, mockTheme),
+        registeredTool.renderResult({ content: [], details: successDetails }, {}, mockTheme, hints),
       );
 
       expect(rendered).toContain("3 tool calls");
       expect(rendered).toContain("2 turns");
       expect(rendered).toContain("sub-schema-audit");
       expect(rendered).not.toContain(successDetails.task);
-      expect(rendered).not.toContain(successDetails.finalOutput);
+      for (const line of successDetails.finalOutput.split("\n")) {
+        expect(rendered).not.toContain(line);
+      }
     });
 
     it.each([
@@ -197,6 +186,7 @@ describe("subagent extension", () => {
           { content: [], details: { ...successDetails, ...detailOverrides } },
           {},
           mockTheme,
+          hints,
         ),
       );
 
@@ -209,6 +199,7 @@ describe("subagent extension", () => {
           { content: [{ type: "text", text: "raw output" }] },
           {},
           mockTheme,
+          hints,
         ),
       );
 
@@ -221,11 +212,12 @@ describe("subagent extension", () => {
           { content: [], details: successDetails },
           { expanded: true },
           mockTheme,
+          hints,
         ),
       );
 
       expect(rendered).toContain(successDetails.task);
-      expect(rendered).toContain(successDetails.finalOutput);
+      for (const line of successDetails.finalOutput.split("\n")) expect(rendered).toContain(line);
       expect(rendered).toContain(successDetails.modelOverride);
       expect(rendered).toContain(successDetails.sessionName);
       expect(rendered).toContain(successDetails.sessionFile);

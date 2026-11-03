@@ -34,6 +34,10 @@ Register each model-facing Pi tool through `.pi/extensions/_shared/tool-render.t
 
 Use the shared short-description helper for compact prose. Its default limit is 70 content characters plus `...`. Keep the source text unchanged for expanded output. Apply ANSI-safe viewport truncation at the component render boundary.
 
+Thread the host's injected `KeybindingHints` through renderer helpers: tool renderers receive them in `context`, and message/entry renderers in `options`. Derive tool-render boundary types from Pi's native callback context and `ToolRenderResultOptions`, selecting only the fields consumed or forwarded. Pi 1.5 does not re-export `ToolRenderContext`; the shared `NativeToolRenderContext` derives it from `ToolDefinition["renderResult"]`. Use `context.isError`, not a field on the host's `{ content, details }` result. Leaf helpers that only format hints can depend on `KeybindingHints`. Helpers that use or forward context must require it, including direct callers and test fixtures. Do not import global `keyHint`/`keyText` or substitute a default key: a bundled package copy may not share the host's bindings. An empty `keyText("app.tools.expand")` means the binding is disabled; omit the hint and its decoration without calling `keyHint`.
+
+For inline custom dialogs that wait for an answer, follow upstream [custom screens and overlays](https://pi.dev/docs/tui#use-custom-screens-and-overlays) and set `blocked`. Overlays ignore that option; the `/subagents` overlay does not need it.
+
 ## Settings boundary
 
 Use `.pi/extensions/_shared/settings.ts` as the single settings boundary. It owns path resolution, file IO, JSON/root validation, missing-file semantics, shallow overlay precedence, and Effect Schema decode.
@@ -67,13 +71,17 @@ registerContractTool(pi, {
 });
 ```
 
+Import schema builders and types from `typebox` in library and bundled code. Pi's extension loader maps `@earendil-works/pi-ai` to a compatibility entry that also supplies TypeBox, but ordinary Node imports do not use that mapping. Use native `Type.Enum(values, { type: "string", ...annotations })` for string enums to preserve literal inference and a provider-compatible flat enum. Do not depend on loader-only exports or private compatibility paths.
+
+Pi validates tool arguments as JSON Schema, not through TypeBox-specific refinements, codecs, or format registries. Keep non-JSON-Schema constraints at execution boundaries. See upstream [tool parameter schemas and TypeBox](https://pi.dev/docs/extensions#tool-parameter-schemas-and-typebox) for coercion and validation semantics.
+
 Declare `parameters` as one top-level object. Some provider adapters, including Pi's Anthropic adapter, send only top-level `properties` and `required`, so a top-level union reaches the model as an empty object. Check per-action combinations at execution, as the [notes contract](../../.pi/extensions/notes/contract.ts) does.
 
 The helper registers one native tool. It does not publish a second AgentTool or maintain a process-wide tool catalog. [toPiTool](../../.pi/extensions/_shared/tool-contract.ts) adapts contracts into native definitions. Native execution supplies each invocation's cwd, signal, and progress callback.
 
 Pass review-private definitions through the existing [DAG submission authority](../../.pi/extensions/_shared/dag-runtime-service.ts). Do not publish run-bound callbacks globally or serialize functions into graph artifacts. Native child sessions load ordinary extensions and receive only their run's supplied definitions.
 
-Use the [registration contract test](../../.pi/extensions/__tests__/register-contract-tool.test.ts) and representative native tool tests, such as [closeout](../../.pi/extensions/dev-tools/__tests__/closeout.integration.test.ts), for schema, context, cancellation, progress, and rendering metadata. State side effects and operational limits in safety-sensitive descriptions.
+Use the [tool adapter tests](../../.pi/extensions/__tests__/tool-contract.test.ts) for invocation context, cancellation, and progress, and representative native tool tests, such as [closeout](../../.pi/extensions/dev-tools/__tests__/closeout.integration.test.ts), for execution behavior. State side effects and operational limits in safety-sensitive descriptions.
 
 [Child creation context](../../.pi/extensions/_shared/child-context.ts) identifies target cwd and agentDir across native loading and independently bundled extensions. Root orchestration factories return early in that scope. Do not change process cwd or environment variables to identify a child.
 

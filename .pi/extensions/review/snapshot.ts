@@ -11,10 +11,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExecResult, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Data, Effect, Exit, PartitionedSemaphore } from "effect";
 import { execEffect } from "../_shared/exec";
-import { ProcessFailure, ProcessFailureKind, runProcess } from "../../../src/process/platform.js";
+import {
+  ProcessFailure,
+  ProcessFailureKind,
+  runProcess,
+  type ProcessCommandResult,
+} from "../../../src/process/platform.js";
 import {
   reviewIdFromMetadata,
   parseChangedFilesFromDiff,
@@ -125,21 +130,29 @@ function fetchError(error: SnapshotError, command: string): SnapshotError {
   });
 }
 
-/** Run Git through the shared process owner for bounded output and POSIX process-group cleanup. */
-export const managedGitExec: Exec = async (command, args, options = {}) => {
-  const effect = runProcess(command, args, {
-    cwd: options.cwd,
-    timeoutMs: options.timeout,
-  });
-  const result = options.signal
-    ? await Effect.runPromise(effect, { signal: options.signal })
-    : await Effect.runPromise(effect);
+function toExecResult(result: ProcessCommandResult): ExecResult {
   return {
     code: result.exitCode,
     stdout: result.stdout,
     stderr: result.stderr,
     killed: false,
+    // The process owner rejects output-limit failures after process-tree cleanup.
+    truncated: false,
   };
+}
+
+/** Run Git through the shared process owner for bounded output and POSIX process-group cleanup. */
+export const managedGitExec: Exec = async (command, args, options = {}) => {
+  const effect = runProcess(command, args, {
+    cwd: options.cwd,
+    timeoutMs: options.timeout,
+    maxBuffer: options.maxBuffer,
+    combinedOutputLimitBytes: options.maxBuffer,
+  });
+  const result = options.signal
+    ? await Effect.runPromise(effect, { signal: options.signal })
+    : await Effect.runPromise(effect);
+  return toExecResult(result);
 };
 
 let managedGitExecOverride: Exec | undefined;
@@ -163,12 +176,7 @@ function runEffect(
       cwd: options.cwd,
       timeoutMs: options.timeout ?? 120000,
     }).pipe(
-      Effect.map((result) => ({
-        code: result.exitCode,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        killed: false,
-      })),
+      Effect.map(toExecResult),
       Effect.mapError((cause) =>
         toSnapshotError(options.failureDetail ?? `${rendered} failed.`, cause),
       ),

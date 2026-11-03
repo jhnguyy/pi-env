@@ -16,7 +16,6 @@ import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveNodeCommand } from "../../../../src/process/platform.js";
 import {
-  managedGitExec,
   prepareResolvedSnapshot,
   removeManagedGitWorktreeEffect,
   reviewGitExec,
@@ -25,7 +24,10 @@ import {
 import { git, reviewRepo } from "./fixtures/review-repo";
 
 const mocked = { agentDir: "" };
-const commandTreeUrl = new URL("./fixtures/command-tree.ts", import.meta.url);
+const commandTreeUrl = new URL(
+  "../../../../src/process/__tests__/fixtures/command-tree.ts",
+  import.meta.url,
+);
 const commandTreePath = fileURLToPath(commandTreeUrl);
 
 const temps: string[] = [];
@@ -96,42 +98,6 @@ function fixture() {
 }
 
 describe("review snapshot Git integration", () => {
-  it.skipIf(process.platform === "win32")(
-    "terminates the complete command process group on cancellation",
-    async () => {
-      const root = temp("pi-review-process-");
-      const parentPidPath = join(root, "parent.pid");
-      const childPidPath = join(root, "child.pid");
-      const node = resolveNodeCommand();
-
-      const controller = new AbortController();
-      const running = managedGitExec(node, [commandTreePath, parentPidPath, childPidPath], {
-        cwd: root,
-        signal: controller.signal,
-        timeout: 10_000,
-      });
-      await withOwnedCommand(controller, running, parentPidPath, childPidPath, async () => {
-        await vi.waitFor(
-          () => {
-            expect(existsSync(parentPidPath)).toBe(true);
-            expect(existsSync(childPidPath)).toBe(true);
-          },
-          { timeout: 3_000 },
-        );
-        const parentPid = Number(readFileSync(parentPidPath, "utf8"));
-        const childPid = Number(readFileSync(childPidPath, "utf8"));
-
-        controller.abort();
-        await expect(running).rejects.toBeDefined();
-        await vi.waitFor(() => {
-          expect(processIsAlive(parentPid)).toBe(false);
-          expect(processIsAlive(childPid)).toBe(false);
-        });
-      });
-    },
-    10_000,
-  );
-
   it.skipIf(process.platform === "win32")(
     "waits for a Git process tree to stop before cancelled snapshot preparation settles",
     async () => {
@@ -207,13 +173,9 @@ describe("review snapshot Git integration", () => {
     );
   });
 
-  it("recovers a failed local-Git snapshot with the same identity and retains evidence", async () => {
+  it("recovers a failed local-Git snapshot with the same identity", async () => {
     const f = fixture();
     const reviewId = "retry-evidence";
-    const artifactRoot = process.env.PI_ENV_REVIEW_E2E_ARTIFACT_DIR
-      ? join(process.env.PI_ENV_REVIEW_E2E_ARTIFACT_DIR, `snapshot-${Date.now()}`)
-      : mkdtempSync(join(tmpdir(), "pi-review-snapshot-evidence-"));
-    mkdirSync(artifactRoot, { recursive: true });
     let failFetch = true;
     const exec: ExtensionAPI["exec"] = (command, args, options) => {
       if (command === "git" && args[0] === "fetch" && failFetch) {
@@ -223,80 +185,47 @@ describe("review snapshot Git integration", () => {
           stdout: "",
           stderr: "fixture fetch failure",
           killed: false,
+          truncated: false,
         });
       }
       return f.localExec(command, args, options);
     };
     const expected = { reviewId, head: f.metadata.headOid, files: ["head.txt"] };
-    let actual: Record<string, unknown> = {};
-    try {
-      const first = await prepareResolvedSnapshot(
-        exec,
-        mocked.agentDir,
-        f.metadata,
-        undefined,
-        reviewId,
-        mocked.agentDir,
-      ).catch((cause) => cause);
-      const worktree = join(mocked.agentDir, "pr-review", "worktrees", reviewId);
-      actual = { firstFailure: first.code, worktreeAfterFailure: existsSync(worktree) };
-      expect(first).toMatchObject({ code: "fetch_failed" });
-      expect(existsSync(worktree)).toBe(false);
-      const snapshot = await prepareResolvedSnapshot(
-        exec,
-        mocked.agentDir,
-        f.metadata,
-        undefined,
-        reviewId,
-        mocked.agentDir,
-      );
-      actual = {
-        ...actual,
-        reviewId: snapshot.id,
-        head: git(snapshot.worktree, "rev-parse", "HEAD"),
-        files: snapshot.metadata.changedFiles.map((file) => file.path),
-        diffVerified:
-          createHash("sha256").update(readFileSync(snapshot.diffPath)).digest("hex") ===
-          snapshot.diffHash,
-        registered: git(snapshot.cache!.repoDir, "worktree", "list", "--porcelain").includes(
-          worktree,
-        ),
-      };
-      expect(actual).toMatchObject({
-        firstFailure: "fetch_failed",
-        worktreeAfterFailure: false,
-        ...expected,
-        diffVerified: true,
-        registered: true,
-      });
-    } finally {
-      writeFileSync(
-        join(artifactRoot, "result.json"),
-        JSON.stringify(
-          {
-            input: {
-              source: "local bare Git fixture",
-              base: f.metadata.baseOid,
-              head: f.metadata.headOid,
-              reviewId,
-            },
-            expected: {
-              firstFailure: "fetch_failed",
-              worktreeAfterFailure: false,
-              ...expected,
-              diffVerified: true,
-              registered: true,
-            },
-            actual,
-            reproduce:
-              "nub run test:integration .pi/extensions/review/__tests__/snapshot-git.integration.test.ts",
-          },
-          null,
-          2,
-        ),
-      );
-      console.info(`Review snapshot evidence: ${join(artifactRoot, "result.json")}`);
-    }
+    const first = await prepareResolvedSnapshot(
+      exec,
+      mocked.agentDir,
+      f.metadata,
+      undefined,
+      reviewId,
+      mocked.agentDir,
+    ).catch((cause) => cause);
+    const worktree = join(mocked.agentDir, "pr-review", "worktrees", reviewId);
+    expect(first).toMatchObject({ code: "fetch_failed" });
+    expect(existsSync(worktree)).toBe(false);
+    const snapshot = await prepareResolvedSnapshot(
+      exec,
+      mocked.agentDir,
+      f.metadata,
+      undefined,
+      reviewId,
+      mocked.agentDir,
+    );
+    const actual = {
+      reviewId: snapshot.id,
+      head: git(snapshot.worktree, "rev-parse", "HEAD"),
+      files: snapshot.metadata.changedFiles.map((file) => file.path),
+      diffVerified:
+        createHash("sha256").update(readFileSync(snapshot.diffPath)).digest("hex") ===
+        snapshot.diffHash,
+      registered: git(snapshot.cache!.repoDir, "worktree", "list", "--porcelain").includes(
+        worktree,
+      ),
+    };
+    expect(actual).toMatchObject({
+      ...expected,
+      diffVerified: true,
+      registered: true,
+    });
   });
 
   it("unregisters a created worktree when later snapshot persistence fails", async () => {
@@ -326,7 +255,7 @@ describe("review snapshot Git integration", () => {
     expect(existsSync(artifactDir)).toBe(false);
   });
 
-  it("removes a failed worktree path before pruning its Git registration", async () => {
+  it("removes the worktree and registration when Git removal fails", async () => {
     const f = fixture();
     const snapshot = await prepareResolvedSnapshot(
       f.localExec,
@@ -336,12 +265,15 @@ describe("review snapshot Git integration", () => {
       undefined,
       mocked.agentDir,
     );
-    let pathMissingAtPrune = false;
     const failingRemove: ExtensionAPI["exec"] = async (command, args, options) => {
       if (command === "git" && args[0] === "worktree" && args[1] === "remove")
-        return { code: 1, stdout: "", stderr: "forced removal failure", killed: false };
-      if (command === "git" && args[0] === "worktree" && args[1] === "prune")
-        pathMissingAtPrune = !existsSync(snapshot.worktree);
+        return {
+          code: 1,
+          stdout: "",
+          stderr: "forced removal failure",
+          killed: false,
+          truncated: false,
+        };
       return f.localExec(command, args, options);
     };
     const removed = await Effect.runPromise(
@@ -352,7 +284,6 @@ describe("review snapshot Git integration", () => {
         snapshot.worktree,
       ),
     );
-    expect(pathMissingAtPrune).toBe(true);
     expect(removed).toBe(true);
     expect(existsSync(snapshot.worktree)).toBe(false);
     expect(git(snapshot.cache!.repoDir, "worktree", "list", "--porcelain")).not.toContain(

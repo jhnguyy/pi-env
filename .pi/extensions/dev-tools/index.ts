@@ -7,7 +7,6 @@
 
 import type { Static } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { StringEnum } from "@earendil-works/pi-ai";
 import "./register-actions"; // side-effect: populate action formatters/renderers for this bundle
 import { LspClient } from "./client";
 import { formatResult } from "./formatters";
@@ -17,19 +16,13 @@ import { txt } from "../_shared/result";
 import { registerPublicTool } from "../_shared/tool-render";
 import { formatError } from "../_shared/errors";
 import * as Request from "./request";
-import {
-  createDevToolsParameterSchema,
-  DEV_TOOLS_TOOL_DESCRIPTIONS,
-} from "./action-contract";
+import { devToolsParameters } from "./action-contract";
 import { registerCleanupCommand } from "./cleanup";
 import { registerCloseout } from "./closeout";
 
 // ─── Extension ────────────────────────────────────────────────────────────────
 
-type DevToolsRegistrationApi = Pick<
-  ExtensionAPI,
-  "exec" | "registerCommand" | "registerTool"
->;
+type DevToolsRegistrationApi = Pick<ExtensionAPI, "exec" | "registerCommand" | "registerTool">;
 
 export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspClient()) {
   registerCleanupCommand(pi);
@@ -46,11 +39,7 @@ export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspCl
     "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use. " +
     "Diagnostics supports bulk checks: pass multiple paths to check all files in one call.";
 
-  const toolParameters = createDevToolsParameterSchema(
-    StringEnum(Request.DEV_TOOLS_ACTIONS, { description: DEV_TOOLS_TOOL_DESCRIPTIONS.action }),
-  );
-
-  type DevToolsToolParameters = typeof toolParameters;
+  type DevToolsToolParameters = typeof devToolsParameters;
 
   /** Execute the native dev-tools action, including rename. */
   async function executeDevTools(_toolCallId: string, params: Static<DevToolsToolParameters>) {
@@ -79,15 +68,15 @@ export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspCl
       "Use diagnostics for supported changed code when they add relevant validation evidence.",
       "Use rg for text and pattern searches, or when semantic tools do not cover or answer the question.",
     ],
-    parameters: toolParameters,
+    parameters: devToolsParameters,
     async execute(toolCallId, params, _signal) {
       return executeDevTools(toolCallId, params);
     },
     renderCall(args, theme, _ctx) {
       return renderDevToolsCall(args, theme);
     },
-    renderResult(result, opts, theme, _ctx) {
-      return renderDevToolsResult(result, opts, theme);
+    renderResult(result, opts, theme, context) {
+      return renderDevToolsResult(result, opts, theme, context);
     },
   });
 }

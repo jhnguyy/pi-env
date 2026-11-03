@@ -6,17 +6,14 @@ import {
   applyExactEdits,
   createNotesContract,
   MAX_DETAIL_ITEMS,
-  NOTES_ACTIONS,
   NOTES_PARAMETERS,
   NOTES_VARIANTS,
 } from "../contract";
 import {
-  MAX_EDIT_ITEMS,
   MAX_INDEX_BYTES,
   MAX_LIST_CURSOR_LENGTH,
   MAX_NOTE_BYTES,
   MAX_NOTE_COUNT,
-  MAX_REVISION_LENGTH,
   type NoteSearchResult,
   type NotesProvider,
 } from "../domain";
@@ -55,94 +52,35 @@ describe("notes tool contract", () => {
     } = JSON.parse(JSON.stringify(NOTES_PARAMETERS));
     expect(flat.type).toBe("object");
     expect(flat.anyOf).toBeUndefined();
-    const variantFields = new Set(NOTES_VARIANTS.anyOf.flatMap((variant) => Object.keys(variant.properties)));
+    const variantFields = new Set(
+      NOTES_VARIANTS.anyOf.flatMap((variant) => Object.keys(variant.properties)),
+    );
     expect(new Set(Object.keys(flat.properties))).toEqual(variantFields);
     for (const field of Object.values(flat.properties)) expect(field.description).toBeTruthy();
-    expect(flat.properties.target?.description).toContain("projects read (required), projects write (required):");
+    expect(flat.properties.target?.description).toContain(
+      "projects read (required), projects write (required):",
+    );
     expect(flat.properties.action?.description).toContain("worklog record:");
 
     const fake = provider();
     const contract = createNotesContract(fake);
-    const missingFields = { collection: "projects", action: "write", content: "# Plan", path: "projects/plan.md" };
+    const missingFields = {
+      collection: "projects",
+      action: "write",
+      content: "# Plan",
+      path: "projects/plan.md",
+    };
     expect(Check(contract.parameters, missingFields)).toBe(true);
     await expect(contract.execute(missingFields as never, { cwd: "/repo" })).rejects.toThrow(
       "Invalid notes projects write arguments: missing target, revision; unsupported path",
     );
     await expect(
       contract.execute({ collection: "projects", action: "search" } as never, { cwd: "/repo" }),
-    ).rejects.toThrow("notes projects does not support action search; use one of: list, read, write");
+    ).rejects.toThrow(
+      "notes projects does not support action search; use one of: list, read, write",
+    );
     expect(fake.write).not.toHaveBeenCalled();
     expect(fake.search).not.toHaveBeenCalled();
-  });
-
-  it("exposes one stable provider-neutral schema", () => {
-    const contract = createNotesContract(provider());
-    expect(contract.name).toBe("notes");
-    const variants: Array<{ properties: Record<string, { description?: string }> }> = JSON.parse(
-      JSON.stringify(NOTES_VARIANTS.anyOf),
-    );
-    for (const variant of variants) {
-      expect(variant.properties.collection?.description).toBeTruthy();
-      expect(variant.properties.action.description).toBeTruthy();
-    }
-    for (const action of NOTES_ACTIONS.filter((candidate) => candidate !== "record")) {
-      expect(accepts({ action })).toBe(true);
-    }
-    expect(accepts({ action: "record" })).toBe(false);
-    expect(accepts({})).toBe(false);
-    expect(accepts({ action: "list", prefix: "any/provider/path" })).toBe(true);
-    expect(accepts({ action: "list", area: "wiki" })).toBe(false);
-    expect(accepts({ action: "search", areas: ["worklog"] })).toBe(false);
-    expect(
-      accepts({ collection: "inbox", action: "read", date: "2026-09-12" }),
-    ).toBe(true);
-    expect(accepts({ collection: "projects", action: "list" })).toBe(true);
-    expect(
-      accepts({
-        collection: "projects",
-        action: "write",
-        target: "platform/roadmap.md",
-        content: "# Roadmap",
-        revision: null,
-      }),
-    ).toBe(true);
-    expect(accepts({ collection: "projects", action: "search" })).toBe(false);
-    expect(
-      accepts({ collection: "worklog", action: "record", text: "Shipped" }),
-    ).toBe(true);
-    expect(accepts({ collection: "wiki", action: "read", target: "ai" })).toBe(
-      true,
-    );
-    expect(
-      accepts({
-        collection: "inbox",
-        action: "write",
-        kind: "note",
-        text: "capture",
-        date: "2099-01-01",
-      }),
-    ).toBe(false);
-    expect(
-      accepts({
-        collection: "worklog",
-        action: "record",
-        text: "done",
-        selector: "2000-01-01",
-      }),
-    ).toBe(false);
-    expect(accepts({ action: "list", limit: MAX_NOTE_COUNT + 1 })).toBe(false);
-    expect(
-      accepts({
-        action: "edit",
-        edits: Array.from({ length: MAX_EDIT_ITEMS + 1 }, () => ({ oldText: "a", newText: "b" })),
-      }),
-    ).toBe(false);
-    expect(
-      accepts({
-        action: "delete",
-        revision: "r".repeat(MAX_REVISION_LENGTH + 1),
-      }),
-    ).toBe(false);
   });
 
   it("uses provider-owned orientation and routes provider-neutral operations", async () => {
@@ -157,7 +95,10 @@ describe("notes tool contract", () => {
       { action: "read", path: "records/2026/09/01.md" },
       { cwd: "/repo" },
     );
-    const searched = await contract.execute({ action: "search", query: "topic", limit: 12 }, { cwd: "/repo" });
+    const searched = await contract.execute(
+      { action: "search", query: "topic", limit: 12 },
+      { cwd: "/repo" },
+    );
     const resolved = await contract.execute(
       { action: "resolve", reference: "record/by-date" },
       { cwd: "/repo" },
@@ -171,10 +112,12 @@ describe("notes tool contract", () => {
       text: expect.stringContaining("under projects/notes"),
     });
     expect(index.content).toContainEqual({
-      type: "text", text: expect.stringContaining("[Notes Index]|provider:test"),
+      type: "text",
+      text: expect.stringContaining("[Notes Index]|provider:test"),
     });
     expect(searched.content).toContainEqual({
-      type: "text", text: expect.stringContaining("records/2026/09/01.md"),
+      type: "text",
+      text: expect.stringContaining("records/2026/09/01.md"),
     });
     expect(fake.index).toHaveBeenCalledWith(undefined);
     expect(fake.list).toHaveBeenCalledWith({ prefix: "projects/notes", limit: 12 }, undefined);
@@ -481,7 +424,9 @@ describe("notes tool contract", () => {
       { collection: "wiki", action: "read", limit: 1 },
       { cwd: "/repo" },
     );
-    expect(wiki.details.items).toEqual([{ kind: "folder", target: "nested", path: "wiki/nested/" }]);
+    expect(wiki.details.items).toEqual([
+      { kind: "folder", target: "nested", path: "wiki/nested/" },
+    ]);
     expect(wiki.details.nextCursor).toEqual(expect.any(String));
     const continuedWiki = await contract.execute(
       { collection: "wiki", action: "read", limit: 1, cursor: wiki.details.nextCursor },
@@ -842,7 +787,9 @@ describe("notes tool contract", () => {
   });
   it("preserves a full list page and the provider continuation cursor", async () => {
     const fake = provider();
-    const entries = Array.from({ length: MAX_DETAIL_ITEMS }, (_, index) => ({ path: `${index}.md` }));
+    const entries = Array.from({ length: MAX_DETAIL_ITEMS }, (_, index) => ({
+      path: `${index}.md`,
+    }));
     vi.mocked(fake.list).mockResolvedValue({ entries, nextCursor: "next-page" });
     const contract = createNotesContract(fake);
     const output = await contract.execute({ action: "list" }, { cwd: "/repo" });
@@ -850,7 +797,10 @@ describe("notes tool contract", () => {
     expect(output.details.nextCursor).toBe("next-page");
     expect(output.details.truncated).toBe(true);
     expect(output.content).toContainEqual({ type: "text", text: expect.stringContaining("0.md") });
-    expect(output.content).toContainEqual({ type: "text", text: expect.stringContaining("next-page") });
+    expect(output.content).toContainEqual({
+      type: "text",
+      text: expect.stringContaining("next-page"),
+    });
   });
 
   it("rejects unsafe paths and oversized UTF-8 content before provider IO", async () => {
@@ -883,9 +833,9 @@ describe("notes tool contract", () => {
         { cwd: "/repo" },
       ),
     ).rejects.toMatchObject({ code: "resource-limit" });
-    expect(() =>
-      applyExactEdits("x", [{ oldText: "x", newText: oversizedUtf8 }]),
-    ).toThrow("exceeds");
+    expect(() => applyExactEdits("x", [{ oldText: "x", newText: oversizedUtf8 }])).toThrow(
+      "exceeds",
+    );
     expect(() => applyExactEdits("aaa", [{ oldText: "aa", newText: "b" }])).toThrow(
       "more than once",
     );

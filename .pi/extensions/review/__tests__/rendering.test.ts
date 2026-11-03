@@ -1,5 +1,6 @@
 import "../../__tests__/tui-setup";
 import { describe, expect, it } from "vitest";
+import { componentText as textOf, expansionHints } from "../../__tests__/rendering";
 import { reviewActionResult, reviewProgressResult, withoutNestedUsage } from "../index";
 import { projectReviewProgress, renderReviewResult } from "../render";
 
@@ -8,9 +9,10 @@ const recordingTheme = {
   bold: (text: string) => `<bold>${text}</bold>`,
 };
 
-function textOf(component: unknown): string {
-  return (component as { text: string }).text;
-}
+const context = {
+  isError: false,
+  ...expansionHints,
+};
 
 describe("review tool rendering", () => {
   it("shows a bounded one-line verdict, zero cost, and the exact review ID without usage counters", () => {
@@ -41,11 +43,13 @@ describe("review tool rendering", () => {
     };
 
     const collapsed = textOf(
-      renderReviewResult(result, { expanded: false, isPartial: false }, recordingTheme),
+      renderReviewResult(result, { expanded: false, isPartial: false }, recordingTheme, context),
     );
     const verdictLine = collapsed.split("\n").find((line) => line.includes("verdict:"));
 
-    expect(verdictLine).toContain(`verdict: ${"v".repeat(40)} ${"w".repeat(29)}...`);
+    expect(verdictLine).toContain(`verdict: ${"v".repeat(40)}`);
+    expect(verdictLine).toContain("w");
+    expect(collapsed).not.toContain(verdict);
     expect(verdictLine).not.toContain("full verdict tail");
     expect(collapsed).toContain("cost: $0.0000");
     expect(collapsed).toContain(reviewId);
@@ -68,36 +72,36 @@ describe("review tool rendering", () => {
         },
         { expanded: true, isPartial: false },
         recordingTheme,
+        context,
       ),
     );
 
-    expect(expanded).toContain(verdict);
+    for (const line of verdict.split("\n")) expect(expanded).toContain(line);
     expect(expanded).toContain(detailed);
     expect(expanded).toContain("$1.2500");
     expect(expanded).toContain("review-expanded");
-    expect(expanded).toContain("<warning>⚠</warning>");
   });
 
   it.each([
-    ["succeeded", "<success>✓</success>"],
-    ["degraded", "<warning>⚠</warning>"],
-    ["interrupted", "<warning>⚠</warning>"],
-    ["cancelled", "<warning>⚠</warning>"],
-    ["failed", "<error>✗</error>"],
-  ])("uses the required terminal icon for %s reviews", (status, icon) => {
+    ["succeeded", "success"],
+    ["degraded", "warning"],
+    ["interrupted", "warning"],
+    ["cancelled", "warning"],
+    ["failed", "error"],
+  ])("uses the outcome's semantic role for %s reviews", (status, role) => {
     const rendered = textOf(
       renderReviewResult(
         {
           content: [{ type: "text" as const, text: "terminal result" }],
           details: { status, reviewId: `review-${status}` },
-          ...(status === "failed" ? { isError: true } : {}),
         },
         { expanded: false, isPartial: false },
         recordingTheme,
+        { ...context, isError: status === "failed" },
       ),
     );
 
-    expect(rendered).toContain(icon);
+    expect(rendered).toContain(`<${role}>`);
     if (["failed", "interrupted", "cancelled"].includes(status)) {
       expect(rendered).toContain("verdict: unavailable");
     }
@@ -118,6 +122,7 @@ describe("review tool rendering", () => {
         },
         { expanded: false, isPartial: false },
         recordingTheme,
+        context,
       ),
     );
 
@@ -148,13 +153,13 @@ describe("review tool rendering", () => {
         { content: [], details },
         { expanded: false, isPartial: true },
         recordingTheme,
+        context,
       ),
     );
 
-    expect(rendered).toContain("<success>planning ✓</success>");
+    expect(rendered).toContain("<success>planning");
     expect(rendered).toContain("<warning>reviewing intent, tests</warning>");
-    expect(rendered).toContain("<dim>synthesizing ○</dim>");
-    expect(rendered).toContain("<muted> → </muted>");
+    expect(rendered).toContain("synthesizing");
     expect(rendered).toContain("cost: $0.1621");
     expect(rendered).toContain("review-progress");
   });
@@ -179,6 +184,7 @@ describe("review tool rendering", () => {
         },
         { expanded: false, isPartial: true },
         recordingTheme,
+        context,
       ),
     );
 
