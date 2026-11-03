@@ -6,12 +6,56 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Data, Effect } from "effect";
 import { execEffect } from "../_shared/exec";
-import { bound, parsePrUrl } from "./core";
+import { parseGitHubPullRequestUrl } from "../_shared/github";
 import {
   MAX_CONTEXT_PAGE_SIZE,
   PrReviewFeedback,
   type PrReviewFeedback as PrReviewFeedbackValue,
 } from "./schema";
+
+function bound(value: string, max = 12000): string {
+  return value.length > max
+    ? `${value.slice(0, max)}\n[truncated ${value.length - max} chars]`
+    : value;
+}
+
+function parsePrUrl(url: string) {
+  const reference = parseGitHubPullRequestUrl(url);
+  if (!reference) throw contextError("Expected a valid GitHub pull request URL.");
+  return reference;
+}
+
+export async function resolvePrUrl(
+  exec: ExtensionAPI["exec"],
+  cwd: string,
+  requested?: string,
+  signal?: AbortSignal,
+): Promise<{ url?: string; message?: string }> {
+  if (requested) return { url: parsePrUrl(requested).url };
+  try {
+    const effect = execEffect(
+      exec,
+      "gh",
+      ["pr", "view", "--json", "url", "--jq", ".url"],
+      contextError,
+      { cwd },
+    );
+    const result = await Effect.runPromise(effect, { signal });
+    const url = result.stdout.trim();
+    return url
+      ? { url: parsePrUrl(url).url }
+      : {
+          message:
+            "No pull request is associated with this checkout. Please provide a GitHub PR URL.",
+        };
+  } catch (cause) {
+    if (signal?.aborted) throw cause;
+    return {
+      message:
+        "No pull request URL was provided and the current checkout PR could not be resolved. Please provide a GitHub PR URL.",
+    };
+  }
+}
 
 const DEFAULT_CONTEXT_PAGE_SIZE = 3;
 const INLINE_COMMENTS_PER_THREAD = 5;
@@ -283,12 +327,7 @@ function hasMore(cursor: ContextCursor): boolean {
   );
 }
 
-function parseGraphQlPage(
-  raw: string,
-  reference: ReturnType<typeof parsePrUrl>,
-  cursor: ContextCursor,
-  pageSize: number,
-): PullRequestContextPage {
+function parseGraphQlPullRequest(raw: string): JsonRecord {
   let root: JsonRecord;
   try {
     root = record(JSON.parse(raw || "{}")) ?? {};
@@ -303,7 +342,16 @@ function parseGraphQlPage(
   }
   const pullRequest = record(record(record(root.data)?.repository)?.pullRequest);
   if (!pullRequest) throw contextError("GitHub did not return the requested pull request.");
+  return pullRequest;
+}
 
+function parseGraphQlPage(
+  raw: string,
+  reference: ReturnType<typeof parsePrUrl>,
+  cursor: ContextCursor,
+  pageSize: number,
+): PullRequestContextPage {
+  const pullRequest = parseGraphQlPullRequest(raw);
   const conversation = included(cursor.conversation)
     ? connection(pullRequest.comments, "conversation comments")
     : undefined;
@@ -333,6 +381,21 @@ function parseGraphQlPage(
   };
 }
 
+function contextRequest(options: PullRequestContextOptions) {
+  const decoded = options.cursor ? decodeCursor(options.cursor) : undefined;
+  const feedback = options.feedback ?? decoded?.feedback ?? PrReviewFeedback.All;
+  if (!isFeedback(feedback)) throw contextError("Unknown feedback category.");
+  if (decoded && options.feedback && options.feedback !== decoded.feedback) {
+    throw contextError("The feedback category does not match the pagination cursor.");
+  }
+  const cursor = decoded ?? initialCursor(feedback);
+  const pageSize = options.pageSize ?? DEFAULT_CONTEXT_PAGE_SIZE;
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > MAX_CONTEXT_PAGE_SIZE) {
+    throw contextError(`pageSize must be between 1 and ${MAX_CONTEXT_PAGE_SIZE}.`);
+  }
+  return { cursor, pageSize };
+}
+
 function fetchPullRequestContextEffect(
   exec: Exec,
   cwd: string,
@@ -340,17 +403,7 @@ function fetchPullRequestContextEffect(
   options: PullRequestContextOptions,
 ): Effect.Effect<PullRequestContextPage, PullRequestContextError> {
   const reference = parsePrUrl(url);
-  const decoded = options.cursor ? decodeCursor(options.cursor) : undefined;
-  const feedback = options.feedback ?? decoded?.feedback ?? PrReviewFeedback.All;
-  if (!isFeedback(feedback)) return Effect.fail(contextError("Unknown feedback category."));
-  if (decoded && options.feedback && options.feedback !== decoded.feedback) {
-    return Effect.fail(contextError("The feedback category does not match the pagination cursor."));
-  }
-  const cursor = decoded ?? initialCursor(feedback);
-  const pageSize = options.pageSize ?? DEFAULT_CONTEXT_PAGE_SIZE;
-  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > MAX_CONTEXT_PAGE_SIZE) {
-    return Effect.fail(contextError(`pageSize must be between 1 and ${MAX_CONTEXT_PAGE_SIZE}.`));
-  }
+  const { cursor, pageSize } = contextRequest(options);
   const args = [
     "api",
     "graphql",
@@ -400,7 +453,13 @@ export function fetchPullRequestContext(
   options: PullRequestContextOptions = {},
   signal?: AbortSignal,
 ): Promise<PullRequestContextPage> {
-  const effect = fetchPullRequestContextEffect(exec, cwd, url, options);
+  const effect = Effect.try({
+    try: () => fetchPullRequestContextEffect(exec, cwd, url, options),
+    catch: (cause) =>
+      cause instanceof PullRequestContextError
+        ? cause
+        : contextError("Could not prepare pull request context request.", cause),
+  }).pipe(Effect.flatten);
   return signal ? Effect.runPromise(effect, { signal }) : Effect.runPromise(effect);
 }
 
@@ -540,7 +599,7 @@ export function formatPullRequestContext(page: PullRequestContextPage): string {
   const contentLimit = DEFAULT_MAX_BYTES - Buffer.byteLength(notice, "utf8");
   const truncated = truncateHead(output, {
     maxBytes: contentLimit,
-    maxLines: DEFAULT_MAX_LINES,
+    maxLines: DEFAULT_MAX_LINES - notice.split("\n").length + 1,
   });
   return truncated.truncated ? `${truncated.content}${notice}` : output;
 }
