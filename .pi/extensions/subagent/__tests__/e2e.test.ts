@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +12,9 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
+import { RegisteredServiceFixture } from "./registered-service.fixture";
 import { settleOperations, testCleanup } from "./cleanup";
+import { connectSubagentService, type SubagentServiceConnection } from "../service-host";
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const bundle = join(repo, ".pi/extensions/subagent/dist/index.js");
@@ -24,8 +26,9 @@ it.each(["on", "only"] as const)(
     const root = mkdtempSync(join(tmpdir(), "pi-native-delegation-"));
     const cleanup = testCleanup();
     cleanup(() => rmSync(root, { recursive: true, force: true }));
-    cleanup(() => vi.unstubAllEnvs());
     const agentDir = join(root, "agent");
+    const service = new RegisteredServiceFixture(agentDir);
+    let connection: SubagentServiceConnection | undefined;
     const target = join(root, "target");
     vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
     const evidenceDir = process.env.PI_ENV_NATIVE_TOOL_ARTIFACT_DIR ?? tmpdir();
@@ -54,6 +57,9 @@ it.each(["on", "only"] as const)(
       () => parent?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" }),
       () => settleOperations(operations),
       () => parent?.dispose(),
+      () => connection?.close(),
+      () => service.close(),
+      () => vi.unstubAllEnvs(),
       () => {
         writeFileSync(artifact, JSON.stringify(evidence, null, 2) + "\n");
       },
@@ -66,7 +72,7 @@ it.each(["on", "only"] as const)(
       mkdirSync(target);
       writeFileSync(join(root, "identity.txt"), "parent identity must not leak");
       writeFileSync(join(target, "identity.txt"), "child-native identity");
-      const childCode = `text(await tools.read({path: "identity.txt"})); text({parentTool: ALL_TOOLS.some(t => t.name === "parent_only"), delegation: ALL_TOOLS.some(t => t.name === "subagent")}); let blocked = false; try { await tools.subagent({action:"run",name:"recursive",task:"must not run"}); } catch (error) { blocked = true; text("recursive call blocked: " + error.message); } if (!blocked) throw Error("recursive delegation was allowed");`;
+      const childCode = `text(await tools.read({path: "identity.txt"})); text({parentTool: ALL_TOOLS.some(t => t.name === "parent_only"), delegation: ALL_TOOLS.some(t => t.name === "subagent"), codemode: ALL_TOOLS.some(t => t.name === "codemode")}); let blocked = false; try { await tools.subagent({action:"run",name:"recursive",task:"must not run"}); } catch (error) { blocked = true; text("recursive call blocked: " + error.message); } if (!blocked) throw Error("recursive delegation was allowed");`;
       const parentCode = `text(await tools.subagent({action:"run",name:"blocking",task:"child task",cwd:${JSON.stringify(target)}})); const started = await tools.subagent({action:"start",name:"background",task:"child task",cwd:${JSON.stringify(target)}}); const id = started.match(/Started subagent job ([\\w-]+)/)?.[1]; if (!id) throw Error(started); text(await tools.subagent({action:"wait",job_id:id})); text(await tools.subagent({action:"result",job_id:id}));`;
       const cancelCode = `text(await tools.subagent({action:"run",name:"cancelled",task:"blocked task",cwd:${JSON.stringify(target)}}));`;
       const provider = join(agentDir, "provider.mjs");
@@ -119,6 +125,7 @@ export default function(pi) {
         join(agentDir, "models.json"),
         JSON.stringify({ providers: { "native-delegation": { apiKey: "fixture-key" } } }),
       );
+      await service.start();
       const services = await createAgentSessionServices({
         cwd: root,
         agentDir,
@@ -163,19 +170,30 @@ export default function(pi) {
       );
       evidence.parentCodeResults = parentCodeResults;
       expect(parentCodeResults).toHaveLength(1);
-      const result = parentCodeResults[0];
+      expect(
+        parentCodeResults.every((message) => message.role === "toolResult" && !message.isError),
+      ).toBe(true);
+      const result = parentCodeResults.find(
+        (message) => message.role === "toolResult" && !message.isError,
+      );
+      expect(result?.role).toBe("toolResult");
       if (result?.role !== "toolResult") throw new Error("Missing parent codemode result");
       evidence.parentResult = result;
       expect(result.isError).toBe(false);
       expect(JSON.stringify(result.content)).toContain("child complete");
-      const childDirectory = join(
-        parent.sessionManager.getSessionDir(),
-        "_children",
-        parent.sessionId,
-      );
-      const files = readdirSync(childDirectory).filter((file) => file.endsWith(".jsonl"));
+      expect(result.nestedCalls?.calls.map((call) => call.name)).toEqual([
+        "subagent",
+        "subagent",
+        "subagent",
+        "subagent",
+      ]);
+      connection = await connectSubagentService(parent.sessionId);
+      const files = connection.view.snapshot.value.children.map((child) => child.sessionFile);
       expect(files).toHaveLength(2);
-      const children = files.map((file) => SessionManager.open(join(childDirectory, file)));
+      const children = files.map((file) => {
+        if (!file) throw new Error("Settled child has no native session file");
+        return SessionManager.open(file);
+      });
       evidence.children = children.map((child) => child.buildSessionContext().messages);
       const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
       for (const child of children) {
@@ -191,13 +209,18 @@ export default function(pi) {
           (message) => message.role === "toolResult" && message.toolName === "codemode",
         );
         expect(codeResults).toHaveLength(1);
-        const codeResult = codeResults[0];
-        if (codeResult?.role !== "toolResult") throw new Error("Missing child codemode result");
-        expect(codeResult.isError).toBe(false);
+        expect(
+          codeResults.every((message) => message.role === "toolResult" && !message.isError),
+        ).toBe(true);
+        const codeResult = codeResults.find(
+          (message) => message.role === "toolResult" && !message.isError,
+        );
+        expect(codeResult?.role === "toolResult" && codeResult.isError).toBe(false);
         expect(JSON.stringify(codeResult)).toContain("child-native identity");
         expect(JSON.stringify(codeResult)).not.toContain("parent identity must not leak");
         expect(JSON.stringify(codeResult)).toContain('\\"parentTool\\":false');
         expect(JSON.stringify(codeResult)).toContain('\\"delegation\\":false');
+        expect(JSON.stringify(codeResult)).toContain('\\"codemode\\":false');
         expect(JSON.stringify(codeResult)).toContain("recursive call blocked:");
         const rejected = messages.find(
           (message) => message.role === "toolResult" && message.toolName === "subagent",
@@ -214,7 +237,7 @@ export default function(pi) {
           }),
         );
       }
-      expect(Object.values(usage).reduce((total, count) => total + count, 0)).toBeGreaterThan(0);
+      expect(usage.input).toBeGreaterThan(0);
       expect(result.usage).toEqual(expect.objectContaining(usage));
       const cancellationStarted = performance.now();
       const cancellationMessageStart = parent.messages.length;
@@ -241,7 +264,9 @@ export default function(pi) {
       await parent.abort();
       await cancelled;
       await vi.waitFor(() => expect(existsSync(join(target, "settled"))).toBe(true));
-      evidence.cancellationSettled = true;
+      const cancellationSettled = existsSync(join(target, "settled"));
+      evidence.cancellationSettled = cancellationSettled;
+      expect(cancellationSettled).toBe(true);
       evidence.verdict = "passed";
     } catch (error) {
       evidence.failure = error instanceof Error ? error.message : String(error);

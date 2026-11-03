@@ -7,33 +7,76 @@ import * as ChildTypes from "../child-types";
 // native workflow and terminal smoke cover real owner actions and editor transport.
 it("renders supplied snapshot fields and handles supported editor shortcut keys", async () => {
   const child: ChildTypes.NativeChildSnapshot = {
-    id: "child-id", runId: "operation-id", name: "界 child", task: "\u001b]52;c;evil\u0007First line\nSecond line\u0000",
-    cwd: "/target", sessionFile: "/sessions/child.jsonl", model: "child/model", systemPrompt: "Native system\nDelegated instruction" + "\nContext line".repeat(80),
-    activeTools: ["read"], callableTools: ["read", "late"], messages: [],
-    inputs: [{ source: ChildTypes.NativeInputSource.Human, mode: ChildTypes.NativeInputMode.Prompt, text: "Human original\nsecond line", at: "now" }], state: ChildTypes.NativeChildState.Idle,
+    id: "child-id",
+    runId: "operation-id",
+    name: "界 child",
+    task: "\u001b]52;c;evil\u0007First line\nSecond line\u0000",
+    cwd: "/target",
+    sessionFile: "/sessions/child.jsonl",
+    model: "child/model",
+    systemPrompt: "Native system\nDelegated instruction" + "\nContext line".repeat(80),
+    activeTools: ["read"],
+    callableTools: ["read", "late"],
+    messages: [],
+    inputs: [
+      {
+        source: ChildTypes.NativeInputSource.Human,
+        mode: ChildTypes.NativeInputMode.Prompt,
+        text: "Human original\nsecond line",
+        at: "now",
+      },
+    ],
+    state: ChildTypes.NativeChildState.Idle,
   };
   let viewOpen = true;
   let editorTitle = "";
   const tui = { terminal: { rows: 60 }, requestRender: () => {} };
   const theme = { fg: (_color: string, text: string) => text };
-  const source = { listChildren: () => [child], inspectChild: () => child, cancelChild: async () => {} };
-  const browser = new Browser.SubagentBrowser(source, tui as any, theme as any, () => { viewOpen = false; }, async (id, mode) => { editorTitle = `${mode} · ${id}`; });
+  const source = {
+    listChildren: () => [child],
+    inspectChild: async () => child,
+    cancelChild: async () => {},
+    reopenChild: async () => {},
+  };
+  const browser = new Browser.SubagentBrowser(
+    source,
+    tui as any,
+    theme as any,
+    () => {
+      viewOpen = false;
+    },
+    async (id, mode) => {
+      editorTitle = `${mode} · ${id}`;
+    },
+  );
   try {
     browser.focused = true;
     browser.render(160);
     browser.handleInput("\r");
+    await Promise.resolve();
     browser.handleInput("\t");
-    const instructions = browser.render(160).map((line) => line.trimEnd()).join("\n");
+    const instructions = browser
+      .render(160)
+      .map((line) => line.trimEnd())
+      .join("\n");
     expect(instructions).toContain("First line\nSecond line");
     expect(instructions).toContain("Native system\nDelegated instruction");
     expect(instructions).not.toContain("\u001b");
     expect(instructions).not.toContain("evil");
     browser.handleInput("\t");
-    const configuration = browser.render(160).map((line) => line.trimEnd()).join("\n");
+    const configuration = browser
+      .render(160)
+      .map((line) => line.trimEnd())
+      .join("\n");
     expect(configuration).toContain("Cwd: /target");
     expect(configuration).toContain("Active tools\nread\n\nCallable tools\nread\nlate");
     browser.handleInput("\t");
-    expect(browser.render(160).map((line) => line.trimEnd()).join("\n")).toContain("Human original\nsecond line");
+    expect(
+      browser
+        .render(160)
+        .map((line) => line.trimEnd())
+        .join("\n"),
+    ).toContain("Human original\nsecond line");
     browser.handleInput("s");
     expect(editorTitle).toBe("");
     expect(browser.render(160).join("\n")).toContain("require a running child");
@@ -48,7 +91,8 @@ it("renders supplied snapshot fields and handles supported editor shortcut keys"
       await Promise.resolve();
       expect(editorTitle).toBe(`${mode} · child-id`);
       const rendered = browser.render(160);
-      for (const unknown of ["x", "constructor", "toString", "__proto__"]) browser.handleInput(unknown);
+      for (const unknown of ["x", "constructor", "toString", "__proto__"])
+        browser.handleInput(unknown);
       expect(editorTitle).toBe(`${mode} · child-id`);
       expect(browser.render(160)).toEqual(rendered);
     }
@@ -56,16 +100,35 @@ it("renders supplied snapshot fields and handles supported editor shortcut keys"
     browser.handleInput("\u001b");
     browser.handleInput("\u001b");
     expect(viewOpen).toBe(false);
-  } finally { browser.dispose(); }
+  } finally {
+    browser.dispose();
+  }
 });
 
 it("bounds rendered dimensions on resize and ignores keys after view disposal", () => {
   const tui = { terminal: { rows: 20 }, requestRender: () => {} };
-  const source = { listChildren: () => [], inspectChild: () => undefined, cancelChild: async () => {} };
+  const source = {
+    listChildren: () => [],
+    inspectChild: async () => undefined,
+    cancelChild: async () => {},
+    reopenChild: async () => {},
+  };
   let viewOpen = true;
-  const browser = new Browser.SubagentBrowser(source, tui as any, { fg: (_color: string, text: string) => text } as any, () => { viewOpen = false; }, async () => {});
+  const browser = new Browser.SubagentBrowser(
+    source,
+    tui as any,
+    { fg: (_color: string, text: string) => text } as any,
+    () => {
+      viewOpen = false;
+    },
+    async () => {},
+  );
   try {
-    for (const [width, rows] of [[40, 20], [8, 8], [2, 3]]) {
+    for (const [width, rows] of [
+      [40, 20],
+      [8, 8],
+      [2, 3],
+    ]) {
       tui.terminal.rows = rows;
       browser.invalidate();
       const rendered = browser.render(width);
@@ -76,5 +139,7 @@ it("bounds rendered dimensions on resize and ignores keys after view disposal", 
     browser.dispose();
     browser.handleInput("\u001b");
     expect(viewOpen).toBe(true);
-  } finally { browser.dispose(); }
+  } finally {
+    browser.dispose();
+  }
 });

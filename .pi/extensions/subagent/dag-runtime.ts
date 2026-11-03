@@ -1,4 +1,4 @@
-import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Data, Effect } from "effect";
 
 import * as DagExecutorRegistration from "../_shared/dag-executor-registration";
@@ -16,6 +16,7 @@ import {
 import * as Control from "./control";
 import * as Execute from "./execute";
 import * as Resolver from "./resolver";
+import * as Usage from "./usage";
 
 export const DagSubagentExecutorKey = "pi/subagent-v1" as const;
 
@@ -44,7 +45,10 @@ function resolveContainedCwd(
   );
   if (!Resolver.isResolutionOk(resolved))
     throw new DagSubagentAdapterFailure({ phase: "resolution", message: resolved.error.message });
-  if (!Resolver.isResolutionOk(root) || !PathContainment.isPathContained(root.value, resolved.value))
+  if (
+    !Resolver.isResolutionOk(root) ||
+    !PathContainment.isPathContained(root.value, resolved.value)
+  )
     throw new DagSubagentAdapterFailure({
       phase: "resolution",
       message: "DAG subagent cwd must be contained in the parent workspace.",
@@ -55,32 +59,36 @@ function resolveContainedCwd(
 function resolveRun(
   request: DagSubagentRuntimeRequest,
   ctx: ExtensionContext,
-  customTools: readonly ToolDefinition[],
   workspaceRoot?: string,
 ): Execute.ResolvedSubagentRun {
   const cwd = resolveContainedCwd(request, ctx, workspaceRoot);
   const systemPrompt = request.prompt.system;
-  const promptBytes = Buffer.byteLength(systemPrompt, "utf8") + Buffer.byteLength(request.prompt.user, "utf8");
+  const promptBytes =
+    Buffer.byteLength(systemPrompt, "utf8") + Buffer.byteLength(request.prompt.user, "utf8");
   if (promptBytes > DagSubagentPromptMaxBytes) {
-    throw new DagSubagentAdapterFailure({ phase: "resolution", message: "DAG subagent prompt exceeds the absolute prompt byte limit." });
+    throw new DagSubagentAdapterFailure({
+      phase: "resolution",
+      message: "DAG subagent prompt exceeds the absolute prompt byte limit.",
+    });
   }
   return {
     name: request.payload.name,
     task: request.prompt.user,
     toolNames: [...request.payload.tools],
-    customTools: customTools.filter((tool) => request.payload.tools.includes(tool.name)),
     modelOverride: request.payload.model,
     systemPrompt,
     cwd,
     maxTurns: request.payload.maxTurns,
     reasoning: request.payload.reasoning,
-    workspaceAccess: request.payload.workspace.access === "write" ? Control.WorkspaceAccess.Write : Control.WorkspaceAccess.Read,
+    workspaceAccess:
+      request.payload.workspace.access === "write"
+        ? Control.WorkspaceAccess.Write
+        : Control.WorkspaceAccess.Read,
   };
 }
 
 interface DagSubagentRuntimeOptions extends Execute.RunSubagentOptions {
   readonly workspaceRootForRun?: (runId: string) => string | undefined;
-  readonly customToolsForRun?: (runId: string) => readonly ToolDefinition[];
   readonly executeResolved?: typeof Execute.runResolvedSubagentEffect;
 }
 export function makeDagSubagentRuntime(
@@ -91,13 +99,7 @@ export function makeDagSubagentRuntime(
     run: (request) =>
       Effect.gen(function* () {
         const run = yield* Effect.try({
-          try: () =>
-            resolveRun(
-              request,
-              ctx,
-              options.customToolsForRun?.(request.runId) ?? [],
-              options.workspaceRootForRun?.(request.runId),
-            ),
+          try: () => resolveRun(request, ctx, options.workspaceRootForRun?.(request.runId)),
           catch: (cause) =>
             runtimeFailure(
               cause instanceof DagSubagentAdapterFailure
@@ -112,7 +114,10 @@ export function makeDagSubagentRuntime(
         const executeResolved = options.executeResolved ?? Execute.runResolvedSubagentEffect;
         const result = yield* executeResolved(run, ctx, {
           ...options,
-          runId: `${DagRuntimeService.dagUsagePrefix(request.runId)}${request.nodeId}:${request.attemptId}`,
+          // Group lifetime by graph, but deduplicate only the same node attempt.
+          runId: request.runId,
+          requestId: `${DagRuntimeService.dagUsagePrefix(request.runId)}${request.nodeId}:${request.attemptId}`,
+          ledger: undefined,
           workspaceAccess: run.workspaceAccess,
         }).pipe(
           Effect.mapError(
@@ -123,6 +128,11 @@ export function makeDagSubagentRuntime(
                 cause,
               }),
           ),
+        );
+        options.ledger?.record(
+          `${DagRuntimeService.dagUsagePrefix(request.runId)}${request.nodeId}:${request.attemptId}`,
+          options.executionMode ?? Usage.SubagentUsageMode.Sync,
+          result.details,
         );
         const admissibleOneRequestResult =
           request.payload.maxTurns === 1 &&
