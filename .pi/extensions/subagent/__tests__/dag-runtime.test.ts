@@ -83,7 +83,7 @@ const executeResolved: NonNullable<
 };
 
 // Native dispatch, model/empty selection and one-request results are
-// exercised by review/__tests__/native-dag.integration.test.ts.
+// exercised by subagent/__tests__/native-dag.integration.test.ts.
 function adapter(ctx: any) {
   return DagRuntime.makeDagSubagentRuntime(ctx, { executeResolved });
 }
@@ -120,7 +120,9 @@ describe("DAG shared subagent runtime adapter", () => {
     const registry = DagRuntime.createDagSubagentExecutorRegistry(ctx, cwd, "generation", {});
 
     await expect(
-      Effect.runPromise(registry.lookup(DagExecutorKind.Subagent, DagRuntime.DagSubagentExecutorKey)),
+      Effect.runPromise(
+        registry.lookup(DagExecutorKind.Subagent, DagRuntime.DagSubagentExecutorKey),
+      ),
     ).resolves.toBeTypeOf("function");
     await expect(
       Effect.runPromise(registry.lookup(DagExecutorKind.Subagent, "other")),

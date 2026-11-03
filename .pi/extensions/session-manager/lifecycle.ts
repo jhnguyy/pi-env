@@ -111,6 +111,24 @@ function persistenceFor(materialized: boolean, sessionFile?: string): Persistenc
     : { state: "pending" };
 }
 
+function findOpenWorkRecord(
+  manifest: SessionManifest,
+  sessionId: string,
+): OpenSessionRecord | undefined {
+  const found = findRecord(manifest, sessionId);
+  if (!found) return undefined;
+  if (found.role === "coordinator") {
+    throw new SessionIdentityConflict({
+      sessionId,
+      reason: "session ID belongs to the coordinator",
+    });
+  }
+  if (found.desiredState === "closed") {
+    throw new SessionAlreadyClosed({ sessionId });
+  }
+  return found;
+}
+
 function adoptionNameSource(found: SessionRecord | undefined, requestedName?: string) {
   return requestedName || (found?.role === "work" && found.explicitName)
     ? { explicitName: true as const }
@@ -177,16 +195,7 @@ export function createSessionLifecycle(options: {
       let selected: OpenSessionRecord | undefined;
       const committed = yield* catalog
         .update(identity.canonicalCwd, (manifest) => {
-          const found = findRecord(manifest, input.sessionId);
-          if (found?.role === "coordinator") {
-            throw new SessionIdentityConflict({
-              sessionId: input.sessionId,
-              reason: "session ID belongs to the coordinator",
-            });
-          }
-          if (found?.role === "work" && found.desiredState === "closed") {
-            throw new SessionAlreadyClosed({ sessionId: input.sessionId });
-          }
+          const found = findOpenWorkRecord(manifest, input.sessionId);
           if (found?.role === "work") {
             selected = {
               ...found,
@@ -246,16 +255,7 @@ export function createSessionLifecycle(options: {
       let selected: OpenSessionRecord | undefined;
       const committed = yield* catalog
         .update(identity.canonicalCwd, (manifest) => {
-          const found = findRecord(manifest, input.sessionId);
-          if (found?.role === "coordinator") {
-            throw new SessionIdentityConflict({
-              sessionId: input.sessionId,
-              reason: "session ID belongs to the coordinator",
-            });
-          }
-          if (found?.role === "work" && found.desiredState === "closed") {
-            throw new SessionAlreadyClosed({ sessionId: input.sessionId });
-          }
+          const found = findOpenWorkRecord(manifest, input.sessionId);
           const requestedName = input.sessionName?.trim();
           const name =
             requestedName ||

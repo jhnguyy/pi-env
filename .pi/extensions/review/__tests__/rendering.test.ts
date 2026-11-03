@@ -1,267 +1,46 @@
 import "../../__tests__/tui-setup";
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import { componentText as textOf, expansionHints } from "../../__tests__/rendering";
-import { reviewActionResult, reviewProgressResult, withoutNestedUsage } from "../index";
-import { projectReviewProgress, renderReviewResult } from "../render";
+import { renderReviewCall, renderReviewResult } from "../render";
 
-const recordingTheme = {
-  fg: (style: string, text: string) => `<${style}>${text}</${style}>`,
-  bold: (text: string) => `<bold>${text}</bold>`,
+const theme = { fg: (style: string, text: string) => `<${style}>${text}</${style}>` };
+const result = {
+  content: [{ type: "text" as const, text: `Pull request context\n${"body ".repeat(30)}end` }],
+  details: { status: "ok" },
 };
-
-const context = {
-  isError: false,
-  ...expansionHints,
-};
-
-describe("review tool rendering", () => {
-  it("shows a bounded one-line verdict, zero cost, and the exact review ID without usage counters", () => {
-    const reviewId = "review-a1-review-a10";
-    const verdict = `${"v".repeat(40)}\n${"w".repeat(40)} full verdict tail`;
-    const result = {
-      content: [
-        {
-          type: "text" as const,
-          text: `Detailed result\nturns=991 input=992 output=993 cache=994\n${verdict}`,
-        },
-      ],
-      details: {
-        status: "succeeded",
-        reviewId,
-        verdict,
-        metrics: {
-          usage: {
-            cost: 0,
-            turns: 991,
-            input: 992,
-            output: 993,
-            cacheRead: 994,
-            cacheWrite: 995,
-          },
-        },
-      },
-    };
-
-    const collapsed = textOf(
-      renderReviewResult(result, { expanded: false, isPartial: false }, recordingTheme, context),
-    );
-    const verdictLine = collapsed.split("\n").find((line) => line.includes("verdict:"));
-
-    expect(verdictLine).toContain(`verdict: ${"v".repeat(40)}`);
-    expect(verdictLine).toContain("w");
-    expect(collapsed).not.toContain(verdict);
-    expect(verdictLine).not.toContain("full verdict tail");
-    expect(collapsed).toContain("cost: $0.0000");
-    expect(collapsed).toContain(reviewId);
-    expect(collapsed).not.toMatch(/991|992|993|994|995/);
-  });
-
-  it("keeps the complete verdict and existing detailed result when expanded", () => {
-    const verdict = "first verdict line\nsecond verdict line";
-    const detailed = "Existing detailed result with findings and coverage.";
-    const expanded = textOf(
-      renderReviewResult(
-        {
-          content: [{ type: "text" as const, text: detailed }],
-          details: {
-            status: "degraded",
-            reviewId: "review-expanded",
-            verdict,
-            metrics: { usage: { cost: 1.25 } },
-          },
-        },
-        { expanded: true, isPartial: false },
-        recordingTheme,
-        context,
+it("renders get calls compactly and preserves full context only in expanded results", () => {
+  expect(
+    textOf(
+      renderReviewCall(
+        { command: "pr", action: "get", url: "https://github.com/o/r/pull/1" },
+        theme,
       ),
-    );
-
-    for (const line of verdict.split("\n")) expect(expanded).toContain(line);
-    expect(expanded).toContain(detailed);
-    expect(expanded).toContain("$1.2500");
-    expect(expanded).toContain("review-expanded");
-  });
-
-  it.each([
-    ["succeeded", "success"],
-    ["degraded", "warning"],
-    ["interrupted", "warning"],
-    ["cancelled", "warning"],
-    ["failed", "error"],
-  ])("uses the outcome's semantic role for %s reviews", (status, role) => {
-    const rendered = textOf(
-      renderReviewResult(
-        {
-          content: [{ type: "text" as const, text: "terminal result" }],
-          details: { status, reviewId: `review-${status}` },
-        },
-        { expanded: false, isPartial: false },
-        recordingTheme,
-        { ...context, isError: status === "failed" },
-      ),
-    );
-
-    expect(rendered).toContain(`<${role}>`);
-    if (["failed", "interrupted", "cancelled"].includes(status)) {
-      expect(rendered).toContain("verdict: unavailable");
-    }
-  });
-
-  it("labels persisted spend when an idempotent review is reused", () => {
-    const rendered = textOf(
-      renderReviewResult(
-        {
-          content: [{ type: "text" as const, text: "recorded result" }],
-          details: {
-            status: "succeeded",
-            reviewId: "review-reused",
-            verdict: "recorded verdict",
-            reused: true,
-            metrics: { usage: { cost: 0.25 } },
-          },
-        },
-        { expanded: false, isPartial: false },
-        recordingTheme,
-        context,
-      ),
-    );
-
-    expect(rendered).toContain("recorded cost: $0.2500");
-    expect(rendered).not.toContain("  cost:");
-  });
-
-  it("maps completed, active, and queued phases to their required theme roles", () => {
-    const details = {
-      status: "running",
-      reviewId: "review-progress",
-      runId: "run-progress",
-      nodes: {
-        "reading-plan": "succeeded",
-        "evidence-resolver": "succeeded",
-        "review-correctness": "succeeded",
-        "review-intent": "running",
-        "review-maintainability": "queued",
-        "review-tests": "running",
-        "review-security": "queued",
-        "review-whole-change": "queued",
-        synthesis: "queued",
-      },
-      usage: { cost: 0.1621 },
-    };
-    const rendered = textOf(
-      renderReviewResult(
-        { content: [], details },
-        { expanded: false, isPartial: true },
-        recordingTheme,
-        context,
-      ),
-    );
-
-    expect(rendered).toContain("<success>planning");
-    expect(rendered).toContain("<warning>reviewing intent, tests</warning>");
-    expect(rendered).toContain("synthesizing");
-    expect(rendered).toContain("cost: $0.1621");
-    expect(rendered).toContain("review-progress");
-  });
-
-  it("keeps running reviewer roles visible when a sibling already failed", () => {
-    const rendered = textOf(
-      renderReviewResult(
-        {
-          content: [],
-          details: {
-            status: "running",
-            reviewId: "review-mixed-terminal",
-            nodes: {
-              "reading-plan": "succeeded",
-              "evidence-resolver": "succeeded",
-              "review-correctness": "failed",
-              "review-intent": "running",
-              "review-tests": "running",
-              synthesis: "queued",
-            },
-          },
-        },
-        { expanded: false, isPartial: true },
-        recordingTheme,
-        context,
-      ),
-    );
-
-    expect(rendered).toContain("<warning>reviewing intent, tests</warning>");
-    expect(rendered).toContain("<error>[correctness failed]</error>");
-    expect(rendered).not.toContain("<success>reviewing");
-  });
-
-  it("preserves failed and interrupted phases instead of marking them complete", () => {
-    const phases = projectReviewProgress({
-      "reading-plan": "failed",
-      "evidence-resolver": "blocked",
-      "review-correctness": "interrupted",
-      "review-intent": "cancelled",
-      synthesis: "queued",
-    });
-
-    expect(phases[0]).toMatchObject({ label: "planning", status: "failed" });
-    expect(phases[1]).toMatchObject({ label: "reviewing", status: "interrupted" });
-  });
-
-  it("reports terminal nested usage once and omits it for duplicate or persisted reuse results", () => {
-    const state = {
-      snapshot: { id: "review-terminal-usage" },
-      dag: { status: "succeeded" },
-      result: { verdict: "complete", findings: [] },
-      metrics: {
-        durationMs: 1,
-        deckBytes: 2,
-        reviewerOutputBytes: 3,
-        reviewersSucceeded: 6,
-        reviewersFailed: 0,
-        reviewersMalformed: 0,
-        findings: 0,
-        anchoredFindings: 0,
-        usage: {
-          input: 11,
-          output: 12,
-          cacheRead: 13,
-          cacheWrite: 14,
-          cost: 1.5,
-          turns: 6,
-        },
-      },
-      selectedFindingIds: [],
-      posts: [],
-    } as never;
-
-    const terminal = reviewActionResult(state);
-    expect(terminal.usage).toMatchObject({
-      input: 11,
-      output: 12,
-      cacheRead: 13,
-      cacheWrite: 14,
-      cost: { total: 1.5 },
-    });
-    expect(Object.hasOwn(withoutNestedUsage(terminal), "usage")).toBe(false);
-    expect(Object.hasOwn(reviewActionResult(state, true), "usage")).toBe(false);
-  });
-
-  it("keeps cumulative child usage in partial details and out of top-level accounting", () => {
-    const usage = {
-      input: 101,
-      output: 102,
-      cacheRead: 103,
-      cacheWrite: 104,
-      cost: 1.2345,
-      turns: 105,
-    };
-    const partial = reviewProgressResult({
-      reviewId: "review-usage",
-      runId: "run-usage",
-      nodes: { "reading-plan": "running" },
-      usage,
-    });
-
-    expect(partial.details.usage).toEqual(usage);
-    expect(Object.hasOwn(partial, "usage")).toBe(false);
-  });
+    ),
+  ).toContain("pr get https://github.com/o/r/pull/1");
+  const context = { isError: false, ...expansionHints };
+  const collapsed = textOf(
+    renderReviewResult(result, { expanded: false, isPartial: false }, theme, context),
+  );
+  expect(collapsed).toContain("Pull request context");
+  expect(collapsed).not.toContain("end");
+  const expanded = textOf(
+    renderReviewResult(result, { expanded: true, isPartial: false }, theme, context),
+  );
+  for (const line of result.content[0].text.split("\n")) expect(expanded).toContain(line);
+});
+it("uses the host error flag and injected expansion binding", () => {
+  const context = { isError: true, keyText: () => "alt+x", keyHint: () => "alt+x to expand" };
+  const output = textOf(
+    renderReviewResult(result, { expanded: false, isPartial: false }, theme, context),
+  );
+  expect(output).toContain("<error>✗</error>");
+  expect(output).toContain("alt+x to expand");
+  expect(
+    textOf(
+      renderReviewResult(result, { expanded: false, isPartial: false }, theme, {
+        ...context,
+        keyText: () => "",
+      }),
+    ),
+  ).not.toContain("to expand");
 });

@@ -1,12 +1,14 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
+import type { SessionManifest } from "../contracts.js";
 import { CloseSource } from "../domain.js";
 import type { CurrentWindow, SessionHostShape } from "../host.js";
 import {
   SessionAlreadyClosed,
+  SessionIdentityConflict,
   SessionNameInvalid,
   createSessionLifecycle,
   type SessionStartInput,
@@ -136,6 +138,73 @@ describe("session lifecycle", () => {
     await Effect.runPromise(lifecycle.close(adopted, CloseSource.SessionDone));
     expect(await failureOf(lifecycle.adopt(input))).toBeInstanceOf(SessionAlreadyClosed);
   });
+
+  it.each([
+    ["start", "coordinator"],
+    ["start", "closed"],
+    ["adopt", "coordinator"],
+    ["adopt", "closed"],
+  ] as const)(
+    "rejects %s when a %s conflict commits after preflight",
+    async (operation, conflict) => {
+      const { cwd, catalog, lifecycle, input } = await fixture();
+      const started = await Effect.runPromise(lifecycle.start(input));
+      if (started.state !== "managed") throw new Error("expected managed session");
+      await writeFile(
+        input.sessionFile!,
+        `${JSON.stringify({ type: "session", version: 3, id: input.sessionId, cwd })}\n`,
+      );
+      const { desiredState: _state, ...base } = started.session.record;
+      let conflicting: SessionManifest | undefined;
+      const bindCurrent = vi.fn(host.bindCurrent);
+      const contender = createSessionLifecycle({
+        catalog: {
+          identity: (path) => catalog.identity(path),
+          read: (path) => catalog.read(path),
+          update: (path, transform) =>
+            catalog
+              .update(path, (manifest) =>
+                conflict === "coordinator"
+                  ? { ...manifest, coordinator: { ...base, role: "coordinator" }, sessions: [] }
+                  : {
+                      ...manifest,
+                      sessions: [
+                        {
+                          ...started.session.record,
+                          desiredState: "closed",
+                          closedAt: started.session.record.lastOpenedAt,
+                          closedBy: "session-done",
+                        },
+                      ],
+                    },
+              )
+              .pipe(
+                Effect.flatMap((committed) => {
+                  conflicting = committed;
+                  return catalog.update(path, transform);
+                }),
+              ),
+        },
+        host: { ...host, bindCurrent },
+        sessionFiles: nodeSessionFileProbe,
+      });
+
+      const error = await (operation === "start"
+        ? failureOf(contender.start(input))
+        : failureOf(contender.adopt(input)));
+
+      expect(error).toBeInstanceOf(
+        conflict === "coordinator" ? SessionIdentityConflict : SessionAlreadyClosed,
+      );
+      expect(error).toMatchObject({
+        sessionId: input.sessionId,
+        ...(conflict === "coordinator" ? { reason: "session ID belongs to the coordinator" } : {}),
+      });
+      expect(conflicting).toBeDefined();
+      expect(await Effect.runPromise(catalog.read(cwd))).toEqual(conflicting);
+      expect(bindCurrent).not.toHaveBeenCalled();
+    },
+  );
 
   it("adopts a session whose JSONL cwd is a symlink to the canonical workspace", async () => {
     const { root, cwd, catalog, lifecycle, input } = await fixture();
