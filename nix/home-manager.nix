@@ -12,7 +12,7 @@ let
   cfg = config.pi-env;
   packages = packagesFor pkgs;
   ghosttyDirectory =
-    if pkgs.stdenv.isDarwin then
+    if pkgs.stdenv.hostPlatform.isDarwin then
       "Library/Application Support/com.mitchellh.ghostty"
     else
       ".config/ghostty";
