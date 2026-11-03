@@ -75,10 +75,11 @@ function roleInstructions(role: ReviewRole): string {
       ...common,
       "Load the successful reading-plan and admitted raw findings with the result-reference tool.",
       "Return v: 2 editorial consolidation. Retained findings may group and rephrase one or more raw findings by rawFindingIds.",
+      "Preserve material qualifications, proof gaps, and unresolved human decisions from reviewer verdicts and findings in the editorial verdict, including the distinction between observed execution, static deduction, and unverified hypothesis. Do not turn ambiguity or missing proof into an invented code defect or imply that verified snapshot, digests, or provenance establish successful execution.",
       "Account for every admitted raw finding ID exactly once, either in one retained finding or in dismissals with a specific nonblank reason. Never omit, duplicate, or invent an ID.",
       "Do not supply source reviewer or agreement claims. The harness derives distinct source roles and agreement from raw IDs. Silence is not dissent.",
       "Report failed or malformed reviewer paths as degraded coverage. Use only these coverage role values: correctness, intent, maintainability, tests, security, whole-change. Do not use DAG node IDs or reading-plan.",
-      "Return exactly one JSON object shaped as {\"v\":2,\"verdict\":\"<non-empty editorial summary>\",\"coverage\":{\"status\":\"complete|degraded\",\"succeeded\":[],\"failed\":[],\"malformed\":[]},\"findings\":[{\"severity\":\"low|medium|serious|blocking\",\"impact\":\"low|medium|high\",\"problem\":\"<non-empty text>\",\"consequence\":\"<non-empty text>\",\"suggestedFix\":\"<non-empty text>\",\"rawFindingIds\":[\"R-...\"]}],\"dismissals\":[{\"rawFindingId\":\"R-...\",\"reason\":\"<non-empty reason>\"}]}. Optional anchor fields remain file, side, and line.",
+      'Return exactly one JSON object shaped as {"v":2,"verdict":"<non-empty editorial summary>","coverage":{"status":"complete|degraded","succeeded":[],"failed":[],"malformed":[]},"findings":[{"severity":"low|medium|serious|blocking","impact":"low|medium|high","problem":"<non-empty text>","consequence":"<non-empty text>","suggestedFix":"<non-empty text>","rawFindingIds":["R-..."]}],"dismissals":[{"rawFindingId":"R-...","reason":"<non-empty reason>"}]}. Optional anchor fields remain file, side, and line.',
       "Call the structured synthesis submission tool. Then return only the accepted canonical JSON from that tool.",
     ].join("\n");
   }
@@ -91,6 +92,14 @@ function roleInstructions(role: ReviewRole): string {
     "Use the supplied validated reading plan and resolved evidence dossier. Do not rebuild the plan or explore the filesystem.",
     focus,
     "Return goal-relative, actionable findings only.",
+    "Distinguish demonstrated contract violations from consequential ambiguity. Judge the remedy as well as the defect: if the remedy expands the stated intent or resolves a consequential ambiguity, identify the decision for the user rather than assume authorization. Do not invent requirements. Put material unresolved choices in the verdict, not fabricated code findings.",
+    "Distinguish observed execution, static deduction, and unverified hypothesis. Verified snapshot, digests, and provenance establish evidence identity, not successful execution. Sound static defects do not require execution evidence.",
+    "Put material proof gaps in the verdict, naming the smallest focused check and the claim it would establish. Do not present a proposed or unavailable check as completed evidence.",
+    ...(role === "maintainability" || role === "whole-change"
+      ? [
+          "Challenge unnecessary machinery only when you can name a concrete simpler alternative that preserves the contracts and a concrete maintenance or failure cost of the current approach. Avoid style churn and blanket removal recommendations.",
+        ]
+      : []),
     "Do not report evidence omissions or degraded coverage as code findings. The harness reports coverage separately. Review the admitted evidence that is present.",
     "Set evidenceDigest to the exact digest in evidence_coverage.",
     `Return exactly one JSON object with this shape: {"role":"${role}","evidenceDigest":"<64 lowercase hex characters from evidence_coverage>","verdict":"<non-empty summary>","findings":[{"severity":"low|medium|serious|blocking","impact":"low|medium|high","file":"<optional changed path>","side":"<optional LEFT or RIGHT when line is present>","line":1,"problem":"<non-empty text>","consequence":"<non-empty text>","suggestedFix":"<non-empty text>"}]}.`,
@@ -122,11 +131,7 @@ function payload(
     workspace: { cwd, access: "read" },
     context: {
       outputs: reviewer
-        ? [
-            ReadingPlanNode.outputName,
-            ReviewEvidenceCoverageOutput,
-            ...ReviewEvidenceChunkOutputs,
-          ]
+        ? [ReadingPlanNode.outputName, ReviewEvidenceCoverageOutput, ...ReviewEvidenceChunkOutputs]
         : [],
     },
     output: { name: node.outputName },

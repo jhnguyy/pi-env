@@ -21,6 +21,10 @@ A review pins the pull request head, base, changed-file manifest, and diff befor
 
 The review records its reading plan, coverage, reviewer results, findings, and provenance. Failed runs distinguish failed nodes from blocked dependencies and expose the initiating error and child transcript when available. An incomplete run is not a clean assessment. Failed or malformed reviewers and missing evidence degrade coverage. Invalid synthesis falls back to admitted raw findings without silently dropping them. An invalid diff anchor remains an unanchored finding. These outcomes do not prove that a finding is correct.
 
+Reviewer instructions distinguish demonstrated contract violations from consequential ambiguity. When a remedy expands the stated intent or resolves a consequential ambiguity, reviewers identify the decision for the user rather than assume authorization. They put material unresolved choices in the existing verdict summary, not fabricated code findings. Maintainability and whole-change reviewers challenge unnecessary machinery only with a concrete simpler alternative that preserves contracts and a concrete maintenance or failure cost; this is not a mandate for style churn or blanket removal.
+
+Reviewers distinguish observed execution, static deduction, and unverified hypotheses. Verified snapshots, digests, and provenance establish evidence identity, not successful execution. Sound static defects do not require execution evidence. Reviewers assess the admitted evidence; they do not execute the checks they recommend. Material proof gaps belong in the verdict with the smallest focused check and the claim it would establish. Synthesis instructions preserve material qualifications, proof gaps, and unresolved human decisions in the editorial verdict without changing finding accounting or dismissal rules. These instructions guide model judgment; they do not guarantee it.
+
 Use these commands to inspect local reviews:
 
 ```text
