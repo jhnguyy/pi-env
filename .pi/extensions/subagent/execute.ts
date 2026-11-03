@@ -60,7 +60,6 @@ function submission(
     ...(run.reasoning !== undefined ? { reasoning: run.reasoning } : {}),
     ...(run.maxTurns !== undefined ? { maxTurns: run.maxTurns } : {}),
     ...(run.workspaceAccess !== undefined ? { workspaceAccess: run.workspaceAccess } : {}),
-    ...(run.capability !== undefined ? { capability: run.capability } : {}),
   };
 }
 
@@ -118,7 +117,7 @@ export function runResolvedSubagentEffect(
       options.signal?.throwIfAborted();
       if (run.customTools?.length)
         throw new Error(
-          "Executable private tools cannot cross the service boundary; supply a service-owned capability.",
+          "Executable private tools cannot cross the service boundary; select native target-loaded tools by name.",
         );
       const connection =
         options.serviceConnection ??

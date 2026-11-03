@@ -11,7 +11,6 @@ import {
   defineDoc,
   defineExtension,
   defineTask,
-  type JsonObject,
   type TaskId,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
@@ -21,7 +20,6 @@ import { SubagentRunSupervisor } from "../../.pi/extensions/subagent/control.js"
 import { NativeChildOwner } from "../../.pi/extensions/subagent/native-child.js";
 import { NativeInputMode } from "../../.pi/extensions/subagent/child-types.js";
 import { addUsage, getFinalOutput, zeroUsage } from "../../.pi/extensions/subagent/usage.js";
-import type { ResolvedSubagentRun } from "../../.pi/extensions/subagent/execution-types.js";
 import type { NativeChildSnapshot } from "../../.pi/extensions/subagent/child-types.js";
 import {
   MaxServiceRequestBytes,
@@ -36,18 +34,6 @@ import {
   type Submit,
 } from "./contract.js";
 
-export interface CapabilityRequest {
-  readonly capability: JsonObject;
-  readonly parentSessionId: string;
-  readonly runId: string;
-  readonly cwd: string;
-}
-export interface PrivateCapabilityAdapter {
-  parse(request: CapabilityRequest): JsonObject | Promise<JsonObject>;
-  resolve(
-    request: CapabilityRequest & { childId: string },
-  ): Promise<Pick<ResolvedSubagentRun, "customTools" | "toolNames" | "systemPrompt">>;
-}
 type StoredResult = {
   text: string;
   preview: { text: string; truncated: boolean };
@@ -126,7 +112,6 @@ type ServiceOptions = {
   agentDir?: string;
   maxRetainedOperations?: number;
   maxOutstandingOperations?: number;
-  capabilityAdapter?: PrivateCapabilityAdapter;
   openStorage?: typeof openNodeSqliteStorage;
 };
 
@@ -316,15 +301,6 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
     reopened = false,
   ) => {
     const spec = record.spec!;
-    const overrides = spec.capability
-      ? await options.capabilityAdapter!.resolve({
-          capability: spec.capability,
-          parentSessionId: record.parentSessionId,
-          runId: record.runId,
-          childId: record.childId,
-          cwd: spec.cwd,
-        })
-      : {};
     // Logical run IDs group many children. Native supervisor lease IDs must be
     // unique per child, including when siblings execute in different workspaces.
     const limits = loadSubagentRuntimeConfig(spec.cwd, agentDir);
@@ -342,7 +318,6 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
             reasoning: spec.reasoning,
             maxTurns: spec.maxTurns,
             workspaceAccess: spec.workspaceAccess,
-            ...overrides,
           },
           {
             cwd: spec.cwd,
@@ -679,8 +654,6 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
       const initial = store.operations.find(
         (op) => op.childId === childId && op.kind === "initial",
       )!;
-      if (initial.spec?.capability && !options.capabilityAdapter)
-        throw new Error("private_capability_adapter_required");
       const owner = await makeOwner(
         initial,
         SessionManager.open(child.sessionFile),
@@ -799,15 +772,6 @@ export async function openServiceRuntime(options: ServiceOptions): Promise<Servi
           throw new Error("invalid_submit");
         if (!isAbsolute(raw.cwd)) throw new Error("absolute_cwd_required");
         const request = structuredClone(raw);
-        if (request.capability) {
-          if (!options.capabilityAdapter) throw new Error("private_capability_adapter_required");
-          request.capability = await options.capabilityAdapter.parse({
-            capability: request.capability,
-            parentSessionId,
-            runId: request.runId,
-            cwd: request.cwd,
-          });
-        }
         return admit(parentSessionId, request, "initial");
       },
       async input(parentSessionId, raw) {

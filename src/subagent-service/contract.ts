@@ -1,5 +1,4 @@
 import { hostNamed, method, remote } from "@earendil-works/chord";
-import type { JsonObject } from "@earendil-works/pi-durable";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import {
   obj,
@@ -34,30 +33,6 @@ const Id = str({ minLength: 1, maxLength: 256 });
 const Text = str({ maxLength: 16_384 });
 const Prompt = str({ minLength: 1, maxLength: 4 * 1024 * 1024 });
 export const MaxServiceRequestBytes = 32 * 1024 * 1024;
-// Matches Durable's JsonObject: an object whose values recursively contain only
-// JSON primitives, arrays and objects. Open recursive objects also keep Chord's
-// input cleaning from hiding unknown descriptor fields from the private decoder.
-// Chord cleans a pattern's $ref without compiling it on its own; an
-// additionalProperties $ref would be compiled without its enclosing $defs.
-// Explicit finite bounds exclude NaN/Infinity, which pi-schema's number accepts.
-export const CapabilitySchema: Schema<JsonObject> = {
-  $id: "urn:pi-env:subagent:capability",
-  type: "object",
-  patternProperties: { "^": { $ref: "#/$defs/value" } },
-  additionalProperties: true,
-  $defs: {
-    value: {
-      anyOf: [
-        { type: "null" },
-        { type: "boolean" },
-        { type: "number", minimum: -Number.MAX_VALUE, maximum: Number.MAX_VALUE },
-        { type: "string" },
-        { type: "array", items: { $ref: "#/$defs/value" } },
-        { type: "object", additionalProperties: { $ref: "#/$defs/value" } },
-      ],
-    },
-  },
-};
 const scopeProperties = { parentSessionId: Id };
 export const ScopeSchema = obj(scopeProperties);
 export const SubmitSchema = obj({
@@ -72,7 +47,6 @@ export const SubmitSchema = obj({
   reasoning: opt(oneOf(["max", "minimal", "low", "medium", "high", "xhigh"])),
   maxTurns: opt(int({ minimum: 1, maximum: 100_000 })),
   workspaceAccess: opt(oneOf(["read", "write"])),
-  capability: opt(CapabilitySchema),
 });
 export type Submit = Static<typeof SubmitSchema>;
 export const InputSchema = obj({

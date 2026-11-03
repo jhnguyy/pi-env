@@ -8,7 +8,6 @@ import type * as Control from "./control";
 import type * as Types from "./types";
 import type * as Usage from "./usage";
 import type { SubagentServiceConnection } from "./service-host";
-import type { JsonObject } from "@earendil-works/pi-durable";
 
 export type SubagentParentContext = Pick<
   ExtensionContext,
@@ -40,7 +39,6 @@ export interface ResolvedSubagentRun {
   systemPrompt?: string;
   toolNames?: readonly string[];
   customTools?: readonly ToolDefinition[];
-  capability?: JsonObject;
   reasoning?: ThinkingLevel;
   maxTurns?: number;
   workspaceAccess?: Control.WorkspaceAccess;

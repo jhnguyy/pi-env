@@ -32,7 +32,6 @@ function createEvents(): DagRuntimeServiceEvents {
 }
 
 const service: ActiveDagRuntimeService = {
-  runSubagent: () => Effect.die("unused"),
   closeChildren: async () => {},
   submit: () => Effect.die("unused"),
   reconstruct: () => Effect.die("unused"),

@@ -12,7 +12,6 @@ import {
   reconstructDagSession,
   submitDagRun,
   type DagExecutorRegistry,
-  type DagSubagentRuntimeRequest,
   type DagExecutorRegistryService,
   type DagRunHandle,
   type DagRuntimeJournal,
@@ -31,7 +30,7 @@ import {
   type DagRuntimeUsage,
 } from "../_shared/dag-runtime-service";
 import type { SubagentServiceConnection } from "./service-host";
-import { createDagSubagentExecutorRegistry, makeDagSubagentRuntime } from "./dag-runtime";
+import { createDagSubagentExecutorRegistry } from "./dag-runtime";
 import { createDagSessionStore, persistedDagRunIds } from "./dag-session-store";
 import { addUsage, zeroUsage, type SubagentUsageLedger } from "./usage";
 
@@ -64,18 +63,8 @@ export class DagSessionRuntime {
     private readonly ledger: SubagentUsageLedger,
     private readonly parentSessionId: string,
     private readonly sessionGeneration: string,
-    ctx: ExtensionContext,
-    telemetryRuntime: ToolingTelemetryRuntime,
   ) {
     const service = Object.freeze({
-      runSubagent: (request: DagSubagentRuntimeRequest, authority: DagRuntimeSubmissionAuthority) =>
-        makeDagSubagentRuntime(ctx, {
-          serviceConnection: this.serviceConnection,
-          ledger: this.ledger,
-          telemetryRuntime,
-          workspaceRootForRun: () => authority.workspaceRoot,
-          capabilityForRun: () => authority.capability,
-        }).run(request),
       submit: <TPayload>(
         graph: ValidatedDagDefinition<TPayload>,
         authority?: DagRuntimeSubmissionAuthority,
@@ -95,7 +84,7 @@ export class DagSessionRuntime {
       },
     });
     this.registration = registerDagRuntimeService(pi, {
-      parentSessionId: ctx.sessionManager.getSessionId(),
+      parentSessionId: this.parentSessionId,
       sessionGeneration: this.sessionGeneration,
       service,
     });
@@ -126,7 +115,6 @@ export class DagSessionRuntime {
         dependencies.sessionGeneration,
         {
           workspaceRootForRun: (runId) => authorities.get(runId)?.workspaceRoot,
-          capabilityForRun: (runId) => authorities.get(runId)?.capability,
           ledger: dependencies.ledger,
           serviceConnection: dependencies.serviceConnection,
           telemetryRuntime: dependencies.telemetryRuntime,
@@ -145,8 +133,6 @@ export class DagSessionRuntime {
         dependencies.ledger,
         parentSessionId,
         dependencies.sessionGeneration,
-        ctx,
-        dependencies.telemetryRuntime,
       );
     } catch (cause) {
       await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -195,14 +181,10 @@ export class DagSessionRuntime {
           new DagRuntimeNotAccepting({ message: "The session DAG runtime is shutting down." }),
         );
       }
-      if (
-        authority &&
-        Object.keys(authority).some((key) => key !== "workspaceRoot" && key !== "capability")
-      ) {
+      if (authority && Object.keys(authority).some((key) => key !== "workspaceRoot")) {
         return Effect.fail(
           new DagRuntimeNotAccepting({
-            message:
-              "Unsupported DAG authority; supply only workspaceRoot and data-only capability.",
+            message: "Unsupported DAG authority; supply only workspaceRoot.",
           }),
         );
       }

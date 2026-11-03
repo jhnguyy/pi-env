@@ -1,10 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { JsonObject } from "@earendil-works/pi-durable";
 import type { Effect } from "effect";
 import type {
   DagRunHandle,
-  DagSubagentRuntimeRequest,
-  DagSubagentRuntimeFailure,
   DagRuntimeError,
   DagSessionFailure,
   DagSessionReconstruction,
@@ -25,7 +22,6 @@ export function dagUsagePrefix(runId: string): string {
 
 export interface DagRuntimeSubmissionAuthority {
   readonly workspaceRoot?: string;
-  readonly capability?: JsonObject;
 }
 export interface DagRuntimeUsage {
   readonly input: number;
@@ -36,10 +32,6 @@ export interface DagRuntimeUsage {
   readonly turns: number;
 }
 export interface ActiveDagRuntimeService {
-  readonly runSubagent: (
-    request: DagSubagentRuntimeRequest,
-    authority: DagRuntimeSubmissionAuthority,
-  ) => Effect.Effect<string, DagSubagentRuntimeFailure>;
   readonly submit: <TPayload>(
     graph: ValidatedDagDefinition<TPayload>,
     authority?: DagRuntimeSubmissionAuthority,

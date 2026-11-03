@@ -3,7 +3,6 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { openServiceRuntime } from "../../../src/subagent-service/runtime.js";
 import { serve } from "../../../src/subagent-service/transport.js";
-import { reviewServiceAdapter } from "../review/service-adapter.js";
 
 const [directory, agentDir] = process.argv.slice(2);
 if (!directory)
@@ -16,7 +15,6 @@ const runtime = await openServiceRuntime({
   directory,
   agentDir,
   bundleId,
-  capabilityAdapter: reviewServiceAdapter,
 });
 let transport: Awaited<ReturnType<typeof serve>>;
 try {

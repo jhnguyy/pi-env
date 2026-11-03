@@ -16,7 +16,6 @@ import {
 import * as Control from "./control";
 import * as Execute from "./execute";
 import * as Resolver from "./resolver";
-import type { JsonObject } from "@earendil-works/pi-durable";
 import * as Usage from "./usage";
 
 export const DagSubagentExecutorKey = "pi/subagent-v1" as const;
@@ -60,7 +59,6 @@ function resolveContainedCwd(
 function resolveRun(
   request: DagSubagentRuntimeRequest,
   ctx: ExtensionContext,
-  capability: JsonObject | undefined,
   workspaceRoot?: string,
 ): Execute.ResolvedSubagentRun {
   const cwd = resolveContainedCwd(request, ctx, workspaceRoot);
@@ -77,7 +75,6 @@ function resolveRun(
     name: request.payload.name,
     task: request.prompt.user,
     toolNames: [...request.payload.tools],
-    capability,
     modelOverride: request.payload.model,
     systemPrompt,
     cwd,
@@ -92,7 +89,6 @@ function resolveRun(
 
 interface DagSubagentRuntimeOptions extends Execute.RunSubagentOptions {
   readonly workspaceRootForRun?: (runId: string) => string | undefined;
-  readonly capabilityForRun?: (runId: string) => JsonObject | undefined;
   readonly executeResolved?: typeof Execute.runResolvedSubagentEffect;
 }
 export function makeDagSubagentRuntime(
@@ -103,13 +99,7 @@ export function makeDagSubagentRuntime(
     run: (request) =>
       Effect.gen(function* () {
         const run = yield* Effect.try({
-          try: () =>
-            resolveRun(
-              request,
-              ctx,
-              options.capabilityForRun?.(request.runId),
-              options.workspaceRootForRun?.(request.runId),
-            ),
+          try: () => resolveRun(request, ctx, options.workspaceRootForRun?.(request.runId)),
           catch: (cause) =>
             runtimeFailure(
               cause instanceof DagSubagentAdapterFailure

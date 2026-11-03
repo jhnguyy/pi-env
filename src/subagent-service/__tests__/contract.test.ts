@@ -1,8 +1,7 @@
 import { expect, expectTypeOf, it } from "vitest";
 import type { ServiceView } from "../client.js";
 import type { Submit, Receipt, Snapshot, ResultPage } from "../contract.js";
-import { compile } from "@earendil-works/pi-schema";
-import { CapabilitySchema, ServiceChecks } from "../contract.js";
+import { ServiceChecks } from "../contract.js";
 
 it("infers RPC inputs, results and state from the service schemas", () => {
   expectTypeOf<Parameters<ServiceView["submit"]>[0]>().toEqualTypeOf<Submit>();
@@ -25,8 +24,7 @@ it("checks admission strictly without coercing bounds, optional fields or discri
     { reasoning: "invalid" },
     { workspaceAccess: "invalid" },
     { surprise: true },
-    { capability: [] },
-    { capability: { nested: { invalid: undefined } } },
+    { capability: { kind: "retired" } },
   ])
     expect(ServiceChecks.submit({ ...submit, ...patch })).toBe(false);
   expect(
@@ -54,22 +52,4 @@ it("checks admission strictly without coercing bounds, optional fields or discri
     ServiceChecks.result({ operationId: "o", offset: Number.MAX_SAFE_INTEGER, limit: 16_384 }),
   ).toBe(true);
   expect(ServiceChecks.result({ operationId: "o", offset: -1 })).toBe(false);
-});
-it("validates recursive JSON objects, including values under arbitrary keys", () => {
-  const check = compile(CapabilitySchema).check;
-  expect(
-    check({ nested: [{ extra: { values: [null, true, 2.5, "text", [], {}] } }], "line\nbreak": 1 }),
-  ).toBe(true);
-  for (const value of [
-    null,
-    [],
-    "text",
-    { a: undefined },
-    { a: [NaN] },
-    { a: { b: Infinity } },
-    { "line\nbreak": undefined },
-    { a: () => {} },
-  ]) {
-    expect(check(value), String(value) + JSON.stringify(value)).toBe(false);
-  }
 });

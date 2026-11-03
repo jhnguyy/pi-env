@@ -1,13 +1,14 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createAgentSessionFromServices,
   createAgentSessionServices,
   SessionManager,
   SettingsManager,
+  ProjectTrustStore,
   type ExtensionAPI,
-  type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
 import { expect, it, vi } from "vitest";
@@ -20,13 +21,17 @@ import {
 } from "../../../../src/dag/index.js";
 import * as DagRuntimeService from "../../_shared/dag-runtime-service";
 import initSubagent from "../../subagent/index";
-import * as Control from "../../subagent/control";
+import { RegisteredServiceFixture } from "./registered-service.fixture";
+import {
+  connectSubagentService,
+  waitForOperation,
+  type SubagentServiceConnection,
+} from "../service-host";
 import * as DagRuntime from "../../subagent/dag-runtime";
 import * as ChildTypes from "../../subagent/child-types";
 
-// Only inference is scripted. This qualifies run-private tool authority and
-// native child retention through the shared DAG runtime.
-it("dispatches run-local authority through the real DAG and retains its native child", async () => {
+// Inference is scripted; tools load from the trusted target, not submission callbacks.
+it("dispatches native target tools through the registered DAG service and retains children", async () => {
   const root = await mkdtemp(join(tmpdir(), "native-private-dag-"));
   const agentDir = join(root, "agent");
   const target = join(root, "target");
@@ -36,35 +41,22 @@ it("dispatches run-local authority through the real DAG and retains its native c
   let parent: Awaited<ReturnType<typeof createAgentSessionFromServices>>["session"] | undefined;
   let service: DagRuntimeService.ActiveDagRuntimeService | undefined;
   let unsubscribe: (() => void) | undefined;
+  let connection: SubagentServiceConnection | undefined;
+  const host = new RegisteredServiceFixture(agentDir);
   const failures: unknown[] = [];
   vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
   try {
     await mkdir(agentDir);
     await mkdir(join(target, ".pi"), { recursive: true });
-    const providerPath = join(agentDir, "provider.mjs");
+    const providerPath = join(agentDir, "provider.ts");
     await writeFile(
       providerPath,
-      `import { fauxProvider, fauxAssistantMessage, fauxToolCall } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
+      `import { registerNativeDagFixture } from ${JSON.stringify(fileURLToPath(new URL("./native-dag-provider.fixture.ts", import.meta.url)))};
 export default function(pi) {
-  const p = fauxProvider({provider:'dag-task-fixture'});
-  pi.registerProvider(p.provider);
-  const defaults = fauxProvider({provider:'dag-default-fixture'});
-  defaults.setResponses([fauxAssistantMessage('Native default without tools')]);
-  pi.registerProvider(defaults.provider);
-  pi.on('input', event => {
-    if (event.text === 'Human continuation\\nkeep original DAG result') {
-      p.setResponses([fauxAssistantMessage('Human continuation complete')]);
-    } else {
-      p.setResponses([
-        fauxAssistantMessage(fauxToolCall('submit_private_task', ${JSON.stringify(submission)}), {stopReason:'toolUse'}),
-        fauxAssistantMessage('Initial task submitted')
-      ]);
-    }
-  });
+  registerNativeDagFixture(pi, ${JSON.stringify(submissionPath)}, ${JSON.stringify(submission)});
 }`,
     );
-    // Native disk configuration and synthetic credentials; no ambient provider or
-    // credential selection. The private tool is NOT registered in these resources.
+    // Native disk configuration and synthetic credentials isolate provider selection.
     await writeFile(
       join(agentDir, "models.json"),
       JSON.stringify({
@@ -89,6 +81,8 @@ export default function(pi) {
     );
     await writeFile(join(target, "AGENTS.md"), "Target context for native DAG integration.");
 
+    new ProjectTrustStore(agentDir).set(target, true);
+    await host.start();
     const observeRuntime = (pi: ExtensionAPI) => {
       unsubscribe = DagRuntimeService.listenForDagRuntimeService(pi, (registration) => {
         service = registration.service;
@@ -112,33 +106,11 @@ export default function(pi) {
     expect(service).toBeDefined();
     const runtime = service!;
     expect(runtime.closeChildren).toBeTypeOf("function");
-    expect(parent.getActiveToolNames()).not.toContain("submit_private_task");
+    connection = await connectSubagentService(parent.sessionId, agentDir);
     const parentBefore = {
       messages: structuredClone(parent.messages),
       model: parent.model,
       tools: parent.getActiveToolNames(),
-    };
-    const privateTool: ToolDefinition = {
-      name: "submit_private_task",
-      label: "Submit private task",
-      description: "Persist the submission for this run only",
-      parameters: {
-        type: "object",
-        properties: {
-          verdict: { type: "string" },
-          findings: { type: "array", items: { type: "string" } },
-          snapshot: { type: "string" },
-        },
-        required: ["verdict", "findings", "snapshot"],
-        additionalProperties: false,
-      },
-      async execute(_id, params) {
-        await writeFile(submissionPath, JSON.stringify(params));
-        return {
-          content: [{ type: "text", text: "Task submission persisted" }],
-          details: { path: submissionPath },
-        };
-      },
     };
     const validated = validateDagDefinition({
       runId,
@@ -153,9 +125,9 @@ export default function(pi) {
             payload: {
               v: 1,
               name: "private-task",
-              instructions: "Submit the task using the private submission tool.",
+              instructions: "Submit the task using the native submission tool.",
               model: "dag-task-fixture/faux-1",
-              tools: [privateTool.name],
+              tools: ["submit_native_task"],
               workspace: { cwd: target, access: "read" },
               context: { outputs: [] },
               output: { name: "task_result" },
@@ -186,12 +158,16 @@ export default function(pi) {
     expect(validated._tag, JSON.stringify(validated)).toBe(DagValidationResultTag.Valid);
     if (validated._tag !== DagValidationResultTag.Valid) throw new Error(JSON.stringify(validated));
     const handle = await Effect.runPromise(
-      runtime.submit(validated.graph, { workspaceRoot: target, customTools: [privateTool] }),
+      runtime.submit(validated.graph, { workspaceRoot: target }),
     );
     await Effect.runPromise(handle.accepted);
     await Effect.runPromise(handle.await);
     expect(JSON.parse(await readFile(submissionPath, "utf8"))).toEqual(submission);
     const initialDag = await Effect.runPromise(runtime.reconstruct(runId));
+    expect(initialDag.state.nodes.map((entry) => entry.status)).toEqual([
+      DagNodeStatus.Succeeded,
+      DagNodeStatus.Succeeded,
+    ]);
     const node = initialDag.state.nodes[0];
     expect(node.status).toBe(DagNodeStatus.Succeeded);
     if (node.status !== DagNodeStatus.Succeeded) throw new Error(JSON.stringify(initialDag));
@@ -214,42 +190,54 @@ export default function(pi) {
       "Initial task submitted",
     );
 
-    const supervisor = Control.getSubagentRunSupervisor(parent.sessionId)!;
-    expect(supervisor.children.size).toBe(2);
-    const child = [...supervisor.children.values()].find(
-      (owner) => owner.summary().name === "private-task",
-    )!;
-    const toolFree = [...supervisor.children.values()].find(
-      (owner) => owner.summary().name === "tool-free-default",
-    )!;
-    expect(toolFree.inspect().model).toBe("dag-default-fixture/faux-1");
-    expect(toolFree.inspect().activeTools).toEqual([]);
-    expect(toolFree.inspect().callableTools).toEqual([]);
-    expect(toolFree.inspect().initialResult).toMatchObject({
+    const children = connection.view.snapshot.value.children;
+    expect(children).toHaveLength(2);
+    const child = children.find((owner) => owner.name === "private-task")!;
+    const toolFree = children.find((owner) => owner.name === "tool-free-default")!;
+    const inspection = await connection.inspect(child.childId);
+    const toolFreeInspection = await connection.inspect(toolFree.childId);
+    const childSnapshot = inspection.snapshot.value!;
+    const toolFreeSnapshot = toolFreeInspection.snapshot.value!;
+    inspection.release();
+    toolFreeInspection.release();
+    expect(toolFreeSnapshot.model).toBe("dag-default-fixture/faux-1");
+    expect(toolFreeSnapshot.activeTools).toEqual([]);
+    expect(toolFreeSnapshot.callableTools).toEqual([]);
+    expect(toolFreeSnapshot.initialResult).toMatchObject({
       isError: false,
       finalOutput: "Native default without tools",
       usage: { turns: 1 },
     });
-    expect(child.inspect().model).toBe("dag-task-fixture/faux-1");
-    expect(child.inspect().activeTools).toEqual([privateTool.name]);
-    expect(child.inspect().systemPrompt).toContain("Target context");
-    expect(child.summary().state).toBe("idle");
-    const initialResult = structuredClone(child.inspect().initialResult);
+    const toolFreeTranscript = await readFile(toolFree.sessionFile!, "utf8");
+    expect(toolFreeTranscript.match(/"customType":"fixture-provider-request"/g)).toHaveLength(1);
+    expect(childSnapshot.model).toBe("dag-task-fixture/faux-1");
+    expect(childSnapshot.activeTools).toEqual(["submit_native_task"]);
+    expect(childSnapshot.systemPrompt).toContain("Target context");
+    expect(childSnapshot.state).toBe("idle");
+    const initialResult = structuredClone(childSnapshot.initialResult);
     expect(initialResult?.isError).toBe(false);
     expect(initialResult?.finalOutput).toBe("Initial task submitted");
-    const childFile = child.summary().sessionFile!;
+    const childFile = child.sessionFile!;
     expect(await readFile(childFile, "utf8")).toContain("Task submission persisted");
-    await child.input(
-      "Human continuation\nkeep original DAG result",
-      ChildTypes.NativeInputMode.Prompt,
-    );
+    const receipt = await connection.view.input({
+      requestId: "human-continuation",
+      childId: child.childId,
+      text: "Human continuation\nkeep original DAG result",
+      mode: ChildTypes.NativeInputMode.Prompt,
+      source: "human",
+    });
+    await waitForOperation(connection, receipt.operationId);
     expect(await readFile(childFile, "utf8")).toContain("Human continuation complete");
-    expect(child.inspect().inputs.at(-1)).toMatchObject({
+    const continuedInspection = await connection.inspect(child.childId);
+    const continued = continuedInspection.snapshot.value!;
+    continuedInspection.release();
+    expect(continued.inputs.at(-1)).toMatchObject({
       source: "human",
       mode: "prompt",
       text: "Human continuation\nkeep original DAG result",
     });
-    expect(child.inspect().initialResult).toEqual(initialResult);
+    expect(continued.initialResult).toEqual(initialResult);
+    expect(JSON.parse(await readFile(submissionPath, "utf8"))).toEqual(submission);
     expect(await Effect.runPromise(runtime.reconstruct(runId))).toEqual(initialDag);
     expect(await readFile(join(artifactRoot, reference.path), "utf8")).toBe(
       "Initial task submitted",
@@ -261,11 +249,20 @@ export default function(pi) {
     }).toEqual(parentBefore);
 
     // Closing the run owner must precede removing any target/artifact resources.
-    await runtime.closeChildren!(runId);
-    expect(child.summary().state).toBe("closed");
-    expect(toolFree.summary().state).toBe("closed");
+    await runtime.closeChildren(runId);
+    for (const retained of [child, toolFree]) {
+      const closed = await connection.inspect(retained.childId);
+      expect(closed.snapshot.value!.state).toBe("closed");
+      closed.release();
+    }
     await expect(
-      child.input("must not run after close", ChildTypes.NativeInputMode.Prompt),
+      connection.view.input({
+        requestId: "closed-input",
+        childId: child.childId,
+        text: "must not run after close",
+        mode: "prompt",
+        source: "human",
+      }),
     ).rejects.toThrow(/closed/);
   } catch (cause) {
     failures.push(cause);
@@ -275,6 +272,8 @@ export default function(pi) {
       () => parent?.abort(),
       () => parent?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" }),
       () => parent?.dispose(),
+      () => connection?.close(),
+      () => host.close(),
       () => unsubscribe?.(),
       () => vi.unstubAllEnvs(),
     ];
