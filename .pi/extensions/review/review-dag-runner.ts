@@ -31,7 +31,6 @@ import type { ReviewEvidenceCoverage } from "./evidence-resolver";
 import {
   PlanSchema,
   type AdmittedRawFinding,
-  type Finding,
   type ReviewerOutput,
   type ReviewPlan,
   type ReviewResult,
@@ -184,7 +183,7 @@ function decodeSynthesis(
       validSynthesisSources(decoded, reviewers)
     ) {
       const validated = validateFindingAnchors(
-        { verdict: decoded.verdict, findings: decoded.findings as Finding[] },
+        { verdict: decoded.verdict, findings: decoded.findings },
         diff,
       );
       return { ...validated, coverage: decoded.coverage };

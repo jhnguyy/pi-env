@@ -1,8 +1,8 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import {
-  type KeybindingHints,
-  type ToolDefinition,
-  type ToolRenderResultOptions,
+import type {
+  KeybindingHints,
+  ToolDefinition,
+  ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 import {
   Text,
@@ -19,9 +19,15 @@ export interface ToolRenderTheme {
   bold?(text: string): string;
 }
 
-export interface ToolResultRenderContext extends KeybindingHints {
-  readonly isError: boolean;
-}
+// Pi 1.5 exposes this context through ToolDefinition, but does not re-export its name.
+export type NativeToolRenderContext<Schema extends TSchema = TSchema> = Parameters<
+  NonNullable<ToolDefinition<Schema>["renderResult"]>
+>[3];
+
+export type ToolResultRenderContext = Pick<
+  NativeToolRenderContext,
+  "isError" | keyof KeybindingHints
+>;
 
 export interface ShortDescriptionOptions {
   readonly limit?: number;
@@ -124,7 +130,8 @@ export function renderTextToolResult(
     return new Text(`${header}${text ? `\n${text}` : ""}`, 0, 0);
   }
   const summary = shortDescription(text || (failed ? "error" : "complete"), { oneLine: true });
+  const hint = toolExpandHint(theme, context);
   return new WidthBoundedText(
-    `${header}\n  ${theme.fg(failed ? "error" : "toolOutput", summary)}\n${toolExpandHint(theme, context)}`,
+    `${header}\n  ${theme.fg(failed ? "error" : "toolOutput", summary)}${hint ? `\n${hint}` : ""}`,
   );
 }

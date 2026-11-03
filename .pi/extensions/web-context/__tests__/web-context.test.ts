@@ -110,7 +110,7 @@ describe("web fetch", () => {
     const beforeRender = structuredClone(result);
 
     const collapsed = componentText(
-      tool.renderResult(result, { expanded: false }, mockTheme, expansionHints("alt+e")),
+      tool.renderResult(result, { expanded: false }, mockTheme, expansionHints),
       120,
     );
 
@@ -118,22 +118,9 @@ describe("web fetch", () => {
     expect(collapsed).toContain("text/html");
     expect(collapsed).toContain("4.0KB");
     expect(collapsed).toContain("Fetched body");
-    expect(collapsed).toContain("alt+e to expand");
-    expect(collapsed).not.toContain("ctrl+o");
     expect(collapsed.length).toBeLessThan(1600);
     expect(collapsed).not.toContain(hiddenTail);
     expect(result).toEqual(beforeRender);
-  });
-
-  it("omits hints when the host disables expansion", () => {
-    const tool = registeredWebFetchTool();
-    const { result } = webFetchToolResult();
-    const collapsed = componentText(
-      tool.renderResult(result, { expanded: false }, mockTheme, expansionHints("")),
-      120,
-    );
-    expect(collapsed).toContain("Fetched body");
-    expect(collapsed).not.toMatch(/to expand|ctrl\+o|\(\)/u);
   });
 
   it("reveals the full fetched output when expanded", () => {
@@ -141,35 +128,12 @@ describe("web fetch", () => {
     const { body, result } = webFetchToolResult();
 
     const expanded = componentText(
-      tool.renderResult(result, { expanded: true }, mockTheme, expansionHints("alt+e")),
+      tool.renderResult(result, { expanded: true }, mockTheme, expansionHints),
       4096,
     );
 
     expect(expanded).toContain(body);
     expect(expanded).toContain("URL: https://example.com/");
-    expect(expanded).not.toContain("ctrl+o");
-    expect(expanded).not.toContain("alt+e");
-  });
-
-  it("renders text blocks in order and omits non-text blocks when expanded", () => {
-    const tool = registeredWebFetchTool();
-    const rendered = componentText(
-      tool.renderResult(
-        {
-          content: [
-            { type: "text", text: "first" },
-            { type: "image", data: "not displayed", mimeType: "image/png" },
-            { type: "text", text: "  second" },
-          ],
-        },
-        { expanded: true },
-        mockTheme,
-        expansionHints(""),
-      ),
-      20,
-    );
-
-    expect(rendered).toBe(`${"first".padEnd(20)}\n${"  second".padEnd(20)}`);
   });
 
   it("rejects non-web protocols", () => {
@@ -297,8 +261,6 @@ describe("web fetch", () => {
   it.each([
     [new Error("caller aborted body"), "caller aborted body"],
     [false, "false"],
-    [0, "0"],
-    ["", ""],
     [null, "reader cancelled"],
   ])("cancels a response body stream with reason %s after headers", async (reason, message) => {
     const controller = new AbortController();

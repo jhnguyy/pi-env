@@ -8,9 +8,11 @@
  * This file provides the top-level renderDevToolsResult + renderDevToolsCall.
  */
 
-import type { KeybindingHints } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
+import { toolResultText, type ToolResultRenderContext } from "../_shared/tool-render";
 import { Text } from "@earendil-works/pi-tui";
-import type { LspResult, LspAction } from "./protocol";
+import type { LspResult } from "./protocol";
 import { getAction } from "./action-registry";
 import type { RenderTheme } from "./render-contracts";
 export type { RenderTheme } from "./render-contracts";
@@ -22,30 +24,26 @@ export type { RenderTheme } from "./render-contracts";
  * Dispatches to per-action renderers via the action registry.
  */
 export function renderDevToolsResult(
-  result: {
-    isError?: boolean;
-    content: Array<{ type: string; text?: string }>;
-    details?: LspResult | null;
-  },
-  opts: { expanded?: boolean },
+  result: AgentToolResult<LspResult | null>,
+  opts: Pick<ToolRenderResultOptions, "expanded">,
   theme: RenderTheme,
-  hints: KeybindingHints,
+  context: ToolResultRenderContext,
 ): Text {
-  if (result.isError) {
-    const msg = result.content[0]?.text ?? "error";
+  if (context.isError) {
+    const msg = toolResultText(result) || "error";
     return new Text(theme.fg("error", `✗ ${msg}`), 0, 0);
   }
 
   const details = result.details;
   if (!details) {
-    return new Text(theme.fg("muted", result.content[0]?.text ?? ""), 0, 0);
+    return new Text(theme.fg("muted", toolResultText(result)), 0, 0);
   }
 
   const entry = getAction(details.action);
-  if (entry) return entry.renderer(details, opts, theme, hints);
+  if (entry) return entry.renderer(details, opts, theme, context);
 
   // Fallback for unknown action types
-  return new Text(result.content[0]?.text ?? "", 0, 0);
+  return new Text(toolResultText(result), 0, 0);
 }
 
 // ─── renderCall ───────────────────────────────────────────────────────────────

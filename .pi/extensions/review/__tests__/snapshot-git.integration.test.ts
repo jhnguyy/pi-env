@@ -96,16 +96,50 @@ function fixture() {
 }
 
 describe("review snapshot Git integration", () => {
-  it("returns complete exec results and rejects output limits instead of returning partial Git output", async () => {
-    const result = await managedGitExec("git", ["--version"]);
-    expect(result).toMatchObject({ code: 0, killed: false, truncated: false, stderr: "" });
-    expect(result.stdout).toMatch(/^git version /u);
-    await expect(managedGitExec("git", ["--version"], { maxBuffer: 1 })).rejects.toMatchObject({
+  it("applies Pi maxBuffer to stdout and stderr together", async () => {
+    const node = resolveNodeCommand();
+    const args = ["-e", "process.stdout.write('abc'); process.stderr.write('def')"];
+    await expect(managedGitExec(node, args, { maxBuffer: 4 })).rejects.toMatchObject({
       _tag: "ProcessFailure",
       kind: "output-limit",
-      command: "git",
+    });
+    await expect(managedGitExec(node, args, { maxBuffer: 6 })).resolves.toEqual({
+      code: 0,
+      stdout: "abc",
+      stderr: "def",
+      killed: false,
+      truncated: false,
     });
   });
+
+  it.skipIf(process.platform === "win32")(
+    "awaits process-tree cleanup before rejecting combined overflow",
+    async () => {
+      const root = temp("pi-review-overflow-");
+      const parentPidPath = join(root, "parent.pid");
+      const childPidPath = join(root, "child.pid");
+      const controller = new AbortController();
+      const running = managedGitExec(
+        resolveNodeCommand(),
+        [commandTreePath, parentPidPath, childPidPath, "overflow"],
+        {
+          cwd: root,
+          signal: controller.signal,
+          maxBuffer: 4,
+          timeout: 10_000,
+        },
+      );
+      await withOwnedCommand(controller, running, parentPidPath, childPidPath, async () => {
+        await expect(running).rejects.toMatchObject({
+          _tag: "ProcessFailure",
+          kind: "output-limit",
+        });
+        expect(processIsAlive(Number(readFileSync(parentPidPath, "utf8")))).toBe(false);
+        expect(processIsAlive(Number(readFileSync(childPidPath, "utf8")))).toBe(false);
+      });
+    },
+    10_000,
+  );
 
   it.skipIf(process.platform === "win32")(
     "terminates the complete command process group on cancellation",

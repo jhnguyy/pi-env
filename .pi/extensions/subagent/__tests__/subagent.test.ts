@@ -17,7 +17,7 @@ const mockTheme = {
   bold: (text: string) => text,
 };
 
-const hints = expansionHints("alt+e");
+const hints = { ...expansionHints, args: {}, isError: false };
 
 // ─── Mock ExtensionAPI ────────────────────────────────────────────────────────
 
@@ -98,8 +98,8 @@ describe("subagent extension", () => {
       };
 
       const context = {
-        args: { action: "result", job_id: "job-1" },
         ...hints,
+        args: { action: "result", job_id: "job-1" },
       };
       const collapsed = extractText(registeredTool.renderResult(result, {}, mockTheme, context));
       expect(collapsed).toContain("completed");

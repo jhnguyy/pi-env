@@ -11,7 +11,7 @@ const recordingTheme = {
 
 const context = {
   isError: false,
-  ...expansionHints("alt+e"),
+  ...expansionHints,
 };
 
 describe("review tool rendering", () => {

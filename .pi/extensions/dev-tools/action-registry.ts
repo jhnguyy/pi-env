@@ -18,7 +18,8 @@ import type {
   PublicLspAction,
 } from "./protocol";
 import type { HandlerDeps } from "./handlers";
-import type { KeybindingHints } from "@earendil-works/pi-coding-agent";
+import type { ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
+import type { ToolResultRenderContext } from "../_shared/tool-render";
 import type { RenderTheme } from "./render-contracts";
 import type { Text } from "@earendil-works/pi-tui";
 
@@ -31,9 +32,9 @@ export type ActionHandler = (
 export type ResultFormatter = (result: any) => string;
 export type ResultRenderer = (
   result: any,
-  opts: { expanded?: boolean },
+  opts: Pick<ToolRenderResultOptions, "expanded">,
   theme: RenderTheme,
-  hints: KeybindingHints,
+  context: ToolResultRenderContext,
 ) => Text;
 
 interface ActionEntry {

@@ -15,7 +15,7 @@ export const ProcessFailureKind = {
   OutputLimit: "output-limit",
   Interrupted: "interrupted",
 } as const;
-export type ProcessFailureKind = typeof ProcessFailureKind[keyof typeof ProcessFailureKind];
+export type ProcessFailureKind = (typeof ProcessFailureKind)[keyof typeof ProcessFailureKind];
 
 export class ProcessFailure extends Data.TaggedError("ProcessFailure")<{
   readonly kind: ProcessFailureKind;
@@ -37,12 +37,19 @@ export interface StreamProcessOptions extends ProcessOptions {
   readonly stdin?: string | Uint8Array;
   readonly stdoutLimitBytes?: number;
   readonly stderrLimitBytes?: number;
+  /** Optional shared budget, enforced in addition to each stream's limit. */
+  readonly combinedOutputLimitBytes?: number;
 }
 export interface ScopedChildProcessOptions extends ProcessOptions {
   readonly stdio?: SpawnOptions["stdio"];
 }
-export interface ProcessOutput { readonly stdout: string; readonly stderr: string }
-export interface ProcessCommandResult extends ProcessOutput { readonly exitCode: number }
+export interface ProcessOutput {
+  readonly stdout: string;
+  readonly stderr: string;
+}
+export interface ProcessCommandResult extends ProcessOutput {
+  readonly exitCode: number;
+}
 
 export const ProcessEnvironmentName = {
   NodeBinary: "PI_ENV_NODE_BIN",
@@ -58,22 +65,35 @@ export function resolveNodeCommand(
   return configured ? configured : execPath;
 }
 
-function validatePositiveInteger(value: number, name: string, command: string): ProcessFailure | undefined {
+function validatePositiveInteger(
+  value: number,
+  name: string,
+  command: string,
+): ProcessFailure | undefined {
   return Number.isInteger(value) && value > 0
     ? undefined
-    : new ProcessFailure({ kind: ProcessFailureKind.Spawn, command, message: `${name} must be a positive integer` });
+    : new ProcessFailure({
+        kind: ProcessFailureKind.Spawn,
+        command,
+        message: `${name} must be a positive integer`,
+      });
 }
 
-function validateNonNegativeInteger(value: number, name: string, command: string): ProcessFailure | undefined {
+function validateNonNegativeInteger(
+  value: number,
+  name: string,
+  command: string,
+): ProcessFailure | undefined {
   return Number.isInteger(value) && value >= 0
     ? undefined
-    : new ProcessFailure({ kind: ProcessFailureKind.Spawn, command, message: `${name} must be a non-negative integer` });
+    : new ProcessFailure({
+        kind: ProcessFailureKind.Spawn,
+        command,
+        message: `${name} must be a non-negative integer`,
+      });
 }
 
-function spawnOptions(
-  options: ProcessOptions,
-  stdio: SpawnOptions["stdio"],
-): SpawnOptions {
+function spawnOptions(options: ProcessOptions, stdio: SpawnOptions["stdio"]): SpawnOptions {
   return {
     cwd: options.cwd,
     env: options.env,
@@ -88,7 +108,12 @@ function directChildIsOpen(proc: ChildProcess): boolean {
 
 /** Signal the POSIX process group when available, with a direct-child fallback. */
 function signalChildTree(proc: ChildProcess, signal: NodeJS.Signals): void {
-  if (process.platform !== "win32" && proc.pid !== undefined && proc.pid > 0 && proc.pid !== process.pid) {
+  if (
+    process.platform !== "win32" &&
+    proc.pid !== undefined &&
+    proc.pid > 0 &&
+    proc.pid !== process.pid
+  ) {
     try {
       process.kill(-proc.pid, signal);
       return;
@@ -97,7 +122,11 @@ function signalChildTree(proc: ChildProcess, signal: NodeJS.Signals): void {
     }
   }
   if (!directChildIsOpen(proc)) return;
-  try { proc.kill(signal); } catch { /* already gone */ }
+  try {
+    proc.kill(signal);
+  } catch {
+    /* already gone */
+  }
 }
 
 function waitForClose(proc: ChildProcess): Promise<void> {
@@ -106,7 +135,10 @@ function waitForClose(proc: ChildProcess): Promise<void> {
 }
 
 /** TERM the tree, escalate after the grace period, and do not return before the direct child closes. */
-export async function terminateAndWait(proc: ChildProcess, graceMs: number = DEFAULT_KILL_GRACE_MS): Promise<void> {
+export async function terminateAndWait(
+  proc: ChildProcess,
+  graceMs: number = DEFAULT_KILL_GRACE_MS,
+): Promise<void> {
   if (!directChildIsOpen(proc)) {
     // A cooperative parent may exit before descendants. Clean the still-owned
     // POSIX group during immediate scope release; Windows has no group fallback.
@@ -148,29 +180,43 @@ function spawnStarted(
       resume(effect);
     };
     const onSpawn = (): void => finish(Effect.succeed(proc));
-    const onError = (cause: Error): void => finish(Effect.fail(new ProcessFailure({
-      kind: ProcessFailureKind.Spawn,
-      command,
-      message: cause.message,
-    })));
+    const onError = (cause: Error): void =>
+      finish(
+        Effect.fail(
+          new ProcessFailure({
+            kind: ProcessFailureKind.Spawn,
+            command,
+            message: cause.message,
+          }),
+        ),
+      );
 
     try {
-      proc = spawn(command, [...args], spawnOptions(options, options.stdio ?? ["pipe", "pipe", "pipe"]));
+      proc = spawn(
+        command,
+        [...args],
+        spawnOptions(options, options.stdio ?? ["pipe", "pipe", "pipe"]),
+      );
       proc.once("spawn", onSpawn);
       proc.once("error", onError);
     } catch (cause) {
-      resume(Effect.fail(new ProcessFailure({
-        kind: ProcessFailureKind.Spawn,
-        command,
-        message: cause instanceof Error ? cause.message : String(cause),
-      })));
+      resume(
+        Effect.fail(
+          new ProcessFailure({
+            kind: ProcessFailureKind.Spawn,
+            command,
+            message: cause instanceof Error ? cause.message : String(cause),
+          }),
+        ),
+      );
       return;
     }
 
     return Effect.promise(async () => {
       proc.off("spawn", onSpawn);
       proc.off("error", onError);
-      if (!settled || signal.aborted) await terminateAndWait(proc, options.killGraceMs ?? DEFAULT_KILL_GRACE_MS);
+      if (!settled || signal.aborted)
+        await terminateAndWait(proc, options.killGraceMs ?? DEFAULT_KILL_GRACE_MS);
     });
   });
 }
@@ -182,12 +228,12 @@ export function scopedChildProcess(
 ): Effect.Effect<ChildProcess, ProcessFailure, Scope> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_EXTERNAL_TIMEOUT_MS;
   const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
-  const invalid = validatePositiveInteger(timeoutMs, "timeoutMs", command)
-    ?? validateNonNegativeInteger(killGraceMs, "killGraceMs", command);
+  const invalid =
+    validatePositiveInteger(timeoutMs, "timeoutMs", command) ??
+    validateNonNegativeInteger(killGraceMs, "killGraceMs", command);
   if (invalid) return Effect.fail(invalid);
-  return Effect.acquireRelease(
-    spawnStarted(command, args, options),
-    (proc) => Effect.promise(() => terminateAndWait(proc, killGraceMs)),
+  return Effect.acquireRelease(spawnStarted(command, args, options), (proc) =>
+    Effect.promise(() => terminateAndWait(proc, killGraceMs)),
   );
 }
 
@@ -199,7 +245,11 @@ function waitForExit(command: string, proc: ChildProcess): Effect.Effect<number,
     };
     const onError = (cause: Error): void => {
       cleanup();
-      resume(Effect.fail(new ProcessFailure({ kind: ProcessFailureKind.Exit, command, message: cause.message })));
+      resume(
+        Effect.fail(
+          new ProcessFailure({ kind: ProcessFailureKind.Exit, command, message: cause.message }),
+        ),
+      );
     };
     const onClose = (code: number | null, closeSignal: NodeJS.Signals | null): void => {
       cleanup();
@@ -211,11 +261,15 @@ function waitForExit(command: string, proc: ChildProcess): Effect.Effect<number,
         resume(Effect.succeed(128 + osConstants.signals[closeSignal]));
         return;
       }
-      resume(Effect.fail(new ProcessFailure({
-        kind: ProcessFailureKind.Exit,
-        command,
-        message: `Process exited without a code or signal: ${command}`,
-      })));
+      resume(
+        Effect.fail(
+          new ProcessFailure({
+            kind: ProcessFailureKind.Exit,
+            command,
+            message: `Process exited without a code or signal: ${command}`,
+          }),
+        ),
+      );
     };
     proc.once("error", onError);
     proc.once("close", onClose);
@@ -231,22 +285,34 @@ export function runInheritedProcess(
 ): Effect.Effect<number, ProcessFailure> {
   const timeoutMs = options.timeoutMs;
   const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
-  const invalid = (timeoutMs === undefined ? undefined : validatePositiveInteger(timeoutMs, "timeoutMs", command))
-    ?? validateNonNegativeInteger(killGraceMs, "killGraceMs", command);
+  const invalid =
+    (timeoutMs === undefined
+      ? undefined
+      : validatePositiveInteger(timeoutMs, "timeoutMs", command)) ??
+    validateNonNegativeInteger(killGraceMs, "killGraceMs", command);
   if (invalid) return Effect.fail(invalid);
-  const running = scopedChildProcess(command, args, { ...options, killGraceMs, stdio: "inherit" }).pipe(
-    Effect.flatMap((proc) => waitForExit(command, proc)),
+  const running = scopedChildProcess(command, args, {
+    ...options,
+    killGraceMs,
+    stdio: "inherit",
+  }).pipe(Effect.flatMap((proc) => waitForExit(command, proc)));
+  return Effect.scoped(
+    timeoutMs === undefined
+      ? running
+      : running.pipe(
+          Effect.timeoutOrElse({
+            duration: timeoutMs,
+            orElse: () =>
+              Effect.fail(
+                new ProcessFailure({
+                  kind: ProcessFailureKind.Timeout,
+                  command,
+                  message: `Process timed out after ${timeoutMs}ms: ${command}`,
+                }),
+              ),
+          }),
+        ),
   );
-  return Effect.scoped(timeoutMs === undefined
-    ? running
-    : running.pipe(Effect.timeoutOrElse({
-      duration: timeoutMs,
-      orElse: () => Effect.fail(new ProcessFailure({
-        kind: ProcessFailureKind.Timeout,
-        command,
-        message: `Process timed out after ${timeoutMs}ms: ${command}`,
-      })),
-    })));
 }
 
 function collectProcess(
@@ -271,10 +337,18 @@ function collectProcess(
   const stdoutLimit = options.stdoutLimitBytes ?? options.maxBuffer ?? DEFAULT_STREAM_LIMIT_BYTES;
   const stderrLimit = options.stderrLimitBytes ?? options.maxBuffer ?? DEFAULT_STREAM_LIMIT_BYTES;
   const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
-  const invalid = validatePositiveInteger(timeoutMs, "timeoutMs", command)
-    ?? validateNonNegativeInteger(stdoutLimit, "stdoutLimitBytes", command)
-    ?? validateNonNegativeInteger(stderrLimit, "stderrLimitBytes", command)
-    ?? validateNonNegativeInteger(killGraceMs, "killGraceMs", command);
+  const invalid =
+    validatePositiveInteger(timeoutMs, "timeoutMs", command) ??
+    validateNonNegativeInteger(stdoutLimit, "stdoutLimitBytes", command) ??
+    validateNonNegativeInteger(stderrLimit, "stderrLimitBytes", command) ??
+    (options.combinedOutputLimitBytes === undefined
+      ? undefined
+      : validateNonNegativeInteger(
+          options.combinedOutputLimitBytes,
+          "combinedOutputLimitBytes",
+          command,
+        )) ??
+    validateNonNegativeInteger(killGraceMs, "killGraceMs", command);
   if (invalid) return Effect.fail(invalid);
 
   return Effect.callback<ProcessOutput, ProcessFailure>((resume, signal) => {
@@ -321,79 +395,121 @@ function collectProcess(
       const chunks = stream === "stdout" ? stdout : stderr;
       const current = stream === "stdout" ? stdoutBytes : stderrBytes;
       const limit = stream === "stdout" ? stdoutLimit : stderrLimit;
-      const remaining = Math.max(0, limit - current);
+      const combinedRemaining =
+        options.combinedOutputLimitBytes === undefined
+          ? Infinity
+          : options.combinedOutputLimitBytes - stdoutBytes - stderrBytes;
+      const remaining = Math.max(0, Math.min(limit - current, combinedRemaining));
       if (remaining > 0) chunks.push(chunk.subarray(0, remaining));
       if (stream === "stdout") stdoutBytes += Math.min(chunk.length, remaining);
       else stderrBytes += Math.min(chunk.length, remaining);
       if (chunk.length > remaining) {
-        failAndTerminate(new ProcessFailure({
-          kind: ProcessFailureKind.OutputLimit,
-          command,
-          message: `${stream} exceeded ${limit} bytes`,
-          ...output(),
-        }));
+        failAndTerminate(
+          new ProcessFailure({
+            kind: ProcessFailureKind.OutputLimit,
+            command,
+            message:
+              combinedRemaining < chunk.length
+                ? `combined output exceeded ${options.combinedOutputLimitBytes} bytes`
+                : `${stream} exceeded ${limit} bytes`,
+            ...output(),
+          }),
+        );
       }
     };
     const onStdout = (chunk: Buffer): void => collect("stdout", chunk);
     const onStderr = (chunk: Buffer): void => collect("stderr", chunk);
-    const onError = (cause: Error): void => failAndTerminate(new ProcessFailure({
-      kind: ProcessFailureKind.Spawn,
-      command,
-      message: cause.message,
-      ...output(),
-    }));
+    const onError = (cause: Error): void =>
+      failAndTerminate(
+        new ProcessFailure({
+          kind: ProcessFailureKind.Spawn,
+          command,
+          message: cause.message,
+          ...output(),
+        }),
+      );
     const onClose = (code: number | null, closeSignal: NodeJS.Signals | null): void => {
       closed = true;
       const value = output();
       if (terminalError) {
-        void (termination ?? Promise.resolve()).then(() => settle(Effect.fail(new ProcessFailure({ ...terminalError!, ...value }))));
+        const failure = terminalError;
+        void (termination ?? Promise.resolve()).then(() =>
+          settle(
+            Effect.fail(
+              new ProcessFailure({
+                ...failure,
+                message: failure.message,
+                ...value,
+              }),
+            ),
+          ),
+        );
       } else if (code === null && closeSignal) {
-        settle(Effect.fail(new ProcessFailure({
-          kind: ProcessFailureKind.Exit,
-          command,
-          message: `Process exited with code unknown (${closeSignal}): ${command}`,
-          ...value,
-        })));
+        settle(
+          Effect.fail(
+            new ProcessFailure({
+              kind: ProcessFailureKind.Exit,
+              command,
+              message: `Process exited with code unknown (${closeSignal}): ${command}`,
+              ...value,
+            }),
+          ),
+        );
       } else if (preserveExit) {
         settle(Effect.succeed({ ...value, exitCode: code ?? 1 }));
       } else if (code !== 0) {
-        settle(Effect.fail(new ProcessFailure({
-          kind: ProcessFailureKind.Exit,
-          command,
-          message: `Process exited with code ${code ?? "unknown"}${closeSignal ? ` (${closeSignal})` : ""}: ${command}`,
-          exitCode: code ?? undefined,
-          ...value,
-        })));
+        settle(
+          Effect.fail(
+            new ProcessFailure({
+              kind: ProcessFailureKind.Exit,
+              command,
+              message: `Process exited with code ${code ?? "unknown"}${closeSignal ? ` (${closeSignal})` : ""}: ${command}`,
+              exitCode: code ?? undefined,
+              ...value,
+            }),
+          ),
+        );
       } else {
         settle(Effect.succeed(value));
       }
     };
 
-    const timeoutTimer = setTimeout(() => failAndTerminate(new ProcessFailure({
-      kind: ProcessFailureKind.Timeout,
-      command,
-      message: `Process timed out after ${timeoutMs}ms: ${command}`,
-      ...output(),
-    })), timeoutMs);
+    const timeoutTimer = setTimeout(
+      () =>
+        failAndTerminate(
+          new ProcessFailure({
+            kind: ProcessFailureKind.Timeout,
+            command,
+            message: `Process timed out after ${timeoutMs}ms: ${command}`,
+            ...output(),
+          }),
+        ),
+      timeoutMs,
+    );
     timeoutTimer.unref();
 
     try {
-      child = spawn(command, [...args], spawnOptions(
-        options,
-        [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-      ));
+      child = spawn(
+        command,
+        [...args],
+        spawnOptions(options, [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"]),
+      );
       child.stdout?.on("data", onStdout);
       child.stderr?.on("data", onStderr);
       child.once("error", onError);
       child.once("close", onClose);
       if (options.stdin !== undefined) child.stdin?.end(options.stdin);
     } catch (cause) {
-      settle(Effect.fail(new ProcessFailure({
-        kind: ProcessFailureKind.Spawn,
-        command,
-        message: cause instanceof Error ? cause.message : String(cause),
-        ...output(),
-      })));
+      settle(
+        Effect.fail(
+          new ProcessFailure({
+            kind: ProcessFailureKind.Spawn,
+            command,
+            message: cause instanceof Error ? cause.message : String(cause),
+            ...output(),
+          }),
+        ),
+      );
     }
 
     return Effect.promise(async () => {

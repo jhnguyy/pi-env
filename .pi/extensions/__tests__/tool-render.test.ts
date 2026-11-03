@@ -1,14 +1,12 @@
 import "./tui-setup";
 import { componentText, expansionHints } from "./rendering";
 import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import {
   WidthBoundedText,
-  toolExpandHint,
-  registerPublicTool,
   renderTextToolResult,
   shortDescription,
+  toolExpandHint,
 } from "../_shared/tool-render";
 
 describe("shared compact tool rendering", () => {
@@ -36,48 +34,37 @@ describe("shared compact tool rendering", () => {
     expect(line).toContain("\u001b[0m");
   });
 
-  it("uses the Pi render context for generic error presentation", () => {
+  it("uses the Pi error context and reveals complete content on expansion", () => {
     const theme = {
       fg: (style: string, text: string) => `<${style}>${text}</${style}>`,
       bold: (text: string) => text,
     };
-    const rendered = renderTextToolResult(
-      "sample",
-      { content: [{ type: "text", text: "denied" }], details: undefined },
-      { expanded: false, isPartial: false },
-      theme,
-      { isError: true, ...expansionHints("") },
+    const output = `denied: ${"details ".repeat(20)}`;
+    const context = { isError: true, ...expansionHints };
+    const result = { content: [{ type: "text" as const, text: output }], details: undefined };
+    const collapsed = componentText(
+      renderTextToolResult("sample", result, { expanded: false, isPartial: false }, theme, context),
     );
-    expect(componentText(rendered)).toContain("<error>✗</error>");
+    expect(collapsed).toContain("<error>✗</error>");
+    expect(collapsed).toContain("denied");
+    expect(collapsed).not.toContain(output);
+    const expanded = componentText(
+      renderTextToolResult("sample", result, { expanded: true, isPartial: false }, theme, context),
+    );
+    expect(expanded).toContain(output);
+    expect(expanded).not.toContain("host hint");
   });
 
-  it("requires injected hints at compile time", () => {
+  it("decorates enabled host hints and omits disabled hints without formatting them", () => {
     const theme = { fg: (_style: string, text: string) => text };
-    void (() => {
-      // @ts-expect-error Expansion hints require host-injected bindings.
-      toolExpandHint(theme);
-      // @ts-expect-error Result rendering requires the host context even when expanded.
-      renderTextToolResult(
-        "sample",
-        { content: [], details: {} },
-        { expanded: true, isPartial: false },
-        theme,
-      );
-    });
-  });
-
-  it("requires both render hooks at compile time at the public registration boundary", () => {
-    const host = { registerTool: () => undefined };
-    // @ts-expect-error Public Pi tools must provide renderCall and renderResult.
-    registerPublicTool(host, {
-      name: "incomplete",
-      label: "Incomplete",
-      description: "An intentionally incomplete test tool.",
-      parameters: Type.Object({}),
-      execute: async () => ({
-        content: [{ type: "text" as const, text: "done" }],
-        details: undefined,
+    expect(toolExpandHint(theme, expansionHints)).toBe("(host hint)");
+    expect(
+      toolExpandHint(theme, {
+        keyText: () => "",
+        keyHint: () => {
+          throw new Error("Disabled hints must not be formatted");
+        },
       }),
-    });
+    ).toBe("");
   });
 });

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 
-const [pidPath, childPidPath] = process.argv.slice(2);
+const [pidPath, childPidPath, overflow] = process.argv.slice(2);
 if (!pidPath) throw new Error("A fixture PID path is required");
 
 // Self-owned failure insurance cannot signal an unrelated process after PID reuse.
@@ -16,4 +16,12 @@ if (childPidPath) {
   spawn(process.execPath, [import.meta.filename, childPidPath], { stdio: "ignore" });
 }
 writeFileSync(pidPath, String(process.pid));
+if (overflow && childPidPath) {
+  const ready = setInterval(() => {
+    if (!existsSync(childPidPath)) return;
+    clearInterval(ready);
+    process.stdout.write("abc");
+    process.stderr.write("def");
+  }, 10);
+}
 setInterval(() => {}, 1_000);

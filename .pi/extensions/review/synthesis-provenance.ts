@@ -3,7 +3,6 @@ import {
   ReviewerRoles,
   type AdmittedRawFinding,
   type ConsolidationReviewV2,
-  type Finding,
   type FindingInput,
   type RawFindingRecord,
   type ReviewArtifactReference,
@@ -127,7 +126,7 @@ export function consolidateSynthesis(
         rawFindingIds: [...rawFindingIds],
         sourceReviewers: sources,
         agreement: sources.length,
-      } as Finding;
+      };
     }),
     provenance: {
       v: 2,
@@ -146,15 +145,12 @@ export function fallbackConsolidation(
 ): ReviewResult {
   return {
     verdict: `Reviewer consolidation failed. Every admitted raw finding is preserved below. ${reason}`,
-    findings: rawFindings.map(
-      (raw) =>
-        ({
-          ...raw.finding,
-          rawFindingIds: [raw.id],
-          sourceReviewers: [raw.role],
-          agreement: 1,
-        }) as Finding,
-    ),
+    findings: rawFindings.map((raw) => ({
+      ...raw.finding,
+      rawFindingIds: [raw.id],
+      sourceReviewers: [raw.role],
+      agreement: 1,
+    })),
     coverage: { status: "degraded", succeeded: [], failed: [], malformed: [] },
     provenance: {
       v: 2,

@@ -515,10 +515,10 @@ export default function webContext(pi: ExtensionAPI) {
 
       const details = result.details as (WebFetchResult & { error?: string }) | undefined;
       const expandHint = toolExpandHint(theme, context);
-      if (!details)
-        return new Text(`${theme.fg("muted", "Web fetch complete")}\n${expandHint}`, 0, 0);
+      const hintLine = expandHint ? `\n${expandHint}` : "";
+      if (!details) return new Text(`${theme.fg("muted", "Web fetch complete")}${hintLine}`, 0, 0);
       if (details.error)
-        return new Text(`${theme.fg("error", `✗ ${details.error}`)}\n${expandHint}`, 0, 0);
+        return new Text(`${theme.fg("error", `✗ ${details.error}`)}${hintLine}`, 0, 0);
 
       const contentType = details.contentType?.split(";", 1)[0] ?? "unknown";
       const statusColor = details.status >= 400 ? "warning" : "success";
@@ -530,7 +530,7 @@ export default function webContext(pi: ExtensionAPI) {
       const lines = [summary];
       if (preview.text) lines.push(theme.fg("toolOutput", preview.text));
       if (preview.truncated) lines.push(theme.fg("muted", "... output preview truncated"));
-      lines.push(expandHint);
+      if (expandHint) lines.push(expandHint);
       return new Text(lines.join("\n"), 0, 0);
     },
   });

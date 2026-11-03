@@ -1,4 +1,3 @@
-import type { TSchema } from "typebox";
 import { Type } from "typebox";
 import type { ToolCapability } from "../_shared/agent-tools";
 
@@ -14,14 +13,14 @@ export const DevToolsAction = {
   Symbols: "symbols",
   Status: "status",
 } as const;
-export type DevToolsAction = typeof DevToolsAction[keyof typeof DevToolsAction];
+export type DevToolsAction = (typeof DevToolsAction)[keyof typeof DevToolsAction];
 
 export const DevToolsPathMode = {
   None: "none",
   Single: "single",
   Many: "many",
 } as const;
-export type DevToolsPathMode = typeof DevToolsPathMode[keyof typeof DevToolsPathMode];
+export type DevToolsPathMode = (typeof DevToolsPathMode)[keyof typeof DevToolsPathMode];
 
 export interface DevToolsActionContract {
   readonly pathMode: DevToolsPathMode;
@@ -46,7 +45,13 @@ const POSITION_ACTION_CONTRACT = {
 } as const;
 
 export const DEV_TOOLS_ACTION_CONTRACTS = {
-  [DevToolsAction.Diagnostics]: { ...READ_ACTION_CONTRACT, pathMode: DevToolsPathMode.Many, requiresPath: true, needsPosition: false, requiresPathOrQuery: false },
+  [DevToolsAction.Diagnostics]: {
+    ...READ_ACTION_CONTRACT,
+    pathMode: DevToolsPathMode.Many,
+    requiresPath: true,
+    needsPosition: false,
+    requiresPathOrQuery: false,
+  },
   [DevToolsAction.Hover]: POSITION_ACTION_CONTRACT,
   [DevToolsAction.Definition]: POSITION_ACTION_CONTRACT,
   [DevToolsAction.Implementation]: POSITION_ACTION_CONTRACT,
@@ -58,8 +63,20 @@ export const DEV_TOOLS_ACTION_CONTRACTS = {
   },
   [DevToolsAction.IncomingCalls]: POSITION_ACTION_CONTRACT,
   [DevToolsAction.OutgoingCalls]: POSITION_ACTION_CONTRACT,
-  [DevToolsAction.Symbols]: { ...READ_ACTION_CONTRACT, pathMode: DevToolsPathMode.Single, requiresPath: false, needsPosition: false, requiresPathOrQuery: true },
-  [DevToolsAction.Status]: { ...READ_ACTION_CONTRACT, pathMode: DevToolsPathMode.None, requiresPath: false, needsPosition: false, requiresPathOrQuery: false },
+  [DevToolsAction.Symbols]: {
+    ...READ_ACTION_CONTRACT,
+    pathMode: DevToolsPathMode.Single,
+    requiresPath: false,
+    needsPosition: false,
+    requiresPathOrQuery: true,
+  },
+  [DevToolsAction.Status]: {
+    ...READ_ACTION_CONTRACT,
+    pathMode: DevToolsPathMode.None,
+    requiresPath: false,
+    needsPosition: false,
+    requiresPathOrQuery: false,
+  },
 } as const satisfies Record<DevToolsAction, DevToolsActionContract>;
 
 export const DEV_TOOLS_ACTIONS = Object.values(DevToolsAction);
@@ -68,8 +85,7 @@ export const DEV_TOOLS_TOOL_DESCRIPTIONS = {
   path:
     "Absolute path to the file. Required for diagnostics, hover, definition, implementation, references, rename, call hierarchy, and document symbols. " +
     "For diagnostics, pass an array to check all files in one call.",
-  line:
-    "Line number in the file, 1-indexed. Required for hover, definition, implementation, references, rename, and call hierarchy.",
+  line: "Line number in the file, 1-indexed. Required for hover, definition, implementation, references, rename, and call hierarchy.",
   character:
     "Column number on the line, 1-indexed. Required for hover, definition, implementation, references, rename, and call hierarchy.",
   query: "Search query for workspace symbols (action=symbols without path).",
@@ -80,26 +96,37 @@ export function getActionContract(action: DevToolsAction): DevToolsActionContrac
   return DEV_TOOLS_ACTION_CONTRACTS[action];
 }
 
-export function createDevToolsParameterSchema<const TAction extends TSchema>(actionEnum: TAction) {
-  return Type.Object({
-    action: actionEnum,
-    path: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())], {
+export const devToolsParameters = Type.Object({
+  action: Type.Enum(DEV_TOOLS_ACTIONS, {
+    type: "string",
+    description: DEV_TOOLS_TOOL_DESCRIPTIONS.action,
+  }),
+  path: Type.Optional(
+    Type.Union([Type.String(), Type.Array(Type.String())], {
       description: DEV_TOOLS_TOOL_DESCRIPTIONS.path,
-    })),
-    line: Type.Optional(Type.Integer({
+    }),
+  ),
+  line: Type.Optional(
+    Type.Integer({
       minimum: 1,
       description: DEV_TOOLS_TOOL_DESCRIPTIONS.line,
-    })),
-    character: Type.Optional(Type.Integer({
+    }),
+  ),
+  character: Type.Optional(
+    Type.Integer({
       minimum: 1,
       description: DEV_TOOLS_TOOL_DESCRIPTIONS.character,
-    })),
-    query: Type.Optional(Type.String({
+    }),
+  ),
+  query: Type.Optional(
+    Type.String({
       description: DEV_TOOLS_TOOL_DESCRIPTIONS.query,
-    })),
-    newName: Type.Optional(Type.String({
+    }),
+  ),
+  newName: Type.Optional(
+    Type.String({
       minLength: 1,
       description: DEV_TOOLS_TOOL_DESCRIPTIONS.newName,
-    })),
-  });
-}
+    }),
+  ),
+});
