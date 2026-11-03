@@ -55,7 +55,9 @@ After changing SSH integration, open a fresh Ghostty window and SSH connection. 
 
 ## Slack reference
 
-Setup does not configure Slack. These strings are reference material and may need adjustment for Slack's current interface.
+Setup does not configure Slack. Import one of these strings as a Slack custom theme. Slack's four colors (navigation, selected items, presence, notifications) map to bg0, orange focus, green, and red:
 
-- Dark: `#282828,#3c3836,#fe8019,#282828,#504945,#ebdbb2,#b8bb26,#fb4934,#1d2021,#ebdbb2`
-- Light: `#fbf1c7,#ebdbb2,#af3a03,#fbf1c7,#d5c4a1,#3c3836,#79740e,#9d0006,#f9f5d7,#3c3836`
+- Dark: `#282828,#fe8019,#b8bb26,#fb4934`
+- Light: `#fbf1c7,#af3a03,#79740e,#9d0006`
+
+Slack chooses text colors itself, so the chrome contrast targets above do not carry over. A custom theme does not follow the OS appearance: switch strings manually, or keep one string with a fixed Slack color mode.
