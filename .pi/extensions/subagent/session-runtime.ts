@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Effect, Result } from "effect";
@@ -20,12 +19,7 @@ import {
   SubagentAdmissionError,
   type SubagentRunSupervisor,
 } from "./control";
-import { DagSessionRuntime, type DagSubagentExecutorRegistryFactory } from "./dag-session-runtime";
-import {
-  buildErrorDetails,
-  runSubagentEffect,
-  SUBAGENT_TELEMETRY_SERVICE_NAME,
-} from "./execute";
+import { buildErrorDetails, runSubagentEffect, SUBAGENT_TELEMETRY_SERVICE_NAME } from "./execute";
 import { SubagentJobManager, type SubagentJob } from "./jobs";
 import { isResolutionOk, resolveEffectiveCwd, type SubagentParams } from "./resolver";
 import {
@@ -39,7 +33,6 @@ import { formatUsageCompact, SubagentUsageLedger } from "./usage";
 
 export interface SubagentSessionRuntimeDependencies {
   readonly telemetryRuntimeFactory?: typeof createToolingTelemetryRuntime;
-  readonly dagExecutorRegistryFactory?: DagSubagentExecutorRegistryFactory;
 }
 
 const ACTIVE_JOB_STATUSES = new Set<SubagentJobStatus>([
@@ -93,7 +86,6 @@ export class SubagentSessionRuntime {
   private sessionStorage: SubagentRuntimeConfig["sessionStorage"] =
     DEFAULT_SUBAGENT_CONFIG.sessionStorage;
   private jobs: SubagentJobManager | undefined;
-  private dagRuntime: DagSessionRuntime | undefined;
   private sessionState: SubagentSessionStateValue = SubagentSessionState.Inactive;
   private lifecycleGeneration = 0;
   private transitionTail: Promise<void> = Promise.resolve();
@@ -117,7 +109,10 @@ export class SubagentSessionRuntime {
     const supervisor = this.supervisor;
     if (this.sessionState !== SubagentSessionState.Active || !supervisor) {
       const details = buildErrorDetails(params, [], params.model, "inactive");
-      return Promise.resolve({ content: [{ type: "text", text: "Parent subagent session is not active." }], details });
+      return Promise.resolve({
+        content: [{ type: "text", text: "Parent subagent session is not active." }],
+        details,
+      });
     }
     return Effect.runPromise(
       Effect.catch(
@@ -156,7 +151,8 @@ export class SubagentSessionRuntime {
   }
 
   inputChild(id: string, text: string, mode: ChildTypes.NativeInputMode) {
-    if (this.sessionState !== SubagentSessionState.Active) throw new Error("Parent subagent session is not active.");
+    if (this.sessionState !== SubagentSessionState.Active)
+      throw new Error("Parent subagent session is not active.");
     const child = this.supervisor?.children.get(id);
     if (!child) throw new Error("Child session is no longer retained.");
     return child.input(text, mode);
@@ -172,7 +168,6 @@ export class SubagentSessionRuntime {
     const generation = ++this.lifecycleGeneration;
     this.sessionState = SubagentSessionState.ShuttingDown;
     renderActiveJobStatusSlot([], ctx);
-    this.dagRuntime?.stopAccepting();
     return this.enqueueTransition(async () => {
       await this.disposeActiveResources();
       if (generation !== this.lifecycleGeneration) return false;
@@ -205,35 +200,12 @@ export class SubagentSessionRuntime {
         supervisor,
         (jobs) => this.updateJobStatusSlot(jobs, ctx),
       );
-      let dagRuntime: DagSessionRuntime;
-      try {
-        dagRuntime = await DagSessionRuntime.create(this.pi, ctx, {
-          sessionGeneration: randomUUID(),
-          supervisor,
-          telemetryRuntime: nextRuntime,
-          ledger: this.ledger,
-          sessionStorage: config.sessionStorage,
-          executorRegistryFactory: this.dependencies.dagExecutorRegistryFactory,
-        });
-      } catch (cause) {
-        await disposeSubagentRunSupervisor(sessionId);
-        await this.disposeTelemetry(nextRuntime);
-        throw cause;
-      }
-      if (generation !== this.lifecycleGeneration) {
-        await dagRuntime.dispose();
-        await disposeSubagentRunSupervisor(sessionId);
-        await this.disposeTelemetry(nextRuntime);
-        return false;
-      }
-
       this.ledger.clear();
       this.telemetryRuntime = nextRuntime;
       this.supervisor = supervisor;
       this.supervisorSessionId = sessionId;
       this.sessionStorage = config.sessionStorage;
       this.jobs = jobs;
-      this.dagRuntime = dagRuntime;
       this.sessionState = SubagentSessionState.Active;
       this.updateJobStatusSlot([], ctx);
       return true;
@@ -244,7 +216,6 @@ export class SubagentSessionRuntime {
     const generation = ++this.lifecycleGeneration;
     this.sessionState = SubagentSessionState.ShuttingDown;
     if (ctx) renderActiveJobStatusSlot([], ctx);
-    this.dagRuntime?.stopAccepting();
     return this.enqueueTransition(async () => {
       try {
         await this.disposeActiveResources();
@@ -352,10 +323,8 @@ export class SubagentSessionRuntime {
 
   private async disposeActiveResources(): Promise<void> {
     const manager = this.jobs;
-    const dagRuntime = this.dagRuntime;
     const runtime = this.telemetryRuntime;
     const supervisorSessionId = this.supervisorSessionId;
-    const dagDisposal = dagRuntime?.dispose();
     let failure: unknown;
     const settle = async (operation: Promise<unknown> | undefined): Promise<void> => {
       try {
@@ -366,12 +335,10 @@ export class SubagentSessionRuntime {
     };
 
     await settle(manager?.shutdown());
-    await settle(dagDisposal);
     await settle(
       supervisorSessionId ? disposeSubagentRunSupervisor(supervisorSessionId) : undefined,
     );
     this.jobs = undefined;
-    this.dagRuntime = undefined;
     this.supervisor = undefined;
     this.supervisorSessionId = undefined;
     this.sessionStorage = DEFAULT_SUBAGENT_CONFIG.sessionStorage;

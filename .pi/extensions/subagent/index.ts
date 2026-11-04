@@ -17,12 +17,6 @@ import * as ChildContext from "../_shared/child-context";
 import * as Transcript from "./transcript";
 import * as AgentSettings from "../_shared/agent-settings";
 import * as ToolRender from "../_shared/tool-render";
-export {
-  DagSubagentAdapterFailure,
-  DagSubagentExecutorKey,
-  createDagSubagentExecutorRegistry,
-  makeDagSubagentRuntime,
-} from "./dag-runtime";
 
 export const SubagentAction = {
   Run: "run",

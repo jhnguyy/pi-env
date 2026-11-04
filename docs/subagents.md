@@ -28,7 +28,7 @@ A completed initial result stays unchanged when a human continues the child. Use
 
 ## Direct interaction
 
-Run `/subagents` in terminal mode. The roster includes retained blocking children, background children, and internal native DAG children. Type to search; use the arrow keys and Enter to select a child.
+Run `/subagents` in terminal mode. The roster includes retained blocking and background children. Type to search; use the arrow keys and Enter to select a child.
 
 In a child view:
 
@@ -58,13 +58,13 @@ Set `subagent.sessionStorage` to `"sibling"` only when native Pi discovery must 
 
 ## Native context and trust
 
-Custom named-agent definitions are no longer supported. The extension does not scan user, project, or package `.pi/agents` directories. The public `agent` and `agent_scope` parameters and DAG payload `agent` field are rejected, not ignored. Supply explicit `model`, `tools`, and `system_prompt` overrides instead, or omit them for native target defaults.
+Custom named-agent definitions are no longer supported. The extension does not scan user, project, or package `.pi/agents` directories. The public `agent` and `agent_scope` parameters are rejected, not ignored. Supply explicit `model`, `tools`, and `system_prompt` overrides instead, or omit them for native target defaults.
 
 Native `AGENTS.md` context loading is unchanged. Pi loads target configuration, context, skills, and extensions through its native resource loader. Parent trust applies only to the same canonical cwd. A different target uses its saved decision in Pi's native `ProjectTrustStore`; unknown or denied targets do not receive project trust. Child startup does not prompt for new grants. See [target trust resolution](../.pi/extensions/subagent/resolver.ts) and [native child startup](../.pi/extensions/subagent/native-child.ts).
 
 ## Limits and cancellation
 
-One parent supervisor controls blocking runs, background jobs, internal DAG children, and idle continuations. Configure its limits in the `subagent` settings block:
+One parent supervisor controls blocking runs, background jobs, and idle continuations. Configure its limits in the `subagent` settings block:
 
 ```json
 {
@@ -85,4 +85,4 @@ Pi defaults to two live codemode workers across all sessions in one process. Set
 
 Cancellation aborts native execution and waits for known tools and input hooks to settle. A running job remains `cancelling` until settlement. There is no grace-period force release or hard-kill guarantee. A run-time deadline requests abort; it does not prove that a remote effect stopped. Parent shutdown rejects new work and waits for owned work before releasing coordination.
 
-Native children do not initialize the root subagent, review, or session-manager interfaces. Advisory skill evaluation also remains a parent operation. Run-private tools are supplied directly to their native nodes, not published process-wide. Callers must close retained owners before deleting resources those owners may still use.
+Native children do not initialize the root subagent, review, or session-manager interfaces. Advisory skill evaluation also remains a parent operation. Run-private tools are supplied directly to their native sessions, not published process-wide. Callers must close retained owners before deleting resources those owners may still use.
