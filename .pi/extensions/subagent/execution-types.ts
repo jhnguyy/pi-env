@@ -7,9 +7,12 @@ import type * as Config from "./config";
 import type * as Control from "./control";
 import type * as Types from "./types";
 import type * as Usage from "./usage";
-import type * as ChildTypes from "./child-types";
+import type { SubagentServiceConnection } from "./service-host";
 
-export type SubagentParentContext = Pick<ExtensionContext, "cwd" | "sessionManager" | "isProjectTrusted">;
+export type SubagentParentContext = Pick<
+  ExtensionContext,
+  "cwd" | "sessionManager" | "isProjectTrusted"
+>;
 
 export interface RunSubagentOptions {
   onUpdate?: AgentToolUpdateCallback<Types.SubagentDetails>;
@@ -17,16 +20,15 @@ export interface RunSubagentOptions {
   signal?: AbortSignal;
   ledger?: Usage.SubagentUsageLedger;
   runId?: string;
+  requestId?: string;
   env?: Readonly<Record<string, string | undefined>>;
   telemetryExporter?: SpanExporter;
   telemetryRuntime?: Tooling.ToolingTelemetryRuntime;
   executionMode?: Usage.SubagentUsageMode;
-  supervisor?: Control.SubagentRunSupervisor;
+  serviceConnection?: SubagentServiceConnection;
+  admission?: { scopeId: string; limits: Config.SubagentRuntimeConfig };
   workspaceAccess?: Control.WorkspaceAccess;
-  sessionStorage?: Config.SubagentSessionStorage;
   onAdmitted?: () => void;
-  /** Retention only: the child owns all native execution. */
-  onChild?: (child: ChildTypes.NativeChildSession) => void;
 }
 
 export interface ResolvedSubagentRun {

@@ -42,6 +42,7 @@ export interface UsageStats {
 
 export interface SubagentJobRenderDetails {
   jobId?: string;
+  childId?: string;
   status?: SubagentJobRenderStatus;
   name?: string;
   task?: string;
@@ -61,6 +62,9 @@ export type SubagentJobRenderStatus =
   | ResolutionErrorReason;
 
 export interface SubagentDetails {
+  jobId?: string;
+  childId?: string;
+  resultTruncated?: boolean;
   name: string;
   task: string;
   toolNames: string[];

@@ -104,27 +104,75 @@ describe("shared subagent run supervisor", () => {
     },
   );
 
-  it("coalesces parent disposal until held work settles without reopening admission", async () => {
-    const cleanup = testCleanup();
-    const supervisor = Control.getOrCreateSubagentRunSupervisor("coalesced-dispose", config());
-    cleanup(() => Control.disposeSubagentRunSupervisor("coalesced-dispose"));
+  it("does not evict a reopened owner when the previous owner's close settles", async () => {
+    const supervisor = new Control.SubagentRunSupervisor(
+      "reopen-eviction",
+      config({ maxRetainedJobs: 1 }),
+    );
+    let release!: () => void;
+    const closing = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const child = (id: string, close: () => Promise<void>) => ({
+      id,
+      runId: id,
+      summary: () => ({
+        id,
+        runId: id,
+        name: id,
+        task: "task",
+        cwd: "/fixture",
+        sessionFile: undefined,
+        model: undefined,
+        state: ChildTypes.NativeChildState.Idle,
+      }),
+      inspect: () => {
+        throw new Error("unused inspection");
+      },
+      input: async () => {
+        throw new Error("unused input");
+      },
+      cancel: async () => {},
+      close,
+    });
+    supervisor.retainChild(child("reopened", () => closing));
+    supervisor.retainChild(child("retained", async () => {}));
+    supervisor.pruneChildren();
+    const replacement = child("reopened", async () => {});
+    supervisor.retainChild(replacement);
+    release();
+    try {
+      await closing;
+      expect(supervisor.children.get(replacement.id) === replacement).toBe(true);
+    } finally {
+      await supervisor.shutdown();
+    }
+  });
+
+  it("coalesces shutdown until held work settles without reopening admission", async () => {
+    // Hold admission directly: this isolates coordinator disposal, not native SDK execution.
+    const { supervisor, cleanup } = fixture("coalesced-dispose");
     const lease = await supervisor.acquire(request("/coalesced"));
     cleanup(() => lease.release());
     let secondFinished = false;
-    const first = Control.disposeSubagentRunSupervisor("coalesced-dispose");
-    const second = Control.disposeSubagentRunSupervisor("coalesced-dispose").then(() => {
+    const first = supervisor.shutdown();
+    const second = supervisor.shutdown().then(() => {
       secondFinished = true;
     });
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(secondFinished).toBe(false);
-    expect(Control.getOrCreateSubagentRunSupervisor("coalesced-dispose", config())).toBe(
-      supervisor,
-    );
-    await expect(supervisor.acquire(request("/late"))).rejects.toMatchObject({ reason: "closed" });
-    lease.release();
-    await Promise.all([first, second]);
-    expect(Control.getSubagentRunSupervisor("coalesced-dispose")).toBeUndefined();
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(secondFinished).toBe(false);
+      await expect(supervisor.acquire(request("/late"))).rejects.toMatchObject({
+        reason: "closed",
+      });
+    } finally {
+      lease.release();
+      await Promise.all([first, second]);
+    }
+    await expect(supervisor.acquire(request("/still-closed"))).rejects.toMatchObject({
+      reason: "closed",
+    });
   });
 
   it.each(["AbortSignal", "Effect"] as const)(
@@ -199,13 +247,13 @@ describe("shared subagent run supervisor", () => {
 
   it("aggregates usage from sibling leases", async () => {
     const { supervisor, acquire } = fixture("usage");
-    const first = await acquire({ ...request("/first"), runId: "batch:first" });
-    const second = await acquire({ ...request("/second"), runId: "batch:second" });
+    const first = await acquire({ ...request("/first"), runId: "dag:first" });
+    const second = await acquire({ ...request("/second"), runId: "dag:second" });
     first.updateUsage({ input: 40, output: 10, cacheRead: 0, cacheWrite: 0, cost: 2, turns: 2 });
     second.updateUsage({ input: 41, output: 10, cacheRead: 0, cacheWrite: 0, cost: 2, turns: 2 });
     expect(first.signal.aborted).toBe(false);
     expect(second.signal.aborted).toBe(false);
-    expect(supervisor.usage("batch:")).toMatchObject({ input: 81, output: 20, cost: 4 });
+    expect(supervisor.usage("dag:")).toMatchObject({ input: 81, output: 20, cost: 4 });
   });
 
   it("aborts a run at its wall-time limit", async () => {

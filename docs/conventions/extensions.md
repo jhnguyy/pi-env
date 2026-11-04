@@ -79,7 +79,7 @@ Declare `parameters` as one top-level object. Some provider adapters, including 
 
 The helper registers one native tool. It does not publish a second AgentTool or maintain a process-wide tool catalog. [toPiTool](../../.pi/extensions/_shared/tool-contract.ts) adapts contracts into native definitions. Native execution supplies each invocation's cwd, signal, and progress callback.
 
-Pass run-private definitions through `ResolvedSubagentRun.customTools` at the [native execution entrypoint](../../.pi/extensions/subagent/execute.ts). Select their names with `toolNames`; an explicit empty selection enables no tools. Do not publish run-bound callbacks globally. Native child sessions load ordinary extensions and receive only their run's supplied definitions.
+The [subagent execution entrypoint](../../.pi/extensions/subagent/execute.ts) submits serializable intent to the built native-service sidecar; executable `customTools` callbacks reject before admission. Load child tools from the target's native extensions/MCP configuration and select exact names with `toolNames`; an explicit empty selection enables no tools. Do not publish run-bound callbacks globally or add a parent-local execution fallback. [Subagent operating guidance](../subagents.md) owns explicit local state, service lifetime, and compatibility requirements.
 
 Use the [tool adapter tests](../../.pi/extensions/__tests__/tool-contract.test.ts) for invocation context, cancellation, and progress, and representative native tool tests, such as [closeout](../../.pi/extensions/dev-tools/__tests__/closeout.integration.test.ts), for execution behavior. State side effects and operational limits in safety-sensitive descriptions.
 
