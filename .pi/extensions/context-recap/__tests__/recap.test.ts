@@ -53,7 +53,7 @@ describe("recap request and validation", () => {
     expect(prompt).not.toContain("raw superseded orientation");
   });
 
-  it("uses one selected-model request with no cache writes and bounded output", async () => {
+  it("requests no cache writes and bounded output in one selected-model call", async () => {
     const { event, ctx, complete } = scenario();
     expect((await generateRecap(event, ctx, new AbortController().signal)).summary).toBe(
       validRecap,
@@ -64,7 +64,7 @@ describe("recap request and validation", () => {
       expect.anything(),
       expect.objectContaining({
         cacheRetention: "none",
-        maxTokens: 4096,
+        maxTokens: ctx.model.maxTokens,
         signal: expect.any(AbortSignal),
       }),
     );
@@ -82,7 +82,7 @@ describe("recap request and validation", () => {
     async (source) => {
       const { event, ctx, complete } = scenario();
       ctx.model.contextWindow = 16000;
-      const content = "界".repeat(5000);
+      const content = "界".repeat(80_000);
       if (source === "history")
         event.preparation.messagesToSummarize = [{ role: "user", content, timestamp: 1 }];
       if (source === "prefix")
@@ -97,13 +97,31 @@ describe("recap request and validation", () => {
     },
   );
 
-  it("reserves output and headroom even when the input alone fits", async () => {
+  it("reduces output to remaining model capacity instead of rejecting fitting input", async () => {
     const { event, ctx, complete } = scenario();
-    ctx.model.contextWindow = Buffer.byteLength(recapPrompt(event, ctx), "utf8") + 4096;
-    await expect(generateRecap(event, ctx, new AbortController().signal)).rejects.toThrow(
-      "budget exceeded",
-    );
-    expect(complete).not.toHaveBeenCalled();
+    ctx.model.contextWindow = 4096;
+    await generateRecap(event, ctx, new AbortController().signal);
+    const output = complete.mock.calls[0]?.[2].maxTokens;
+    expect(output).toBeGreaterThan(0);
+    expect(output).toBeLessThan(4096);
+  });
+
+  it("accepts complete detailed summaries beyond the former character cap", () => {
+    const detailed = validRecap + " detail".repeat(5000);
+    expect(validateSummary(fauxAssistantMessage(detailed))).toBe(detailed);
+  });
+
+  it("retains all edited orientation entries beyond the former tail caps", () => {
+    const { event, ctx } = scenario();
+    for (let i = 0; i < 12; i++)
+      ctx.sessionManager.appendMessage({
+        role: "user",
+        content: `orientation-${i} ` + "detail".repeat(1500),
+        timestamp: i + 3,
+      });
+    const prompt = recapPrompt(event, ctx);
+    expect(prompt).toContain("edited retained orientation");
+    for (let i = 0; i < 12; i++) expect(prompt).toContain(`orientation-${i} `);
   });
 
   it.each([0, -1, NaN, Infinity])("rejects invalid context limit %s", async (limit) => {
@@ -124,7 +142,6 @@ describe("recap request and validation", () => {
     "",
     "plain text",
     validRecap.replace("## Remaining Work", "## Next Steps"),
-    validRecap + "x".repeat(24000),
     validRecap + "\n<read-files>file</read-files>",
   ])("rejects unusable summary %#", (text) => {
     expect(() => validateSummary(fauxAssistantMessage(text))).toThrow();
@@ -141,22 +158,39 @@ describe("recap request and validation", () => {
     ).toThrow();
   });
 
-  it("honors a deadline even if the provider ignores abort; never retries", async () => {
-    const timer = vi.spyOn(globalThis, "setTimeout");
+  it("accepts healthy completion after more than 60 seconds without a total deadline", async () => {
+    const timers: { callback: () => void; ms: number }[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    const realClearTimeout = globalThis.clearTimeout;
+    const timer = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation((callback, ms = 0, ...args) => {
+        const handle = realSetTimeout(() => {}, 0);
+        realClearTimeout(handle);
+        timers.push({ callback: () => callback(...args), ms });
+        return handle;
+      });
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
     try {
       const { event, ctx, complete } = scenario();
-      complete.mockImplementation(() => new Promise(() => {}));
-      const result = generateRecap(event, ctx, new AbortController().signal).catch(
-        recapFailureMessage,
+      let resolve!: (value: ReturnType<typeof fauxAssistantMessage>) => void;
+      complete.mockImplementation(
+        () =>
+          new Promise((done) => {
+            resolve = done;
+          }),
       );
-      // Fire the registered deadline directly; no elapsed-time scheduling assumption.
-      expect(timer.mock.calls[0]?.[1]).toBe(60_000);
-      timer.mock.calls[0][0]();
-      expect(await result).toContain("deadline exceeded");
+      const result = generateRecap(event, ctx, new AbortController().signal);
+      const settled = result.catch((error: unknown) => error);
+      clock.mockReturnValue(1_120_001);
+      for (const task of timers) if (task.ms <= 120_001) task.callback();
+      expect(complete.mock.calls[0]?.[2].signal.aborted).toBe(false);
+      resolve(fauxAssistantMessage(validRecap));
+      expect(await settled).toMatchObject({ summary: validRecap });
       expect(complete).toHaveBeenCalledTimes(1);
-      expect(complete.mock.calls[0]?.[2].signal.aborted).toBe(true);
     } finally {
       timer.mockRestore();
+      clock.mockRestore();
     }
   });
 

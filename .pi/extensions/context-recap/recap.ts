@@ -1,6 +1,7 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
   convertToLlm,
+  estimateTokens,
   serializeConversation,
   type ExtensionContext,
   type SessionBeforeCompactEvent,
@@ -16,13 +17,11 @@ const headings = [
   "Remaining Work",
   "Information Sources",
 ] as const;
-const maxSummaryCharacters = 24_000;
 
 const failureReasons = {
   model: "Select a model with valid context and output limits.",
   budget: "Admission budget exceeded; use a larger-context model or reduce context.",
   summary: "Response failed the recap format/completion contract.",
-  deadline: "Summary request deadline exceeded; try again when ready.",
   cancelled: "Activity or cancellation interrupted recap generation.",
   provider: "Summary request failed; check provider availability and authentication.",
 } as const;
@@ -51,7 +50,7 @@ Preserve the current plan, decisions and rationale, completed work, and verifica
 Preserve pending work, blockers, unanswered questions, and next actions. Do not mark proposed or attempted checks as passed.
 ## Information Sources
 Point to authoritative general navigation (such as README, CONTRIBUTING, area docs, tools, and durable decisions) and only task-critical locations. Do not inventory every read or modified file or emit native read-files/modified-files lists.
-Recent history remains verbatim after the recap. Retained-tail orientation is partial context only; do not claim it is being discarded. Carry forward still-relevant prior recap facts, update stale progress, and remove superseded claims. State unknowns rather than inventing facts. Target 400–700 words. Output only the four sections, at most 24000 characters.`;
+Recent history remains verbatim after the recap. Retained-tail orientation is partial context only; do not claim it is being discarded. Carry forward still-relevant prior recap facts, update stale progress, and remove superseded claims. State unknowns rather than inventing facts. Preserve all continuation-critical detail without an arbitrary length target. Output only the four sections.`;
 
 export function validateSummary(response: AssistantMessage): string {
   if (response.stopReason === "error") throw new RecapFailure("provider");
@@ -67,11 +66,7 @@ export function validateSummary(response: AssistantMessage): string {
     .map((part) => part.text)
     .join("\n")
     .trim();
-  if (
-    !text ||
-    text.length > maxSummaryCharacters ||
-    /<\/?(?:read-files|modified-files)>/i.test(text)
-  ) {
+  if (!text || /<\/?(?:read-files|modified-files)>/i.test(text)) {
     throw new RecapFailure("summary");
   }
   const sections = text.split(/^## /m);
@@ -95,14 +90,8 @@ export function recapPrompt(event: SessionBeforeCompactEvent, ctx: RecapContext)
     (entry) => entry.sourceEntry.id === preparation.firstKeptEntryId,
   );
   // Use the edited projection, not raw branch entries: omitted/replaced content must stay omitted/replaced.
-  const tail =
-    keptIndex < 0
-      ? []
-      : projected
-          .slice(keptIndex)
-          .slice(-8)
-          .flatMap((entry) => entry.messages);
-  const orientation = serializeConversation(convertToLlm(tail)).slice(-6000);
+  const tail = keptIndex < 0 ? [] : projected.slice(keptIndex).flatMap((entry) => entry.messages);
+  const orientation = serializeConversation(convertToLlm(tail));
   const history = serializeConversation(convertToLlm(preparation.messagesToSummarize));
   const prefix = serializeConversation(convertToLlm(preparation.turnPrefixMessages));
   return `${instructions}\n\n${JSON.stringify({
@@ -118,7 +107,6 @@ export async function generateRecap(
   event: SessionBeforeCompactEvent,
   ctx: RecapContext,
   invalidation: AbortSignal,
-  deadlineMs = 60_000,
 ) {
   const model = ctx.model;
   if (!model) throw new RecapFailure("model");
@@ -132,29 +120,24 @@ export async function generateRecap(
     throw new RecapFailure("model");
   }
   const prompt = recapPrompt(event, ctx);
-  const maxTokens = Math.min(4096, model.maxTokens);
-  // One budget unit per UTF-8 byte is deliberately conservative, not a tokenizer
-  // guarantee. Reserve additional space for request framing and provider differences.
-  const headroom = Math.max(2048, Math.ceil(model.contextWindow * 0.1));
-  if (Buffer.byteLength(prompt, "utf8") + maxTokens + headroom > model.contextWindow) {
-    throw new RecapFailure("budget");
-  }
-  const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(), deadlineMs);
-  timer.unref();
-  const signal = AbortSignal.any([event.signal, invalidation, deadline.signal]);
+  const message = { role: "user" as const, content: prompt, timestamp: Date.now() };
+  // Native estimation is approximate; reserve request framing without trimming sources.
+  const remaining = model.contextWindow - estimateTokens(message) - 512;
+  const maxTokens = Math.min(model.maxTokens, remaining);
+  if (maxTokens <= 0) throw new RecapFailure("budget");
+  const signal = AbortSignal.any([event.signal, invalidation]);
   let onAbort: (() => void) | undefined;
   try {
     signal.throwIfAborted();
     const aborted = new Promise<never>((_resolve, reject) => {
-      onAbort = () => reject(new RecapFailure(deadline.signal.aborted ? "deadline" : "cancelled"));
+      onAbort = () => reject(new RecapFailure("cancelled"));
       signal.addEventListener("abort", onAbort, { once: true });
     });
     const response = await Promise.race([
       ctx.modelRegistry.complete(
         model,
         {
-          messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
+          messages: [message],
         },
         { signal, maxTokens, cacheRetention: "none" },
       ),
@@ -163,10 +146,9 @@ export async function generateRecap(
     signal.throwIfAborted();
     return { summary: validateSummary(response), usage: response.usage };
   } catch (error) {
-    if (signal.aborted) throw new RecapFailure(deadline.signal.aborted ? "deadline" : "cancelled");
+    if (signal.aborted) throw new RecapFailure("cancelled");
     throw error;
   } finally {
-    clearTimeout(timer);
     if (onAbort) signal.removeEventListener("abort", onAbort);
   }
 }
