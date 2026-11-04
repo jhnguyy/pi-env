@@ -126,13 +126,13 @@ export default function(pi) {
       },
     });
     const manager = SessionManager.create(root, join(root, "sessions"));
-    const historical = { v: 1, runId: "historical", event: { _tag: "graph", opaque: true } };
+    const historical = { v: 1, runId: "historical", event: { opaque: true } };
     manager.appendCustomEntry("pi/dag-run-event", historical);
     const historicalEntries = manager
       .getEntries()
       .filter((entry) => entry.type === "custom" && entry.customType === "pi/dag-run-event");
     manager.appendMessage({ role: "user", content: "Historical session", timestamp: 1 });
-    const artifactDir = join(manager.getSessionDir()!, "dag-artifacts", manager.getSessionId());
+    const artifactDir = join(manager.getSessionDir(), "dag-artifacts", manager.getSessionId());
     await mkdir(artifactDir, { recursive: true });
     const artifact = join(artifactDir, "historical.txt");
     await writeFile(artifact, "historical artifact sentinel");

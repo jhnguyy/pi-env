@@ -118,7 +118,7 @@ export default function(pi) {
     ),
   );
   const supervisor = Control.getSubagentRunSupervisor(parent.sessionId)!;
-  const child = [...supervisor.children.values()][0]!;
+  const child = [...supervisor.children.values()][0];
   expect(initial.details).toMatchObject({ isError: false, finalOutput: "Initial task submitted" });
   expect(JSON.parse(await readFile(submissionPath, "utf8"))).toEqual(submission);
   expect(child.inspect().systemPrompt).toContain("Target context");
