@@ -38,17 +38,40 @@ function scenario() {
 }
 
 describe("recap request and validation", () => {
-  it("includes prior summary, split prefix and projected retained orientation", () => {
+  it("preserves every source through its end and uses the complete edited retained projection", () => {
     const { event, ctx } = scenario();
+    const source = (end: string) => "detail ".repeat(5000) + end;
+    event.preparation.messagesToSummarize = [
+      { role: "user", content: source("HISTORY_END"), timestamp: 1 },
+    ];
+    event.preparation.turnPrefixMessages = [
+      { role: "user", content: source("PREFIX_END"), timestamp: 2 },
+    ];
+    event.preparation.previousSummary = source("PRIOR_END");
+    event.customInstructions = source("OPERATOR_END");
+    for (let i = 0; i < 12; i++)
+      ctx.sessionManager.appendMessage({
+        role: "user",
+        content: source(`TAIL_${i}_END`),
+        timestamp: i + 3,
+      });
+    const omitted = ctx.sessionManager.appendMessage({
+      role: "user",
+      content: "omitted orientation",
+      timestamp: 20,
+    });
+    ctx.sessionManager.appendContextEdit(omitted, null);
     const prompt = recapPrompt(event, ctx);
     for (const evidence of [
-      "old objective",
-      "split pending work",
-      "prior constraints",
+      "HISTORY_END",
+      "PREFIX_END",
+      "PRIOR_END",
+      "OPERATOR_END",
       "edited retained orientation",
-      "preserve approvals",
+      ...Array.from({ length: 12 }, (_, i) => `TAIL_${i}_END`),
     ])
       expect(prompt).toContain(evidence);
+    expect(prompt).not.toContain("omitted orientation");
     expect(prompt).not.toContain("not retained");
     expect(prompt).not.toContain("raw superseded orientation");
   });
@@ -70,58 +93,35 @@ describe("recap request and validation", () => {
     );
   });
 
-  it("respects a smaller selected-model output limit", async () => {
-    const { event, ctx, complete } = scenario();
-    ctx.model.maxTokens = 512;
-    await generateRecap(event, ctx, new AbortController().signal);
-    expect(complete.mock.calls[0]?.[2].maxTokens).toBe(512);
-  });
-
-  it.each(["history", "prefix", "previous summary", "instructions"])(
-    "rejects oversized %s before inference instead of trimming it",
-    async (source) => {
+  it.each([512, 8192])(
+    "admits composed input by model capacity and respects output limit %s",
+    async (maxTokens) => {
       const { event, ctx, complete } = scenario();
-      ctx.model.contextWindow = 16000;
-      const content = "界".repeat(80_000);
-      if (source === "history")
-        event.preparation.messagesToSummarize = [{ role: "user", content, timestamp: 1 }];
-      if (source === "prefix")
-        event.preparation.turnPrefixMessages = [{ role: "user", content, timestamp: 1 }];
-      if (source === "previous summary") event.preparation.previousSummary = content;
-      if (source === "instructions") event.customInstructions = content;
-      expect(recapPrompt(event, ctx)).toContain(content);
+      ctx.model.maxTokens = maxTokens;
+      event.preparation.previousSummary = "prior ".repeat(300);
+      event.customInstructions = "operator ".repeat(300);
+      event.preparation.turnPrefixMessages = [
+        { role: "user", content: "split ".repeat(300), timestamp: 2 },
+      ];
+      ctx.model.contextWindow = 1024;
       await expect(generateRecap(event, ctx, new AbortController().signal)).rejects.toThrow(
         "budget exceeded",
       );
       expect(complete).not.toHaveBeenCalled();
+      ctx.model.contextWindow = 4096;
+      await generateRecap(event, ctx, new AbortController().signal);
+      const output = complete.mock.calls[0]?.[2].maxTokens;
+      expect(output).toBeGreaterThan(0);
+      expect(output).toBeLessThanOrEqual(maxTokens);
+      if (maxTokens === 512) expect(output).toBe(512);
+      else expect(output).toBeLessThan(4096);
+      expect(complete).toHaveBeenCalledTimes(1);
     },
   );
-
-  it("reduces output to remaining model capacity instead of rejecting fitting input", async () => {
-    const { event, ctx, complete } = scenario();
-    ctx.model.contextWindow = 4096;
-    await generateRecap(event, ctx, new AbortController().signal);
-    const output = complete.mock.calls[0]?.[2].maxTokens;
-    expect(output).toBeGreaterThan(0);
-    expect(output).toBeLessThan(4096);
-  });
 
   it("accepts complete detailed summaries beyond the former character cap", () => {
     const detailed = validRecap + " detail".repeat(5000);
     expect(validateSummary(fauxAssistantMessage(detailed))).toBe(detailed);
-  });
-
-  it("retains all edited orientation entries beyond the former tail caps", () => {
-    const { event, ctx } = scenario();
-    for (let i = 0; i < 12; i++)
-      ctx.sessionManager.appendMessage({
-        role: "user",
-        content: `orientation-${i} ` + "detail".repeat(1500),
-        timestamp: i + 3,
-      });
-    const prompt = recapPrompt(event, ctx);
-    expect(prompt).toContain("edited retained orientation");
-    for (let i = 0; i < 12; i++) expect(prompt).toContain(`orientation-${i} `);
   });
 
   it.each([0, -1, NaN, Infinity])("rejects invalid context limit %s", async (limit) => {
@@ -159,18 +159,8 @@ describe("recap request and validation", () => {
   });
 
   it("accepts healthy completion after more than 60 seconds without a total deadline", async () => {
-    const timers: { callback: () => void; ms: number }[] = [];
-    const realSetTimeout = globalThis.setTimeout;
-    const realClearTimeout = globalThis.clearTimeout;
-    const timer = vi
-      .spyOn(globalThis, "setTimeout")
-      .mockImplementation((callback, ms = 0, ...args) => {
-        const handle = realSetTimeout(() => {}, 0);
-        realClearTimeout(handle);
-        timers.push({ callback: () => callback(...args), ms });
-        return handle;
-      });
-    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    vi.stubGlobal("Temporal", undefined);
+    vi.useFakeTimers();
     try {
       const { event, ctx, complete } = scenario();
       let resolve!: (value: ReturnType<typeof fauxAssistantMessage>) => void;
@@ -182,15 +172,14 @@ describe("recap request and validation", () => {
       );
       const result = generateRecap(event, ctx, new AbortController().signal);
       const settled = result.catch((error: unknown) => error);
-      clock.mockReturnValue(1_120_001);
-      for (const task of timers) if (task.ms <= 120_001) task.callback();
+      await vi.advanceTimersByTimeAsync(120_001);
       expect(complete.mock.calls[0]?.[2].signal.aborted).toBe(false);
       resolve(fauxAssistantMessage(validRecap));
       expect(await settled).toMatchObject({ summary: validRecap });
       expect(complete).toHaveBeenCalledTimes(1);
     } finally {
-      timer.mockRestore();
-      clock.mockRestore();
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
     }
   });
 
@@ -245,7 +234,9 @@ describe("recap request and validation", () => {
     expect(notify).toHaveBeenCalledWith(expect.stringContaining(expected), "warning");
     expect(notify.mock.calls[0]?.[0]).toContain("No recap saved; no fallback request made.");
     expect(JSON.stringify(notify.mock.calls)).not.toContain(sensitive);
-    expect(complete.mock.calls.length).toBeLessThanOrEqual(1);
+    expect(complete).toHaveBeenCalledTimes(
+      ["missing model", "invalid model", "budget"].includes(source) ? 0 : 1,
+    );
   });
 
   it("does not register commands or hooks in child creation scope", () => {

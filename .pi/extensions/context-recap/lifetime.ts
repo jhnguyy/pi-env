@@ -1,25 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Effect, Schema } from "effect";
-import { isObject, loadSettingsSnapshotEffect } from "../_shared/settings";
-
-const warmingSchema = Schema.Struct({
-  cacheWarming: Schema.optional(Schema.Literals(["off", "streaming", "idle"])),
-});
-const decodeWarming = Schema.decodeUnknownEffect(warmingSchema);
-
-export function warmingBlock(cwd: string): string | undefined {
-  return Effect.runSync(
-    loadSettingsSnapshotEffect(cwd).pipe(
-      Effect.flatMap((snapshot) => decodeWarming(snapshot.global)),
-      Effect.map((settings) =>
-        settings.cacheWarming === "idle" ? "native idle cache warming enabled" : undefined,
-      ),
-      Effect.orElseSucceed(
-        () => "settings uncertain; repair settings.json before enabling automatic recap",
-      ),
-    ),
-  );
-}
+import { isObject } from "../_shared/settings";
 
 export function modelKey(ctx: Pick<ExtensionContext, "model">): string {
   const m = ctx.model;
@@ -75,39 +55,57 @@ function openAITtl(ttl: unknown): number | undefined {
   return;
 }
 
-function openAILifetime(payload: Record<string, unknown>): Lifetime {
+function openAILifetime(payload: Record<string, unknown>, omittedTtl = 1_800_000): Lifetime {
   const options = payload.prompt_cache_options;
   if (options !== undefined && !isObject(options)) return;
   const settings = isObject(options) ? options : {};
-  const defaultTtl = openAITtl(settings.ttl);
-  if (!defaultTtl) return;
+  const defaultTtl = settings.ttl === undefined ? omittedTtl : openAITtl(settings.ttl);
   const shortest = shortestBreakpoint(
     contentBlocks(payload.input),
     "prompt_cache_breakpoint",
     (bp) => {
       if (!isObject(bp)) return;
-      return bp.ttl === undefined ? defaultTtl : openAITtl(bp.ttl);
+      return bp.ttl === undefined ? defaultTtl || undefined : openAITtl(bp.ttl);
     },
   );
   if (shortest === undefined) return;
   if (settings.mode === "explicit") return shortest;
+  if (!defaultTtl) return;
   if (settings.mode !== undefined && settings.mode !== "implicit") return;
   return shortest === "off" ? defaultTtl : Math.min(defaultTtl, shortest);
 }
 
 /** Only facts leave the provider hook; never retain the request or credentials. */
-export function requestLifetime(payload: unknown, model: ExtensionContext["model"]): Lifetime {
+export function requestLifetime(
+  payload: unknown,
+  model: ExtensionContext["model"],
+): Lifetime | "ineligible" {
   if (!model || !isObject(payload)) return;
   // Selected-model compatibility is not evidence about a different outgoing model.
-  if (payload.model !== undefined && payload.model !== model.id) return;
+  if (payload.model !== undefined && payload.model !== model.id) return "ineligible";
   if (model.api === "anthropic-messages") return anthropicLifetime(payload);
-  let publicOpenAI = false;
+  return openAIRequestLifetime(payload, model);
+}
+
+function openAIRequestLifetime(
+  payload: Record<string, unknown>,
+  model: NonNullable<ExtensionContext["model"]>,
+): Lifetime {
+  let endpoint: URL;
   try {
-    publicOpenAI = new URL(model.baseUrl).origin === "https://api.openai.com";
+    endpoint = new URL(model.baseUrl);
   } catch {
     return;
   }
-  if (model.api !== "openai-responses" || !publicOpenAI) return;
+  if (
+    model.api === "openai-codex-responses" &&
+    endpoint.origin === "https://chatgpt.com" &&
+    /^\/backend-api(?:\/|$)/.test(endpoint.pathname)
+  ) {
+    // Only explicit metadata is evidence here; omitted Codex TTL stays unknown.
+    return payload.prompt_cache_options === undefined ? undefined : openAILifetime(payload, 0);
+  }
+  if (model.api !== "openai-responses" || endpoint.origin !== "https://api.openai.com") return;
   if (
     model.compat &&
     "supportsExplicitPromptCacheMode" in model.compat &&
