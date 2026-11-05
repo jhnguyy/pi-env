@@ -9,7 +9,10 @@ import type * as Types from "./types";
 import type * as Usage from "./usage";
 import type * as ChildTypes from "./child-types";
 
-export type SubagentParentContext = Pick<ExtensionContext, "cwd" | "sessionManager" | "isProjectTrusted">;
+export type SubagentParentContext = Pick<
+  ExtensionContext,
+  "cwd" | "sessionManager" | "isProjectTrusted"
+>;
 
 export interface RunSubagentOptions {
   onUpdate?: AgentToolUpdateCallback<Types.SubagentDetails>;
@@ -22,6 +25,7 @@ export interface RunSubagentOptions {
   telemetryRuntime?: Tooling.ToolingTelemetryRuntime;
   executionMode?: Usage.SubagentUsageMode;
   supervisor?: Control.SubagentRunSupervisor;
+  admission?: { scopeId: string; limits: Config.SubagentRuntimeConfig };
   workspaceAccess?: Control.WorkspaceAccess;
   sessionStorage?: Config.SubagentSessionStorage;
   onAdmitted?: () => void;

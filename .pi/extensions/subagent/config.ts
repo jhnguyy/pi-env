@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 
-import { decodeSettingsBlockSync } from "../_shared/settings";
+import { join } from "node:path";
+import { decodeSettingsBlockSync, defaultSettingsEnv } from "../_shared/settings";
 
 export const SubagentSessionStorage = {
   Nested: "nested",
@@ -69,7 +70,14 @@ export function resolveSubagentRuntimeConfig(
   };
 }
 
-export function loadSubagentRuntimeConfig(cwd: string): SubagentRuntimeConfig {
-  const settings = decodeSettingsBlockSync("subagent", SubagentSettingsSchema, cwd);
+export function loadSubagentRuntimeConfig(cwd: string, agentDir?: string): SubagentRuntimeConfig {
+  const env =
+    agentDir === undefined
+      ? defaultSettingsEnv
+      : {
+          ...defaultSettingsEnv,
+          globalSettingsPath: () => join(agentDir, "settings.json"),
+        };
+  const settings = decodeSettingsBlockSync("subagent", SubagentSettingsSchema, cwd, env);
   return resolveSubagentRuntimeConfig(settings);
 }
