@@ -117,20 +117,30 @@ function run(
 const LOCK_RETRY = { times: 480, schedule: Schedule.spaced("250 millis") };
 
 function isCloseoutLockBusy(error: CloseoutError): boolean {
-  return typeof error.cause === "object" && error.cause !== null &&
-    "code" in error.cause && error.cause.code === "ELOCKED";
+  return (
+    typeof error.cause === "object" &&
+    error.cause !== null &&
+    "code" in error.cause &&
+    error.cause.code === "ELOCKED"
+  );
 }
 
 function acquireCloseoutLock(commonDir: string) {
   return Effect.acquireRelease(
     Effect.try({
-      try: () => lockfile.lockSync(commonDir, { lockfilePath: join(commonDir, "pi-closeout.lock") }),
+      try: () =>
+        lockfile.lockSync(commonDir, { lockfilePath: join(commonDir, "pi-closeout.lock") }),
       catch: (cause) => closeoutFailure(`Could not acquire closeout lock for ${commonDir}.`, cause),
     }).pipe(
       Effect.retry({ ...LOCK_RETRY, while: isCloseoutLockBusy }),
-      Effect.mapError((error) => isCloseoutLockBusy(error)
-        ? closeoutFailure(`Timed out waiting for another closeout in ${commonDir} after 120 seconds.`, error)
-        : error),
+      Effect.mapError((error) =>
+        isCloseoutLockBusy(error)
+          ? closeoutFailure(
+              `Timed out waiting for another closeout in ${commonDir} after 120 seconds.`,
+              error,
+            )
+          : error,
+      ),
     ),
     (release) => Effect.sync(release),
     { interruptible: true },
@@ -158,10 +168,10 @@ function decodePullRequest(raw: string): Effect.Effect<PullRequest, CloseoutErro
 function loadPullRequest(
   exec: Exec,
   cwd: string,
-  requested: string | undefined,
+  requested: string,
+  repository: string,
 ): Effect.Effect<PullRequest, CloseoutError> {
-  const args = ["pr", "view"];
-  if (requested) args.push(requested);
+  const args = ["pr", "view", requested, "--repo", `github.com/${repository}`];
   args.push(
     "--json",
     "state,mergedAt,mergeCommit,url,headRefName,headRefOid,baseRefName,isCrossRepository",
@@ -257,6 +267,61 @@ function githubRepositoryFromRemote(
   );
 }
 
+const selectGitHubRemote = Effect.fnUntraced(function* (
+  exec: Exec,
+  cwd: string,
+  requestedRepository: string | undefined,
+) {
+  const names = (yield* gitText(exec, cwd, ["remote"])).split("\n").filter(Boolean);
+  const candidates: Array<{ name: string; repository: string; urls: string[] }> = [];
+  for (const name of names) {
+    const urls = [
+      ...new Set(
+        (yield* gitText(exec, cwd, ["remote", "get-url", "--all", name]))
+          .split("\n")
+          .filter(Boolean),
+      ),
+    ];
+    yield* ensure(urls.length > 0, `Remote ${name} has no effective fetch URL.`);
+    for (const url of urls) {
+      const repository = yield* githubRepositoryFromRemote(exec, cwd, url);
+      if (repository) candidates.push({ name, repository, urls });
+    }
+  }
+  const matches = requestedRepository
+    ? candidates.filter((candidate) => candidate.repository === requestedRepository)
+    : candidates;
+  yield* ensure(
+    matches.length > 0,
+    requestedRepository
+      ? `No configured GitHub fetch remote matches ${requestedRepository}. Configure a matching remote before closeout.`
+      : "No configured GitHub fetch remote found. Configure a GitHub remote before closeout.",
+  );
+  yield* ensure(
+    new Set(matches.map((candidate) => candidate.repository)).size === 1,
+    "Multiple GitHub repositories are configured. Pass an explicit GitHub PR URL to select one.",
+  );
+  const rank = (name: string) => (name === "origin" ? 0 : name === "github" ? 1 : 2);
+  matches.sort(
+    (left, right) =>
+      rank(left.name) - rank(right.name) ||
+      (left.name < right.name ? -1 : left.name > right.name ? 1 : 0),
+  );
+  const selected = matches[0]!;
+  yield* ensure(
+    selected.urls.length === 1,
+    `Remote ${selected.name} has multiple distinct effective fetch URLs. Configure one fetch URL before closeout.`,
+  );
+  yield* ensure(
+    (yield* gitExit(exec, cwd, [
+      "check-ref-format",
+      `refs/remotes/${selected.name}/closeout-check`,
+    ])) === 0,
+    `Remote ${selected.name} has an invalid tracking namespace. Rename it before closeout.`,
+  );
+  return { name: selected.name, repository: selected.repository };
+});
+
 function canonicalPath(path: string): string {
   try {
     return realpathSync.native(path);
@@ -316,6 +381,46 @@ function verifyLocalHead(
   );
 }
 
+const resolvePullRequest = Effect.fnUntraced(function* (
+  exec: Exec,
+  lookupCwd: string,
+  rawRequested: string | undefined,
+) {
+  const requested =
+    rawRequested === undefined
+      ? undefined
+      : yield* Effect.try({
+          try: () => normalizePullRequestReference(rawRequested),
+          catch: (cause) => closeoutFailure("Expected a PR number or GitHub PR URL.", cause),
+        });
+  const requestedUrl = requested ? parseGitHubPullRequestUrl(requested) : undefined;
+  const repoRoot = yield* gitText(exec, lookupCwd, ["rev-parse", "--show-toplevel"]);
+  const remote = yield* selectGitHubRemote(
+    exec,
+    repoRoot,
+    requestedUrl ? `${requestedUrl.owner}/${requestedUrl.repo}`.toLowerCase() : undefined,
+  );
+  const lookupReference =
+    requested ?? (yield* gitText(exec, lookupCwd, ["branch", "--show-current"]));
+  yield* ensure(
+    Boolean(lookupReference),
+    "Cannot resolve a PR from a detached checkout. Pass a PR number or GitHub PR URL.",
+  );
+  const pr = yield* loadPullRequest(exec, lookupCwd, lookupReference, remote.repository);
+  const parsedUrl = parseGitHubPullRequestUrl(pr.url);
+  if (!parsedUrl) return yield* closeoutFailure("GitHub returned an invalid pull request URL.");
+  yield* ensure(
+    `${parsedUrl.owner}/${parsedUrl.repo}`.toLowerCase() === remote.repository,
+    `GitHub returned a pull request outside the selected repository ${remote.repository}.`,
+  );
+  const requestedNumber = requestedUrl?.number ?? (requested ? Number(requested) : undefined);
+  yield* ensure(
+    requestedNumber === undefined || parsedUrl.number === requestedNumber,
+    `GitHub returned a different pull request than requested (${requestedNumber}).`,
+  );
+  return { pr, parsedUrl, repoRoot, remote };
+});
+
 function closeoutWorkflow(
   exec: Exec,
   cwd: string,
@@ -323,9 +428,11 @@ function closeoutWorkflow(
 ): Effect.Effect<CloseoutResult, CloseoutError, Scope.Scope> {
   return Effect.gen(function* () {
     const lookupCwd = request.repoPath ? resolve(cwd, request.repoPath) : cwd;
-    const pr = yield* loadPullRequest(exec, lookupCwd, request.pr);
-    const parsedUrl = parseGitHubPullRequestUrl(pr.url);
-    yield* ensure(Boolean(parsedUrl), "GitHub returned an invalid pull request URL.");
+    const { pr, parsedUrl, repoRoot, remote } = yield* resolvePullRequest(
+      exec,
+      lookupCwd,
+      request.pr,
+    );
     yield* ensure(
       pr.state === "MERGED" && Boolean(pr.mergedAt) && Boolean(pr.mergeCommit?.oid),
       `Pull request ${pr.url} is not merged.`,
@@ -340,16 +447,11 @@ function closeoutWorkflow(
       `Refusing to delete protected branch ${pr.headRefName}.`,
     );
 
-    const repoRoot = yield* gitText(exec, lookupCwd, ["rev-parse", "--show-toplevel"]);
-    const originUrl = yield* gitText(exec, repoRoot, ["remote", "get-url", "origin"]);
-    const localRepository = yield* githubRepositoryFromRemote(exec, repoRoot, originUrl);
-    const expectedRepository = `${parsedUrl!.owner}/${parsedUrl!.repo}`.toLowerCase();
-    yield* ensure(
-      localRepository === expectedRepository,
-      `Pull request ${pr.url} does not belong to the local origin repository.`,
-    );
-
-    const commonDir = yield* gitText(exec, repoRoot, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+    const commonDir = yield* gitText(exec, repoRoot, [
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ]);
     yield* acquireCloseoutLock(commonDir);
 
     const worktrees = parseWorktreePorcelain(
@@ -386,16 +488,16 @@ function closeoutWorkflow(
       yield* verifyLocalHead(exec, baseWorktree!.path, pr.headRefName, pr.headRefOid);
     }
 
-    const remoteUrl = `https://github.com/${parsedUrl!.owner}/${parsedUrl!.repo}.git`;
+    const remoteUrl = `https://github.com/${remote.repository}.git`;
     yield* run(
       exec,
       "git",
-      ["fetch", "--prune", "--no-tags", remoteUrl, "+refs/heads/*:refs/remotes/origin/*"],
+      ["fetch", "--prune", "--no-tags", remoteUrl, `+refs/heads/*:refs/remotes/${remote.name}/*`],
       { cwd: baseWorktree!.path, timeout: 180_000 },
     );
 
     const localBaseRef = `refs/heads/${pr.baseRefName}`;
-    const remoteBaseRef = `refs/remotes/origin/${pr.baseRefName}`;
+    const remoteBaseRef = `refs/remotes/${remote.name}/${pr.baseRefName}`;
     yield* ensure(
       (yield* gitExit(exec, baseWorktree!.path, [
         "show-ref",
@@ -412,7 +514,7 @@ function closeoutWorkflow(
         "--quiet",
         remoteBaseRef,
       ])) === 0,
-      `Remote base branch origin/${pr.baseRefName} is missing after fetch.`,
+      `Remote base branch ${remote.name}/${pr.baseRefName} is missing after fetch.`,
     );
     yield* ensure(
       (yield* gitExit(exec, baseWorktree!.path, [
@@ -421,7 +523,7 @@ function closeoutWorkflow(
         localBaseRef,
         remoteBaseRef,
       ])) === 0,
-      `Local base branch ${pr.baseRefName} cannot fast-forward to origin/${pr.baseRefName}.`,
+      `Local base branch ${pr.baseRefName} cannot fast-forward to ${remote.name}/${pr.baseRefName}.`,
     );
     yield* ensure(
       (yield* gitExit(exec, baseWorktree!.path, [
@@ -430,7 +532,7 @@ function closeoutWorkflow(
         pr.mergeCommit!.oid,
         remoteBaseRef,
       ])) === 0,
-      `The merged PR commit is not present on origin/${pr.baseRefName}.`,
+      `The merged PR commit is not present on ${remote.name}/${pr.baseRefName}.`,
     );
 
     if (headWorktree) yield* verifyWorktree(exec, headWorktree, pr.headRefName, "PR head");
@@ -445,9 +547,14 @@ function closeoutWorkflow(
       });
     }).pipe(
       Effect.retry({ ...LOCK_RETRY, while: isIndexLockBusy }),
-      Effect.mapError((error) => isIndexLockBusy(error)
-        ? closeoutFailure(`Timed out waiting for the Git index lock after 120 seconds. ${error.message}`, error)
-        : error),
+      Effect.mapError((error) =>
+        isIndexLockBusy(error)
+          ? closeoutFailure(
+              `Timed out waiting for the Git index lock after 120 seconds. ${error.message}`,
+              error,
+            )
+          : error,
+      ),
     );
     const baseOid = yield* gitText(exec, baseWorktree!.path, ["rev-parse", "HEAD"]);
 
@@ -468,8 +575,8 @@ function closeoutWorkflow(
     }
 
     return {
-      prNumber: parsedUrl!.number,
-      prUrl: parsedUrl!.url,
+      prNumber: parsedUrl.number,
+      prUrl: parsedUrl.url,
       baseBranch: pr.baseRefName,
       baseOid,
       headBranch: pr.headRefName,
@@ -527,10 +634,7 @@ export function createCloseoutToolContract(
   };
 }
 
-type CloseoutRegistrationApi = Pick<
-  ExtensionAPI,
-  "exec" | "registerCommand" | "registerTool"
->;
+type CloseoutRegistrationApi = Pick<ExtensionAPI, "exec" | "registerCommand" | "registerTool">;
 
 export function registerCloseout(pi: CloseoutRegistrationApi): void {
   const contract = createCloseoutToolContract((command, args, options) =>

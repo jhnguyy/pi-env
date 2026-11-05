@@ -60,13 +60,15 @@ function createCloseoutFixture() {
   git(integrator, "push", "origin", "main");
   git(integrator, "push", "origin", "--delete", "feat/closeout");
 
-  return { repo, featureWorktree, unrelatedWorktree, headOid, mergeOid };
+  git(repo, "remote", "set-url", "--push", "origin", origin);
+  git(repo, "remote", "set-url", "origin", "https://github.com/acme/demo.git");
+  return { repo, origin, featureWorktree, unrelatedWorktree, headOid, mergeOid };
 }
 
 type ExecCall = { command: string; args: string[]; cwd?: string };
 
 function createExec(
-  fixture: Pick<ReturnType<typeof createCloseoutFixture>, "headOid" | "mergeOid">,
+  fixture: ReturnType<typeof createCloseoutFixture>,
   metadata: Record<string, unknown> = {},
   intercept?: (call: ExecCall) => ExecResult | undefined,
 ): { exec: ExtensionAPI["exec"]; calls: ExecCall[] } {
@@ -89,12 +91,16 @@ function createExec(
     const intercepted = intercept?.(call);
     if (intercepted) return intercepted;
     if (command === "gh") return ok(JSON.stringify(pr));
-    if (command !== "git") throw new Error(`Unexpected command: ${command}`);
-    if (args.join(" ") === "remote get-url origin") {
-      return ok("https://github.com/acme/demo.git\n");
+    if (command === "ssh") {
+      return ok(`hostname ${args.at(-1) === "github-agent" ? "github.com" : "git.example.test"}\n`);
     }
+    if (command !== "git") throw new Error(`Unexpected command: ${command}`);
 
-    const actualArgs = args[0] === "fetch" ? ["fetch", "--prune", "origin"] : args;
+    // Substitute only transport: production owns the fetch options and destination refspec.
+    const actualArgs =
+      args[0] === "fetch"
+        ? args.map((arg) => (arg.startsWith("https://github.com/") ? fixture.origin : arg))
+        : args;
     return new Promise<ExecResult>((resolve) => {
       execFile(
         "git",
@@ -114,26 +120,6 @@ function createExec(
   };
 
   return { exec, calls };
-}
-
-function githubAlias(call: ExecCall): ExecResult | undefined {
-  if (call.command === "git" && call.args.join(" ") === "remote get-url origin") {
-    return ok("git@github-agent:acme/demo.git\n");
-  }
-  if (call.command === "ssh" && call.args.join(" ") === "-G -- github-agent") {
-    return ok("host github-agent\nhostname github.com\nuser git\n");
-  }
-  return undefined;
-}
-
-function unrelatedAlias(call: ExecCall): ExecResult | undefined {
-  if (call.command === "git" && call.args.join(" ") === "remote get-url origin") {
-    return ok("git@notgithub:acme/demo.git\n");
-  }
-  if (call.command === "ssh" && call.args.join(" ") === "-G -- notgithub") {
-    return ok("host notgithub\nhostname git.example.test\nuser git\n");
-  }
-  return undefined;
 }
 
 function hasMutatingGitCall(calls: ExecCall[]): boolean {
@@ -264,7 +250,8 @@ describe("/closeout command", () => {
 
   it("resolves a GitHub SSH host alias before closeout", async () => {
     const fixture = createCloseoutFixture();
-    const { exec, calls } = createExec(fixture, {}, githubAlias);
+    git(fixture.repo, "remote", "set-url", "origin", "git@github-agent:acme/demo.git");
+    const { exec, calls } = createExec(fixture);
 
     const result = await closeoutPullRequest(exec, "/home/agent", request(fixture.repo));
     const persisted = () => ({
@@ -297,6 +284,176 @@ describe("/closeout command", () => {
       args: ["-G", "--", "github-agent"],
       cwd: fixture.repo,
     });
+  });
+
+  it("fetches GitHub into github refs without pruning or moving mirror origin refs", async () => {
+    const fixture = createCloseoutFixture();
+    git(fixture.repo, "remote", "set-url", "origin", fixture.origin);
+    git(fixture.repo, "remote", "add", "github", "https://github.com/acme/demo.git");
+    git(fixture.repo, "update-ref", "refs/remotes/origin/sentinel", fixture.headOid);
+    const mirrorRefs = git(fixture.repo, "for-each-ref", "refs/remotes/origin");
+    const { exec, calls } = createExec(fixture);
+
+    const result = await closeoutPullRequest(exec, "/home/agent", request(fixture.repo));
+
+    expect(result.deletedBranch).toBe(true);
+    expect(existsSync(fixture.featureWorktree)).toBe(false);
+    expect(existsSync(fixture.unrelatedWorktree)).toBe(true);
+    expect(git(fixture.repo, "rev-parse", "HEAD")).toBe(fixture.mergeOid);
+    expect(git(fixture.repo, "rev-parse", "refs/remotes/github/main")).toBe(fixture.mergeOid);
+    expect(git(fixture.repo, "for-each-ref", "refs/remotes/origin")).toBe(mirrorRefs);
+    expect(calls.find(({ command }) => command === "gh")?.args).toEqual([
+      "pr",
+      "view",
+      "42",
+      "--repo",
+      "github.com/acme/demo",
+      "--json",
+      "state,mergedAt,mergeCommit,url,headRefName,headRefOid,baseRefName,isCrossRepository",
+    ]);
+  });
+
+  it("selects deterministic namespaces for ordinary, SSH, duplicate and URL-disambiguated remotes", async () => {
+    const fixture = createCloseoutFixture();
+    const scenarios: Array<{ remotes: Record<string, string>; selected: string; pr?: string }> = [
+      { remotes: { origin: "https://github.com/acme/demo.git" }, selected: "origin" },
+      { remotes: { origin: "ssh://git@github.com/acme/demo.git" }, selected: "origin" },
+      {
+        remotes: {
+          github: "git@github.com:acme/demo.git",
+          origin: "https://github.com/ACME/Demo.git",
+          aaa: "https://github.com/acme/demo",
+        },
+        selected: "origin",
+      },
+      {
+        remotes: {
+          zzz: "https://github.com/acme/demo",
+          github: "https://github.com/acme/demo.git",
+          aaa: "git@github.com:acme/demo.git",
+        },
+        selected: "github",
+      },
+      {
+        remotes: { zzz: "https://github.com/acme/demo", aaa: "git@github.com:acme/demo.git" },
+        selected: "aaa",
+      },
+      {
+        remotes: {
+          origin: "https://github.com/other/repo.git",
+          github: "https://github.com/acme/demo.git",
+        },
+        selected: "github",
+        pr: "https://github.com/acme/demo/pull/42",
+      },
+    ];
+    for (const scenario of scenarios) {
+      for (const name of git(fixture.repo, "remote").split("\n").filter(Boolean))
+        git(fixture.repo, "remote", "remove", name);
+      for (const [name, url] of Object.entries(scenario.remotes))
+        git(fixture.repo, "remote", "add", name, url);
+      const { exec, calls } = createExec(fixture);
+      await closeoutPullRequest(exec, "/home/agent", {
+        pr: scenario.pr ?? "42",
+        repoPath: fixture.repo,
+      });
+      expect(calls.find(({ args }) => args[0] === "fetch")?.args).toEqual([
+        "fetch",
+        "--prune",
+        "--no-tags",
+        "https://github.com/acme/demo.git",
+        `+refs/heads/*:refs/remotes/${scenario.selected}/*`,
+      ]);
+      expect(git(fixture.repo, "rev-parse", `refs/remotes/${scenario.selected}/main`)).toBe(
+        fixture.mergeOid,
+      );
+      expect(calls.find(({ command }) => command === "gh")?.args.slice(0, 5)).toEqual([
+        "pr",
+        "view",
+        scenario.pr ?? "42",
+        "--repo",
+        "github.com/acme/demo",
+      ]);
+    }
+  });
+
+  it("fails discovery and ambiguous selection before lookup or mutation", async () => {
+    const fixture = createCloseoutFixture();
+    const assertRejected = async (
+      message: string,
+      pr: string | null = "42",
+      intercept?: (call: ExecCall) => ExecResult | undefined,
+    ) => {
+      const before = git(fixture.repo, "show-ref");
+      const { exec, calls } = createExec(fixture, {}, intercept);
+      await expect(
+        closeoutPullRequest(exec, "/home/agent", { pr: pr ?? undefined, repoPath: fixture.repo }),
+      ).rejects.toThrow(message);
+      expect(calls.some(({ command }) => command === "gh")).toBe(false);
+      expect(hasMutatingGitCall(calls)).toBe(false);
+      expect(git(fixture.repo, "show-ref")).toBe(before);
+      expect(existsSync(fixture.featureWorktree)).toBe(true);
+    };
+    git(fixture.repo, "remote", "add", "github", "https://github.com/other/repo.git");
+    await assertRejected("Pass an explicit GitHub PR URL");
+    await assertRejected("Pass an explicit GitHub PR URL", null);
+    await assertRejected(
+      "No configured GitHub fetch remote matches",
+      "https://github.com/missing/repo/pull/42",
+    );
+    git(fixture.repo, "remote", "remove", "github");
+    git(fixture.repo, "config", "--add", "remote.origin.url", "git@github.com:acme/demo.git");
+    await assertRejected("multiple distinct effective fetch URLs");
+    git(fixture.repo, "config", "--unset-all", "remote.origin.url");
+    git(fixture.repo, "config", "--add", "remote.origin.url", "https://github.com/acme/demo.git");
+    git(fixture.repo, "config", "--add", "remote.origin.url", fixture.origin);
+    await assertRejected(
+      "multiple distinct effective fetch URLs",
+      "https://github.com/acme/demo/pull/42",
+    );
+    git(fixture.repo, "config", "--unset-all", "remote.origin.url");
+    git(fixture.repo, "config", "--add", "remote.origin.url", "https://github.com/acme/demo.git");
+    for (const failedCommand of ["remote", "remote get-url --all origin"]) {
+      await assertRejected("discovery failed", "42", ({ command, args }) =>
+        command === "git" && args.join(" ") === failedCommand
+          ? { ...ok(), code: 1, stderr: "discovery failed" }
+          : undefined,
+      );
+    }
+    await assertRejected("invalid tracking namespace", "42", ({ command, args }) =>
+      command === "git" && args[0] === "check-ref-format" ? { ...ok(), code: 1 } : undefined,
+    );
+    git(fixture.repo, "remote", "set-url", "origin", fixture.origin);
+    await assertRejected("No configured GitHub fetch remote found");
+    git(fixture.repo, "remote", "set-url", "origin", "https://github.com/acme/demo.git");
+    git(fixture.repo, "config", "--add", "remote.origin.url", "https://github.com/acme/demo.git");
+    const { exec } = createExec(fixture);
+    expect(
+      (await closeoutPullRequest(exec, "/home/agent", request(fixture.repo))).deletedBranch,
+    ).toBe(true);
+  });
+
+  it("binds omitted lookup to the current worktree branch and rejects detached HEAD", async () => {
+    const fixture = createCloseoutFixture();
+    const { exec, calls } = createExec(fixture, { state: "OPEN" });
+    await expect(
+      closeoutPullRequest(exec, "/home/agent", { repoPath: fixture.featureWorktree }),
+    ).rejects.toThrow("is not merged");
+    expect(calls.find(({ command }) => command === "gh")?.args.slice(0, 5)).toEqual([
+      "pr",
+      "view",
+      "feat/closeout",
+      "--repo",
+      "github.com/acme/demo",
+    ]);
+    expect(hasMutatingGitCall(calls)).toBe(false);
+    git(fixture.featureWorktree, "checkout", "--detach");
+    const detached = createExec(fixture);
+    await expect(
+      closeoutPullRequest(detached.exec, "/home/agent", { repoPath: fixture.featureWorktree }),
+    ).rejects.toThrow("detached checkout");
+    expect(detached.calls.some(({ command }) => command === "gh")).toBe(false);
+    expect(hasMutatingGitCall(detached.calls)).toBe(false);
   });
 
   it("waits for an existing Git index lock before completing cleanup", async () => {
@@ -456,53 +613,52 @@ describe("/closeout command", () => {
 
   it("rejects an SSH host alias that does not resolve to GitHub", async () => {
     const fixture = createCloseoutFixture();
-    const { exec, calls } = createExec(fixture, {}, unrelatedAlias);
+    git(fixture.repo, "remote", "set-url", "origin", "git@notgithub:acme/demo.git");
+    const { exec, calls } = createExec(fixture);
 
     await expect(closeoutPullRequest(exec, "/home/agent", request(fixture.repo))).rejects.toThrow(
-      "does not belong to the local origin repository",
+      "No configured GitHub fetch remote",
     );
     expect(hasMutatingGitCall(calls)).toBe(false);
   });
 
-  it.each(["production", "release/2026.08"])(
-    "rejects protected head branch %s before running git",
-    async (headRefName) => {
-      const calls: ExecCall[] = [];
-      const exec: ExtensionAPI["exec"] = async (command, args, options) => {
-        calls.push({ command, args: [...args], cwd: options?.cwd });
-        return ok(
-          JSON.stringify({
-            state: "MERGED",
-            mergedAt: "2026-08-19T12:00:00Z",
-            mergeCommit: { oid: "a".repeat(40) },
-            url: "https://github.com/acme/demo/pull/42",
-            headRefName,
-            headRefOid: "b".repeat(40),
-            baseRefName: "main",
-            isCrossRepository: false,
-          }),
-        );
-      };
-
-      await expect(closeoutPullRequest(exec, "/repo", { pr: "42" })).rejects.toThrow(
-        "protected branch",
+  it("rejects unsafe or mismatched PR metadata without mutation", async () => {
+    const fixture = createCloseoutFixture();
+    const before = git(fixture.repo, "show-ref");
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ headRefName: "production" }, "protected branch"],
+      [{ headRefName: "release/2026.08" }, "protected branch"],
+      [{ state: "OPEN", mergedAt: null, mergeCommit: null }, "is not merged"],
+      [{ isCrossRepository: true }, "fork pull requests"],
+      [{ url: "https://github.com/other/repo/pull/42" }, "outside the selected repository"],
+      [{ url: "https://github.com/acme/demo/pull/43" }, "different pull request"],
+      [{ url: "not-a-url" }, "invalid pull request URL"],
+    ];
+    for (const [metadata, message] of cases) {
+      const { exec, calls } = createExec(fixture, metadata);
+      await expect(closeoutPullRequest(exec, "/home/agent", request(fixture.repo))).rejects.toThrow(
+        message,
       );
-      expect(calls.filter(({ command }) => command === "git")).toEqual([]);
-    },
-  );
-
-  it("rejects a PR that is not merged before running git", async () => {
-    const { exec, calls } = createExec(
-      { headOid: "b".repeat(40), mergeOid: "a".repeat(40) },
-      {
-        state: "OPEN",
-        mergedAt: null,
-        mergeCommit: null,
-      },
-    );
-
-    await expect(closeoutPullRequest(exec, "/repo", { pr: "42" })).rejects.toThrow("is not merged");
-    expect(calls.filter(({ command }) => command === "git")).toEqual([]);
+      expect(hasMutatingGitCall(calls)).toBe(false);
+      expect(git(fixture.repo, "show-ref")).toBe(before);
+      expect(existsSync(fixture.featureWorktree)).toBe(true);
+    }
+    for (const pr of ["https://github.com/acme/demo/pull/42", undefined]) {
+      const { exec, calls } = createExec(fixture, { url: "https://github.com/other/repo/pull/42" });
+      await expect(
+        closeoutPullRequest(exec, "/home/agent", { pr, repoPath: fixture.repo }),
+      ).rejects.toThrow("outside the selected repository");
+      expect(hasMutatingGitCall(calls)).toBe(false);
+    }
+    const wrongNumber = createExec(fixture, { url: "https://github.com/acme/demo/pull/43" });
+    await expect(
+      closeoutPullRequest(wrongNumber.exec, "/home/agent", {
+        pr: "https://github.com/acme/demo/pull/42",
+        repoPath: fixture.repo,
+      }),
+    ).rejects.toThrow("different pull request");
+    expect(hasMutatingGitCall(wrongNumber.calls)).toBe(false);
+    expect(git(fixture.repo, "show-ref")).toBe(before);
   });
 
   it("rejects a dirty target worktree before changing refs or worktrees", async () => {
@@ -548,39 +704,12 @@ describe("/closeout command", () => {
   });
 
   it("resolves a relative repository path against the Pi working directory", async () => {
-    const calls: ExecCall[] = [];
-    const exec: ExtensionAPI["exec"] = async (command, args, options) => {
-      calls.push({ command, args: [...args], cwd: options?.cwd });
-      return ok(
-        JSON.stringify({
-          state: "OPEN",
-          mergedAt: null,
-          mergeCommit: null,
-          url: "https://github.com/acme/demo/pull/42",
-          headRefName: "feat/closeout",
-          headRefOid: "a".repeat(40),
-          baseRefName: "main",
-          isCrossRepository: false,
-        }),
-      );
-    };
-
+    const fixture = createCloseoutFixture();
+    const { exec, calls } = createExec(fixture, { state: "OPEN" });
     await expect(
-      closeoutPullRequest(exec, "/home/agent", { pr: "42", repoPath: "repo" }),
+      closeoutPullRequest(exec, join(fixture.repo, ".."), { pr: "42", repoPath: "repo" }),
     ).rejects.toThrow("is not merged");
-    expect(calls[0]?.cwd).toBe("/home/agent/repo");
-  });
-
-  it("rejects fork pull requests before running git", async () => {
-    const { exec, calls } = createExec(
-      { headOid: "b".repeat(40), mergeOid: "a".repeat(40) },
-      { isCrossRepository: true },
-    );
-
-    await expect(closeoutPullRequest(exec, "/repo", { pr: "42" })).rejects.toThrow(
-      "fork pull requests",
-    );
-    expect(calls.filter(({ command }) => command === "git")).toEqual([]);
+    expect(calls[0]?.cwd).toBe(fixture.repo);
   });
 
   it("does not remove the worktree that contains the Pi current directory through a symlink", async () => {
