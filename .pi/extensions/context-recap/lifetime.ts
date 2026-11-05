@@ -1,7 +1,16 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { isObject } from "../_shared/settings";
+export type CacheModel = {
+  id: string;
+  provider: string;
+  api: string;
+  baseUrl: string;
+  compat?: { supportsExplicitPromptCacheMode?: boolean } | object;
+};
 
-export function modelKey(ctx: Pick<ExtensionContext, "model">): string {
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function modelKey(ctx: { model: CacheModel | undefined }): string {
   const m = ctx.model;
   return m ? JSON.stringify([m.provider, m.id, m.api, m.baseUrl]) : "";
 }
@@ -78,7 +87,7 @@ function openAILifetime(payload: Record<string, unknown>, omittedTtl = 1_800_000
 /** Only facts leave the provider hook; never retain the request or credentials. */
 export function requestLifetime(
   payload: unknown,
-  model: ExtensionContext["model"],
+  model: CacheModel | undefined,
 ): Lifetime | "ineligible" {
   if (!model || !isObject(payload)) return;
   // Selected-model compatibility is not evidence about a different outgoing model.
@@ -87,10 +96,7 @@ export function requestLifetime(
   return openAIRequestLifetime(payload, model);
 }
 
-function openAIRequestLifetime(
-  payload: Record<string, unknown>,
-  model: NonNullable<ExtensionContext["model"]>,
-): Lifetime {
+function openAIRequestLifetime(payload: Record<string, unknown>, model: CacheModel): Lifetime {
   let endpoint: URL;
   try {
     endpoint = new URL(model.baseUrl);
@@ -123,4 +129,73 @@ export function duration(text: string): number | undefined {
   return Number.isSafeInteger(value) && value > 30_000 && value <= 2_147_483_647
     ? value
     : undefined;
+}
+
+export type Policy = {
+  enabled: boolean;
+  estimate?: number;
+  source?: string;
+  blocked?: string;
+};
+
+const providerDefaults = [
+  { provider: "anthropic", apis: ["anthropic-messages"], origin: "https://api.anthropic.com" },
+  {
+    provider: "openai",
+    apis: ["openai-responses", "openai-completions"],
+    origin: "https://api.openai.com",
+  },
+  {
+    provider: "openai-codex",
+    apis: ["openai-codex-responses"],
+    origin: "https://chatgpt.com",
+    path: /^\/backend-api(?:\/|$)/,
+  },
+];
+
+function builtin(model: CacheModel | undefined): Policy {
+  if (!model) return { enabled: false };
+  let endpoint: URL;
+  try {
+    endpoint = new URL(model.baseUrl);
+  } catch {
+    return { enabled: false };
+  }
+  const known = providerDefaults.some(
+    (entry) =>
+      entry.provider === model.provider &&
+      entry.apis.includes(model.api) &&
+      endpoint.origin === entry.origin &&
+      (!entry.path || entry.path.test(endpoint.pathname)),
+  );
+  if (!known) return { enabled: false };
+  // Anthropic needs actual request breakpoints. OpenAI/Codex's omitted TTL is
+  // not an expiry promise; five minutes is our configurable scheduling policy.
+  return model.provider === "anthropic"
+    ? { enabled: true }
+    : {
+        enabled: true,
+        estimate: 300_000,
+        source: "built-in default estimate (not a cache guarantee)",
+      };
+}
+
+export function resolvePolicy(
+  model: CacheModel | undefined,
+  preferences: {
+    enabled?: boolean;
+    providerEnabled?: boolean;
+    estimatedLifetimeMs?: number;
+    idleWarming?: boolean;
+  } = {},
+): Policy {
+  const defaults = builtin(model);
+  const configured = preferences.estimatedLifetimeMs;
+  const policy: Policy = {
+    enabled: preferences.enabled !== false && (preferences.providerEnabled ?? defaults.enabled),
+    estimate: configured ?? defaults.estimate,
+    source: configured ? "configured estimate (not a cache guarantee)" : defaults.source,
+  };
+  if (preferences.idleWarming) policy.blocked = "native idle cache warming enabled";
+  return policy;
 }

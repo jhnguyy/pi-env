@@ -32,7 +32,7 @@ Provider IDs are exact and case-sensitive. Set a provider's `enabled` to `false`
 
 ## Scheduling expectations
 
-Supported provider, transport, and endpoint combinations are defined by [the policy defaults](../.pi/extensions/context-recap/config.ts). Unknown combinations default off. OpenAI and Codex use a built-in five-minute **estimate**, not a verified TTL or retention guarantee. Anthropic requires actual request cache breakpoints. Configured estimates replace built-in estimates; recognized actual request lifetimes take precedence. Actual caching-off or an ineligible outgoing model suppresses scheduling regardless of estimates. [Request lifetime interpretation](../.pi/extensions/context-recap/lifetime.ts) owns the metadata rules.
+Supported provider, transport, and endpoint combinations are defined by [the policy defaults](../.pi/extensions/context-recap/lifetime.ts). Unknown combinations default off. OpenAI and Codex use a built-in five-minute **estimate**, not a verified TTL or retention guarantee. Anthropic requires actual request cache breakpoints. Configured estimates replace built-in estimates; recognized actual request lifetimes take precedence. Actual caching-off or an ineligible outgoing model suppresses scheduling regardless of estimates. [Request lifetime interpretation](../.pi/extensions/context-recap/lifetime.ts) owns the metadata rules.
 
 Only a fresh successful response from the selected physical model can schedule an idle recap. Restored history and status checks do not arm one. Activity or changed settings can consume the target; missed windows do not retry or self-rearm. A successful response and a timer anchor do not prove that caching occurred, and the recap's serialized prompt may not reuse the conversation's cached prefix.
 

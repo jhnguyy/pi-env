@@ -1,9 +1,9 @@
 import { expect, it } from "vitest";
-import { fauxProvider } from "@earendil-works/pi-ai";
-import { duration, requestLifetime } from "../lifetime";
+import { duration, requestLifetime, type CacheModel } from "../lifetime";
 
-const model = (api: string, extra = {}) => ({
-  ...fauxProvider().getModel(),
+const model = (api: string, extra: Partial<CacheModel> = {}): CacheModel => ({
+  id: "cache-model",
+  provider: "cache-provider",
   api,
   baseUrl: "https://api.openai.com/v1",
   ...extra,
@@ -116,7 +116,7 @@ it("does not infer metadata deadlines from legacy retention, Codex, proxies or m
       baseUrl: "https://proxy.example",
       compat: { supportsExplicitPromptCacheMode: true },
     }),
-    model("faux", { promptCache: { short: 300, long: 3600 } }),
+    { ...model("faux"), promptCache: { short: 300, long: 3600 } },
   ])
     expect(requestLifetime({ prompt_cache_retention: "24h" }, m)).toBeUndefined();
 });

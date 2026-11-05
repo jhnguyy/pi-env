@@ -15,6 +15,8 @@ import {
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import contextRecap from "../index";
+import { loadPolicy } from "../config";
+import type { SettingsEnv } from "../../_shared/settings";
 
 const summary =
   "## Objective\nImplement recap.\n## Plan and Progress\nNative fixture completed.\n## Remaining Work\nQualify hosted providers.\n## Information Sources\nREADME.md.";
@@ -164,6 +166,61 @@ async function fixture({
   };
 }
 
+it("adapts shared settings snapshots to policy and suppresses uncertain settings without raw values", () => {
+  const model = {
+    id: "cache-model",
+    provider: "openai-codex",
+    api: "openai-codex-responses",
+    baseUrl: "https://chatgpt.com/backend-api/codex",
+  };
+  const reads: string[] = [];
+  const policy = (global: unknown, project: unknown = {}, selected = model) => {
+    const env: SettingsEnv = {
+      globalSettingsPath: () => "/isolated/global.json",
+      projectSettingsPath: () => "/isolated/project.json",
+      readFile: (path) => {
+        reads.push(path);
+        const document = path === "/isolated/global.json" ? global : project;
+        return typeof document === "string" ? document : JSON.stringify(document);
+      },
+    };
+    return loadPolicy("/isolated", selected, env);
+  };
+  const global = {
+    contextRecap: { providers: { "openai-codex": { enabled: false, estimatedLifetime: "1h" } } },
+  };
+  const project = {
+    contextRecap: { providers: { custom: { enabled: true, estimatedLifetime: "1m" } } },
+    cacheWarming: "idle",
+  };
+  expect(policy(global, project)).toEqual({
+    enabled: true,
+    estimate: 300_000,
+    source: "built-in default estimate (not a cache guarantee)",
+  });
+  expect(reads).toEqual(["/isolated/global.json", "/isolated/project.json"]);
+  expect(policy(global, project, { ...model, provider: "custom" })).toMatchObject({
+    enabled: true,
+    estimate: 60_000,
+    source: "configured estimate (not a cache guarantee)",
+  });
+  expect(policy(global)).toMatchObject({ enabled: false, estimate: 3_600_000 });
+  expect(policy({ cacheWarming: "idle" }, { cacheWarming: "off" }).blocked).toBe(
+    "native idle cache warming enabled",
+  );
+  for (const invalid of [
+    "SENSITIVE_SENTINEL",
+    "[]",
+    { cacheWarming: "SENSITIVE_SENTINEL" },
+    { contextRecap: { providers: { custom: { estimatedLifetime: "SENSITIVE_SENTINEL" } } } },
+  ]) {
+    const result = policy(invalid);
+    expect(result.enabled).toBe(false);
+    expect(result.blocked).toContain("repair contextRecap/cacheWarming in settings.json");
+    expect(result.blocked).not.toContain("SENSITIVE_SENTINEL");
+  }
+});
+
 it("built automatic provider policy persists one native recap, retained history and system checkpoint", async () => {
   let prepared: { firstKeptEntryId: string; tokensBefore: number } | undefined;
   let nativeUsage: unknown;
@@ -250,21 +307,17 @@ it("built automatic provider policy persists one native recap, retained history 
   expect(f.errors).toEqual([]);
 });
 
-it.each(["malformed", "over budget"])(
-  "cancels %s recap without native fallback or persistence",
-  async (source) => {
-    const f = await fixture();
-    if (source === "over budget") f.session.model!.contextWindow = 512;
-    f.provider.setResponses([
-      fauxAssistantMessage("malformed"),
-      fauxAssistantMessage("must not be requested"),
-    ]);
-    await expect(f.session.compact()).rejects.toThrow("cancelled");
-    expect(f.provider.state.callCount).toBe(source === "over budget" ? 1 : 2);
-    expect(f.provider.getPendingResponseCount()).toBe(source === "over budget" ? 2 : 1);
-    expect(f.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(false);
-  },
-);
+it("cancels malformed recap without native fallback or persistence", async () => {
+  const f = await fixture();
+  f.provider.setResponses([
+    fauxAssistantMessage("malformed"),
+    fauxAssistantMessage("must not be requested"),
+  ]);
+  await expect(f.session.compact()).rejects.toThrow("cancelled");
+  expect(f.provider.state.callCount).toBe(2);
+  expect(f.provider.getPendingResponseCount()).toBe(1);
+  expect(f.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(false);
+});
 
 it("invalidates in-flight inference on thinking change even when the provider ignores abort", async () => {
   const f = await fixture();
@@ -311,12 +364,14 @@ it("invalidates in-flight inference on thinking change even when the provider ig
   expect(f.errors).toEqual([]);
 });
 
-it.each([
-  "invalid JSON",
-  JSON.stringify({ cacheWarming: "idle", contextRecap: { enabled: false } }),
-])("native manual compaction ignores automatic policy %#", async (settings) => {
+it("native manual compaction remains available when invalid settings block automatic recap", async () => {
   const f = await fixture({ built: true });
-  await writeFile(join(f.agentDir, "settings.json"), settings);
+  await writeFile(join(f.agentDir, "settings.json"), "invalid JSON");
+  f.fireAutomatic();
+  await f.session.waitForIdle();
+  expect(f.provider.state.callCount).toBe(1);
+  await f.session.prompt("/context-recap");
+  expect(f.notifications.at(-1)).toContain("repair contextRecap/cacheWarming in settings.json");
   f.provider.setResponses([fauxAssistantMessage(summary)]);
   await f.session.compact();
   expect(f.provider.state.callCount).toBe(2);
