@@ -45,27 +45,6 @@ Leave `PI_PACKAGE_DIR` and `PI_ENV_PI_EXECUTABLE` unset during setup and subsequ
 
 After updating the application checkout, rerun the same setup command. Reuse the tools package while it satisfies the checkout's [runtime requirements](../package.json). The consumer owns source revision selection, persistent state, setup sequencing, and session restarts. Existing sessions do not reload the updated runtime automatically.
 
-## Optional Hunk review
-
-[Hunk](https://github.com/modem-dev/hunk) v0.24.1 is an opt-in package for `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`; it is not exported for Intel macOS. It retains its upstream-locked nixpkgs and is not added to default tools, Home Manager, or development shells.
-
-From this checkout, enter a temporary shell or build the package:
-
-```bash
-nix shell .#hunk
-# Or build without installing:
-nix build .#hunk
-./result/bin/hunk --version
-```
-
-For declarative installation, add the exported package to the consuming host's `environment.systemPackages` or Home Manager's `home.packages` (with `inputs.pi-env` naming its locked pi-env input):
-
-```nix
-inputs.pi-env.packages.${pkgs.stdenv.hostPlatform.system}.hunk
-```
-
-Open Hunk yourself in the intended worktree, then invoke `/skill:hunk-review` in Pi. The skill loads version-matched instructions with `hunk skill show hunk-review`. CLI session control requires the TUI and agent to share a host, OS user, and loopback access; a remote terminal or container does not automatically share that boundary. Live review notes are not a durable record: closing sessions, replacing review contents, or restarting the daemon can lose notes. Preserve important discussion elsewhere before those actions.
-
 ## Analysis diagnostics
 
 Analyze keeps a bounded local NDJSON journal under `$XDG_STATE_HOME/pi-env/analyze`, or `~/.local/state/pi-env/analyze` when that variable is absent. It provides diagnostic context for worker failures. Set `PI_ENV_ANALYZE_JOURNAL_DIR` to choose another location or `PI_ENV_ANALYZE_JOURNAL_ENABLED=false` to disable it. Preserve relevant failure evidence before later runs rotate it, and review journals before sharing them.

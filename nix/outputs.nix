@@ -48,7 +48,7 @@ in
 {
   packages = {
     default = toolchain;
-    inherit (packages) tools toolchain pi tmux;
+    inherit (packages) tools toolchain pi tmux hunk;
   };
   apps = {
     default = {
