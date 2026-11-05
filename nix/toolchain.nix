@@ -1,5 +1,6 @@
 {
   nixpkgs,
+  hunk,
   nub,
   pi,
 }:
@@ -74,7 +75,9 @@ let
           manifest.packageManager == "nub@${package.version}"
         ) "Nub flake must match package.json#packageManager";
         package;
+      hunkPackage = hunk.packages.${pkgs.stdenv.hostPlatform.system}.hunk;
       toolsPackages = [
+        hunkPackage
         pkgs.git
         pkgs.gh
         node
@@ -112,6 +115,7 @@ let
     {
       inherit node tmux toolchainPackages;
       pi = piPackage;
+      hunk = hunkPackage;
       tools = package "pi-env-tools" toolsPackages;
       toolchain = package "pi-env-toolchain" toolchainPackages;
     };
