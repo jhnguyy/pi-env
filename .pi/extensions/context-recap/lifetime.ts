@@ -1,0 +1,201 @@
+export type CacheModel = {
+  id: string;
+  provider: string;
+  api: string;
+  baseUrl: string;
+  compat?: { supportsExplicitPromptCacheMode?: boolean } | object;
+};
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function modelKey(ctx: { model: CacheModel | undefined }): string {
+  const m = ctx.model;
+  return m ? JSON.stringify([m.provider, m.id, m.api, m.baseUrl]) : "";
+}
+
+type Lifetime = number | "off" | undefined;
+
+/** Only provider envelope positions participate, never arbitrary user/schema data. */
+function shortestBreakpoint(
+  envelopes: unknown[],
+  field: string,
+  parse: (value: unknown) => number | undefined,
+): Lifetime {
+  let shortest = Infinity;
+  let unknown = false;
+  for (const value of envelopes) {
+    if (!isObject(value) || value[field] === undefined) continue;
+    const ttl = parse(value[field]);
+    if (ttl) shortest = Math.min(shortest, ttl);
+    else unknown = true;
+  }
+  if (unknown) return;
+  return shortest === Infinity ? "off" : shortest;
+}
+
+function array(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function contentBlocks(items: unknown): unknown[] {
+  return array(items).flatMap((item) => (isObject(item) ? array(item.content) : []));
+}
+
+function anthropicLifetime(payload: Record<string, unknown>): Lifetime {
+  const envelopes = [
+    payload,
+    ...array(payload.system),
+    ...array(payload.tools),
+    ...contentBlocks(payload.messages),
+  ];
+  return shortestBreakpoint(envelopes, "cache_control", (control) => {
+    if (!isObject(control) || control.type !== "ephemeral") return;
+    if (control.ttl === undefined || control.ttl === "5m") return 300_000;
+    if (control.ttl === "1h") return 3_600_000;
+    return;
+  });
+}
+
+function openAITtl(ttl: unknown): number | undefined {
+  if (ttl === undefined || ttl === "30m") return 1_800_000;
+  if (ttl === "12h") return 43_200_000;
+  return;
+}
+
+function openAILifetime(payload: Record<string, unknown>, omittedTtl = 1_800_000): Lifetime {
+  const options = payload.prompt_cache_options;
+  if (options !== undefined && !isObject(options)) return;
+  const settings = isObject(options) ? options : {};
+  const defaultTtl = settings.ttl === undefined ? omittedTtl : openAITtl(settings.ttl);
+  const shortest = shortestBreakpoint(
+    contentBlocks(payload.input),
+    "prompt_cache_breakpoint",
+    (bp) => {
+      if (!isObject(bp)) return;
+      return bp.ttl === undefined ? defaultTtl || undefined : openAITtl(bp.ttl);
+    },
+  );
+  if (shortest === undefined) return;
+  if (settings.mode === "explicit") return shortest;
+  if (!defaultTtl) return;
+  if (settings.mode !== undefined && settings.mode !== "implicit") return;
+  return shortest === "off" ? defaultTtl : Math.min(defaultTtl, shortest);
+}
+
+/** Only facts leave the provider hook; never retain the request or credentials. */
+export function requestLifetime(
+  payload: unknown,
+  model: CacheModel | undefined,
+): Lifetime | "ineligible" {
+  if (!model || !isObject(payload)) return;
+  // Selected-model compatibility is not evidence about a different outgoing model.
+  if (payload.model !== undefined && payload.model !== model.id) return "ineligible";
+  if (model.api === "anthropic-messages") return anthropicLifetime(payload);
+  return openAIRequestLifetime(payload, model);
+}
+
+function openAIRequestLifetime(payload: Record<string, unknown>, model: CacheModel): Lifetime {
+  let endpoint: URL;
+  try {
+    endpoint = new URL(model.baseUrl);
+  } catch {
+    return;
+  }
+  if (
+    model.api === "openai-codex-responses" &&
+    endpoint.origin === "https://chatgpt.com" &&
+    /^\/backend-api(?:\/|$)/.test(endpoint.pathname)
+  ) {
+    // Only explicit metadata is evidence here; omitted Codex TTL stays unknown.
+    return payload.prompt_cache_options === undefined ? undefined : openAILifetime(payload, 0);
+  }
+  if (model.api !== "openai-responses" || endpoint.origin !== "https://api.openai.com") return;
+  if (
+    model.compat &&
+    "supportsExplicitPromptCacheMode" in model.compat &&
+    model.compat.supportsExplicitPromptCacheMode
+  )
+    return openAILifetime(payload);
+  // Legacy 24h is an upper retention bound, not a fixed expiry deadline.
+  return;
+}
+
+export function duration(text: string): number | undefined {
+  const match = /^(\d+(?:\.\d+)?)(s|m|h)$/.exec(text);
+  if (!match) return;
+  const value = Number(match[1]) * ({ s: 1000, m: 60_000, h: 3_600_000 }[match[2]] ?? 0);
+  return Number.isSafeInteger(value) && value > 30_000 && value <= 2_147_483_647
+    ? value
+    : undefined;
+}
+
+export type Policy = {
+  enabled: boolean;
+  estimate?: number;
+  source?: string;
+  blocked?: string;
+};
+
+const providerDefaults = [
+  { provider: "anthropic", apis: ["anthropic-messages"], origin: "https://api.anthropic.com" },
+  {
+    provider: "openai",
+    apis: ["openai-responses", "openai-completions"],
+    origin: "https://api.openai.com",
+  },
+  {
+    provider: "openai-codex",
+    apis: ["openai-codex-responses"],
+    origin: "https://chatgpt.com",
+    path: /^\/backend-api(?:\/|$)/,
+  },
+];
+
+function builtin(model: CacheModel | undefined): Policy {
+  if (!model) return { enabled: false };
+  let endpoint: URL;
+  try {
+    endpoint = new URL(model.baseUrl);
+  } catch {
+    return { enabled: false };
+  }
+  const known = providerDefaults.some(
+    (entry) =>
+      entry.provider === model.provider &&
+      entry.apis.includes(model.api) &&
+      endpoint.origin === entry.origin &&
+      (!entry.path || entry.path.test(endpoint.pathname)),
+  );
+  if (!known) return { enabled: false };
+  // Anthropic needs actual request breakpoints. OpenAI/Codex's omitted TTL is
+  // not an expiry promise; five minutes is our configurable scheduling policy.
+  return model.provider === "anthropic"
+    ? { enabled: true }
+    : {
+        enabled: true,
+        estimate: 300_000,
+        source: "built-in default estimate (not a cache guarantee)",
+      };
+}
+
+export function resolvePolicy(
+  model: CacheModel | undefined,
+  preferences: {
+    enabled?: boolean;
+    providerEnabled?: boolean;
+    estimatedLifetimeMs?: number;
+    idleWarming?: boolean;
+  } = {},
+): Policy {
+  const defaults = builtin(model);
+  const configured = preferences.estimatedLifetimeMs;
+  const policy: Policy = {
+    enabled: preferences.enabled !== false && (preferences.providerEnabled ?? defaults.enabled),
+    estimate: configured ?? defaults.estimate,
+    source: configured ? "configured estimate (not a cache guarantee)" : defaults.source,
+  };
+  if (preferences.idleWarming) policy.blocked = "native idle cache warming enabled";
+  return policy;
+}
