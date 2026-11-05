@@ -30,13 +30,11 @@ async function fixture({
   extra,
   before,
   built = false,
-  automatic = false,
   release = () => {},
 }: {
   extra?: (pi: ExtensionAPI) => void;
   before?: (pi: ExtensionAPI) => void;
   built?: boolean;
-  automatic?: boolean;
   release?: () => void;
 } = {}) {
   const root = await mkdtemp(join(tmpdir(), "context-recap-"));
@@ -67,15 +65,14 @@ async function fixture({
   await mkdir(agentDir);
   vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
   const provider = fauxProvider({ provider: "recap-fixture", tokenSize: { min: 1000, max: 1000 } });
-  if (automatic)
-    await writeFile(
-      join(agentDir, "settings.json"),
-      JSON.stringify({
-        contextRecap: {
-          providers: { [provider.getModel().provider]: { enabled: true, estimatedLifetime: "5m" } },
-        },
-      }),
-    );
+  await writeFile(
+    join(agentDir, "settings.json"),
+    JSON.stringify({
+      contextRecap: {
+        providers: { [provider.getModel().provider]: { enabled: true, estimatedLifetime: "5m" } },
+      },
+    }),
+  );
   const services = await createAgentSessionServices({
     cwd: root,
     agentDir,
@@ -123,6 +120,29 @@ async function fixture({
       },
     },
   });
+  // Keep SDK IO real; control only the idle scheduler's long timer and wall clock.
+  const realSetTimeout = globalThis.setTimeout;
+  const candidates: { callback: () => void; handle: NodeJS.Timeout; target: number }[] = [];
+  let now = Date.now();
+  const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+  const timers = vi.spyOn(globalThis, "setTimeout").mockImplementation((callback, ms, ...args) => {
+    const handle = realSetTimeout(callback, ms, ...args);
+    if (ms === 270_000)
+      candidates.push({ callback: () => callback(...args), handle, target: now + ms });
+    return handle;
+  });
+  onTestFinished(() => {
+    for (const candidate of candidates) clearTimeout(candidate.handle);
+    timers.mockRestore();
+    clock.mockRestore();
+  });
+  const fireAutomatic = () => {
+    const candidate = candidates.at(-1);
+    if (!candidate) throw new Error("Fresh successful run did not schedule recap");
+    clearTimeout(candidate.handle);
+    now = candidate.target;
+    candidate.callback();
+  };
   provider.setResponses([fauxAssistantMessage("Earlier evidence ".repeat(100))]);
   await session.prompt("Implement the feature, do not publish.");
   return {
@@ -134,6 +154,8 @@ async function fixture({
     services,
     notifications,
     errors,
+    candidates,
+    fireAutomatic,
     gate: () => {
       const gate = barrier();
       releases.push(gate.resolve);
@@ -148,7 +170,6 @@ it("built automatic provider policy persists one native recap, retained history 
   let payloadHooks = 0;
   const f = await fixture({
     built: true,
-    automatic: true,
     extra: (pi) => {
       pi.on("before_provider_request", () => {
         payloadHooks++;
@@ -163,37 +184,21 @@ it("built automatic provider policy persists one native recap, retained history 
   });
   const original = f.sessionManager.buildSessionProjection().messages[0];
   if (original?.role !== "system") throw new Error("Missing initial checkpoint");
-  // Fake only long scheduler timers; SDK IO and completion retain real timers.
-  const realSetTimeout = globalThis.setTimeout;
-  const candidates: { callback: () => void; handle: NodeJS.Timeout }[] = [];
-  let now = Date.now();
-  const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
-  const timers = vi.spyOn(globalThis, "setTimeout").mockImplementation((callback, ms, ...args) => {
-    const handle = realSetTimeout(callback, ms, ...args);
-    if (ms === 270_000) candidates.push({ callback: () => callback(...args), handle });
-    return handle;
-  });
-  onTestFinished(() => {
-    for (const candidate of candidates) clearTimeout(candidate.handle);
-    timers.mockRestore();
-    clock.mockRestore();
-  });
   f.provider.setResponses([
     fauxAssistantMessage("Fresh retained evidence"),
     fauxAssistantMessage(summary),
   ]);
   await f.session.prompt("Continue without publishing");
+  const beforeTokens = f.session.getSessionStats().tokens;
   expect(payloadHooks).toBe(0);
-  expect(candidates).toHaveLength(1);
+  expect(f.candidates).toHaveLength(2);
   expect(f.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(false);
   const completed = f.gate();
   const unsubscribe = f.session.subscribe((event) => {
     if (event.type === "compaction_end") completed.resolve();
   });
   onTestFinished(unsubscribe);
-  clearTimeout(candidates[0].handle);
-  now += 270_000;
-  candidates[0].callback();
+  f.fireAutomatic();
   await completed.promise;
   await f.session.waitForIdle();
   const reopened = SessionManager.open(
@@ -212,6 +217,12 @@ it("built automatic provider policy persists one native recap, retained history 
   expect(saved[0].usage?.input).toBeGreaterThan(0);
   expect(saved[0].usage?.output).toBeGreaterThan(0);
   expect(saved[0].usage?.cacheWrite).toBe(0);
+  expect(f.session.getSessionStats().tokens).toMatchObject({
+    input: beforeTokens.input + saved[0].usage!.input,
+    output: beforeTokens.output + saved[0].usage!.output,
+    cacheRead: beforeTokens.cacheRead + saved[0].usage!.cacheRead,
+    cacheWrite: beforeTokens.cacheWrite + saved[0].usage!.cacheWrite,
+  });
   const messages = reopened.buildSessionProjection().messages;
   const checkpoint = messages[0];
   if (checkpoint?.role !== "system") throw new Error("Missing reopened checkpoint");
@@ -223,15 +234,18 @@ it("built automatic provider policy persists one native recap, retained history 
   expect(checkpoint.toolsAdded).toEqual(
     expect.arrayContaining([expect.objectContaining({ name: "read" })]),
   );
-  expect(messages).toContainEqual(
-    expect.objectContaining({
-      role: "assistant",
-      content: [{ type: "text", text: "Fresh retained evidence" }],
-    }),
-  );
+  expect(
+    messages.filter(
+      (message) =>
+        message.role === "assistant" &&
+        message.content.some(
+          (part) => part.type === "text" && part.text === "Fresh retained evidence",
+        ),
+    ),
+  ).toHaveLength(1);
   expect(f.provider.state.callCount).toBe(3);
-  expect(candidates).toHaveLength(1);
-  await f.session.prompt("/context-recap status");
+  expect(f.candidates).toHaveLength(2);
+  await f.session.prompt("/context-recap");
   expect(f.notifications.at(-1)).toContain("recap saved; waiting for a fresh successful run");
   expect(f.errors).toEqual([]);
 });
@@ -252,92 +266,64 @@ it.each(["malformed", "over budget"])(
   },
 );
 
-it.each(["thinking change", "cancel command"])(
-  "invalidates in-flight inference on %s",
-  async (source) => {
-    const f = await fixture();
-    const entered = f.gate();
-    const release = f.gate();
-    f.provider.setResponses([
-      async () => {
-        entered.resolve();
-        await release.promise;
-        return fauxAssistantMessage(summary);
-      },
-    ]);
-    const outcome = expect(f.session.compact()).rejects.toThrow("cancelled");
-    try {
-      await entered.promise;
-      if (source === "cancel command") {
-        await f.session.prompt("/context-recap cancel");
-        expect(f.notifications).toContain("Active context recap cancelled.");
-      } else
-        await f.session.extensionRunner.emit({
-          type: "thinking_level_select",
-          level: "off",
-          previousLevel: "low",
-        });
-      await outcome;
-      expect(f.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(
-        false,
-      );
-      expect(f.provider.state.callCount).toBe(2);
-    } finally {
-      release.resolve();
-    }
-  },
-);
-
-it.each([
-  "invalid JSON",
-  JSON.stringify({ cacheWarming: "idle", contextRecap: { enabled: false } }),
-])("manual now ignores automatic policy %#", async (settings) => {
-  const f = await fixture({ built: true });
-  await writeFile(join(f.agentDir, "settings.json"), settings);
-  f.provider.setResponses([fauxAssistantMessage(summary)]);
-  const completed = f.gate();
-  const unsubscribe = f.session.subscribe((event) => {
-    if (event.type === "compaction_end") completed.resolve();
-  });
-  try {
-    await f.session.prompt("/context-recap now");
-    await completed.promise;
-    await f.session.waitForIdle();
-  } finally {
-    unsubscribe();
-  }
-  expect(f.provider.state.callCount).toBe(2);
-  expect(f.sessionManager.getEntries().filter((entry) => entry.type === "compaction")).toHaveLength(
-    1,
-  );
-  expect(f.errors).toEqual([]);
-});
-
-it("cancel never aborts unrelated ordinary agent work", async () => {
+it("invalidates in-flight inference on thinking change even when the provider ignores abort", async () => {
   const f = await fixture();
   const entered = f.gate();
   const release = f.gate();
+  const returned = f.gate();
+  const completed = f.gate();
   let signal: AbortSignal | undefined;
+  f.session.subscribe((event) => {
+    if (event.type === "compaction_end") completed.resolve();
+  });
   f.provider.setResponses([
     async (_messages, options) => {
       signal = options?.signal;
       entered.resolve();
       await release.promise;
-      return fauxAssistantMessage("ordinary work finished");
+      returned.resolve();
+      return fauxAssistantMessage(summary);
     },
   ]);
-  const prompt = f.session.prompt("Continue ordinary work");
+  f.fireAutomatic();
   try {
     await entered.promise;
-    await f.session.prompt("/context-recap cancel");
-    expect(f.notifications.at(-1)).toBe("No active context recap to cancel.");
-    expect(signal?.aborted).toBe(false);
+    await f.session.extensionRunner.emit({
+      type: "thinking_level_select",
+      level: "off",
+      previousLevel: "low",
+    });
+    await completed.promise;
+    await f.session.waitForIdle();
+    expect(signal?.aborted).toBe(true);
+    expect(f.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(false);
+    expect(f.provider.state.callCount).toBe(2);
   } finally {
     release.resolve();
-    await prompt;
   }
-  expect(f.session.getLastAssistantText()).toBe("ordinary work finished");
+  await returned.promise;
+  await f.session.waitForIdle();
+  const reopened = SessionManager.open(
+    f.sessionManager.getSessionFile()!,
+    join(f.root, "reopened"),
+  );
+  expect(reopened.getEntries().some((entry) => entry.type === "compaction")).toBe(false);
+  expect(f.errors).toEqual([]);
+});
+
+it.each([
+  "invalid JSON",
+  JSON.stringify({ cacheWarming: "idle", contextRecap: { enabled: false } }),
+])("native manual compaction ignores automatic policy %#", async (settings) => {
+  const f = await fixture({ built: true });
+  await writeFile(join(f.agentDir, "settings.json"), settings);
+  f.provider.setResponses([fauxAssistantMessage(summary)]);
+  await f.session.compact();
   expect(f.provider.state.callCount).toBe(2);
+  expect(f.sessionManager.getEntries().filter((entry) => entry.type === "compaction")).toHaveLength(
+    1,
+  );
+  expect(f.errors).toEqual([]);
 });
 
 it.each(["ordinary", "bypass", "earlier delayed hook"])(
@@ -371,7 +357,7 @@ it.each(["ordinary", "bypass", "earlier delayed hook"])(
     f.session.subscribe((event) => {
       if (event.type === "agent_settled") completed.resolve();
     });
-    const command = f.session.prompt("/context-recap now");
+    f.fireAutomatic();
     const submitted =
       source !== "bypass"
         ? f.session.prompt("exactly once after recap")
@@ -388,7 +374,6 @@ it.each(["ordinary", "bypass", "earlier delayed hook"])(
     } finally {
       release.resolve();
     }
-    await command;
     await submitted;
     await completed.promise;
     expect(signal?.aborted).toBe(false);
@@ -422,13 +407,9 @@ it.each(["thinking change", "native abort"])(
         }),
     });
     f.provider.setResponses([fauxAssistantMessage(summary), fauxAssistantMessage("later work")]);
-    await f.session.prompt("/context-recap now");
+    f.fireAutomatic();
     try {
       await entered.promise;
-      await f.session.prompt("/context-recap status");
-      expect(f.notifications.at(-1)).toContain("handed-off");
-      await f.session.prompt("/context-recap off");
-      expect(f.notifications.at(-1)).toContain("cannot retract");
       await expect(f.session.prompt("during acquired SDK compaction")).rejects.toThrow(
         "compaction is in progress",
       );
@@ -481,8 +462,8 @@ it.each(["consumed", "authentication failure"])(
         configured.mockRestore();
       }
     }
-    await f.session.prompt("/context-recap now");
-    expect(f.notifications.at(-1)).toContain("must be idle");
+    f.fireAutomatic();
+    expect(f.session.isCompacting).toBe(false);
     expect(f.provider.state.callCount).toBe(1);
     f.provider.setResponses([fauxAssistantMessage("recovered"), fauxAssistantMessage(summary)]);
     await f.session.prompt("later clean input");
@@ -490,14 +471,15 @@ it.each(["consumed", "authentication failure"])(
     f.session.subscribe((event) => {
       if (event.type === "compaction_end") completed.resolve();
     });
-    await f.session.prompt("/context-recap now");
+    f.fireAutomatic();
     await completed.promise;
+    await f.session.waitForIdle();
     expect(f.provider.state.callCount).toBe(3);
     expect(f.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(true);
   },
 );
 
-it("suspended downstream preflight blocks manual acquisition before authentication/run starts", async () => {
+it("suspended downstream preflight prevents automatic acquisition before authentication/run starts", async () => {
   const entered = barrier();
   const release = barrier();
   const f = await fixture({
@@ -515,8 +497,7 @@ it("suspended downstream preflight blocks manual acquisition before authenticati
   const submitted = f.session.prompt("delayed preflight");
   try {
     await entered.promise;
-    await f.session.prompt("/context-recap now");
-    expect(f.notifications.at(-1)).toContain("must be idle");
+    f.fireAutomatic();
     expect(f.session.isCompacting).toBe(false);
   } finally {
     release.resolve();
@@ -577,7 +558,7 @@ it("InteractiveMode natively queues acquired-compaction terminal input exactly o
     },
     fauxAssistantMessage("terminal work completed"),
   ]);
-  await f.session.prompt("/context-recap now");
+  f.fireAutomatic();
   try {
     await entered.promise;
     input("terminal queued exactly once");

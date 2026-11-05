@@ -12,10 +12,15 @@ let cwd: string;
 function settings(value: unknown) {
   writeFileSync(join(agentDir, "settings.json"), JSON.stringify(value));
 }
-function fixture() {
+function fixture(automatic = true) {
   const pi = { on: vi.fn(), registerCommand: vi.fn() };
   const sessionManager = SessionManager.inMemory(cwd);
   const model: NonNullable<ExtensionContext["model"]> = fauxProvider().getModel();
+  const configure = (estimatedLifetime = "5m") =>
+    settings({
+      contextRecap: { providers: { [model.provider]: { enabled: true, estimatedLifetime } } },
+    });
+  if (automatic) configure();
   const ctx = {
     mode: "tui",
     cwd,
@@ -32,7 +37,7 @@ function fixture() {
   contextRecap(pi);
   const emit = (name: string, event = {}) =>
     pi.on.mock.calls.find(([n]) => n === name)?.[1](event, ctx);
-  const command = (args: string) => pi.registerCommand.mock.calls[0][1].handler(args, ctx);
+  const command = (args = "") => pi.registerCommand.mock.calls[0][1].handler(args, ctx);
   const response = () =>
     sessionManager.appendMessage({
       ...fauxAssistantMessage("completed"),
@@ -50,7 +55,7 @@ function fixture() {
     response();
     await emit("agent_settled", { aborted: false });
   };
-  return { ctx, emit, command, start, response, success };
+  return { ctx, emit, command, configure, start, response, success };
 }
 const advance = (ms: number) => vi.advanceTimersByTimeAsync(ms);
 beforeEach(() => {
@@ -74,7 +79,7 @@ afterEach(() => {
 });
 
 it("enables known Codex by default, never arms from history, and never rearms itself", async () => {
-  const f = fixture();
+  const f = fixture(false);
   Object.assign(f.ctx.model, {
     provider: "openai-codex",
     api: "openai-codex-responses",
@@ -82,12 +87,12 @@ it("enables known Codex by default, never arms from history, and never rearms it
   });
   f.response();
   await f.emit("session_start");
-  await f.command("status");
-  expect(f.ctx.ui.notify.mock.lastCall?.[0]).toContain("Automatic context recap on");
+  await f.command();
+  expect(f.ctx.ui.notify.mock.lastCall?.[0]).toContain("Automatic context recap enabled");
   await advance(300_000);
   expect(f.ctx.compact).not.toHaveBeenCalled();
   await f.success();
-  await f.command("status");
+  await f.command();
   expect(f.ctx.ui.notify.mock.lastCall?.[0]).toContain(
     "built-in default estimate (not a cache guarantee)",
   );
@@ -98,16 +103,15 @@ it("enables known Codex by default, never arms from history, and never rearms it
   expect(f.ctx.compact).toHaveBeenCalledTimes(1);
 });
 
-it.each([false, true])(
-  "unknown provider needs an estimate as well as enablement (%s)",
-  async (estimated) => {
-    const f = fixture();
-    await f.command(estimated ? "on 5m" : "on");
-    await f.success();
-    await advance(270_000);
-    expect(f.ctx.compact).toHaveBeenCalledTimes(estimated ? 1 : 0);
-  },
-);
+it.each(["default", "enabled", "estimated"])("unknown provider scheduling: %s", async (policy) => {
+  const f = fixture(false);
+  if (policy === "enabled")
+    settings({ contextRecap: { providers: { [f.ctx.model.provider]: { enabled: true } } } });
+  if (policy === "estimated") f.configure();
+  await f.success();
+  await advance(270_000);
+  expect(f.ctx.compact).toHaveBeenCalledTimes(policy === "estimated" ? 1 : 0);
+});
 
 it.each(["cache off", "different outgoing model"])(
   "never restores eligibility via an estimate after %s",
@@ -118,7 +122,6 @@ it.each(["cache off", "different outgoing model"])(
       baseUrl: "https://api.openai.com/v1",
       compat: { supportsExplicitPromptCacheMode: true },
     });
-    await f.command("on 5m");
     await f.success(
       cause === "cache off" ? { prompt_cache_options: { mode: "explicit" } } : { model: "other" },
     );
@@ -130,7 +133,6 @@ it.each(["cache off", "different outgoing model"])(
 it("uses actual metadata over estimates and refines the early anchor at the payload hook", async () => {
   const f = fixture();
   f.ctx.model.api = "anthropic-messages";
-  await f.command("on 5m");
   await f.start();
   await advance(10_000);
   await f.emit("before_provider_request", {
@@ -142,8 +144,6 @@ it("uses actual metadata over estimates and refines the early anchor at the payl
   expect(f.ctx.compact).not.toHaveBeenCalled();
   await advance(10_000);
   expect(f.ctx.compact).toHaveBeenCalledTimes(1);
-  await f.command("status");
-  expect(f.ctx.ui.notify.mock.lastCall?.[0]).toContain("acquiring");
 });
 
 it.each([
@@ -157,15 +157,11 @@ it.each([
   "model_select",
   "ui_prompt_start",
   "session_shutdown",
-  "off",
-  "cancel",
-])("invalidates the candidate on event/control %s", async (event) => {
+])("invalidates the candidate on event %s", async (event) => {
   const f = fixture();
-  await f.command("on 5m");
   await f.success();
   expect(vi.getTimerCount()).toBe(1);
-  if (event === "off" || event === "cancel") await f.command(event);
-  else await f.emit(event);
+  await f.emit(event);
   await advance(900_000);
   expect(f.ctx.compact).not.toHaveBeenCalled();
 });
@@ -185,11 +181,6 @@ it.each([
   "invalid settings",
 ])("consumes without retry at launch guard: %s", async (cause) => {
   const f = fixture();
-  settings({
-    contextRecap: {
-      providers: { [f.ctx.model.provider]: { enabled: true, estimatedLifetime: "5m" } },
-    },
-  });
   await f.success();
   expect(vi.getTimerCount()).toBe(1);
   if (cause === "busy") f.ctx.isIdle.mockReturnValue(false);
@@ -203,12 +194,7 @@ it.each([
   if (cause === "backward clock") vi.setSystemTime(0);
   if (cause === "warming") settings({ cacheWarming: "idle" });
   if (cause === "policy disabled") settings({ contextRecap: { enabled: false } });
-  if (cause === "TTL changed")
-    settings({
-      contextRecap: {
-        providers: { [f.ctx.model.provider]: { enabled: true, estimatedLifetime: "1h" } },
-      },
-    });
+  if (cause === "TTL changed") f.configure("1h");
   if (cause === "invalid settings") writeFileSync(join(agentDir, "settings.json"), "invalid");
   await advance(270_000);
   expect(f.ctx.compact).not.toHaveBeenCalled();
@@ -229,17 +215,16 @@ it.each(["input", "before_agent_start"])(
       },
       signal: new AbortController().signal,
     };
-    await f.command("now");
+    await f.success();
+    await advance(270_000);
     const early = f.emit(gate);
     expect(await f.emit("session_before_compact", event)).toEqual({ cancel: true });
     expect(f.ctx.modelRegistry.complete).not.toHaveBeenCalled();
-    await f.command("status");
-    expect(f.ctx.ui.notify.mock.lastCall?.[0]).toContain("acquiring; cancellation requested");
     f.ctx.compact.mock.calls[0][0].onError();
     await early;
     if (gate === "before_agent_start") await f.emit("agent_settled", { aborted: true });
     await f.success();
-    await f.command("now");
+    await advance(270_000);
     let resolve!: (value: ReturnType<typeof fauxAssistantMessage>) => void;
     f.ctx.modelRegistry.complete.mockImplementation(
       () =>
@@ -249,8 +234,6 @@ it.each(["input", "before_agent_start"])(
     );
     const proposal = f.emit("session_before_compact", event);
     const signal = f.ctx.modelRegistry.complete.mock.calls[0][2].signal;
-    await f.command("status");
-    expect(f.ctx.ui.notify.mock.lastCall?.[0]).toContain("generating");
     let continued = false;
     const pending = f.emit(gate).then((result: unknown) => {
       continued = true;
@@ -263,7 +246,6 @@ it.each(["input", "before_agent_start"])(
         "## Objective\nGoal\n## Plan and Progress\nDone\n## Remaining Work\nNone\n## Information Sources\nREADME.md",
       ),
     );
-    await f.command("cancel");
     expect(continued).toBe(false);
     f.ctx.compact.mock.calls[1][0].onError();
     expect(await pending).toEqual(gate === "input" ? { action: "continue" } : undefined);
@@ -273,10 +255,12 @@ it.each(["input", "before_agent_start"])(
 
 it("ignores stale callbacks and releases gates on shutdown", async () => {
   const f = fixture();
-  await f.command("now");
+  await f.success();
+  await advance(270_000);
   const first = f.ctx.compact.mock.calls[0][0];
   first.onComplete();
-  await f.command("now");
+  await f.success();
+  await advance(270_000);
   first.onError();
   let continued = false;
   const pending = f.emit("input").then(() => {
@@ -294,7 +278,6 @@ it.each(["aborted", "wrong physical model", "tool calls", "error", "missed windo
   "does not arm unsuccessful/stale settlement: %s",
   async (cause) => {
     const f = fixture();
-    await f.command("on 5m");
     await f.start();
     const response = {
       ...fauxAssistantMessage("completed"),
@@ -315,40 +298,26 @@ it.each(["aborted", "wrong physical model", "tool calls", "error", "missed windo
 
 it("input during a successfully completed run suppresses settlement, then clean work recovers", async () => {
   const f = fixture();
-  await f.command("on 5m");
   await f.start();
   await f.emit("input");
   f.response();
   await f.emit("agent_settled", { aborted: false });
   await advance(300_000);
   expect(f.ctx.compact).not.toHaveBeenCalled();
-  await f.command("status");
-  expect(f.ctx.ui.notify.mock.lastCall?.[0]).toContain("unresolved latest input preflight");
-  await f.command("now");
-  expect(f.ctx.compact).not.toHaveBeenCalled();
-  await f.command("off");
-  await f.success();
-  await f.command("now");
-  expect(f.ctx.compact).toHaveBeenCalledTimes(1);
-  f.ctx.compact.mock.calls[0][0].onComplete();
-  await f.command("on 5m");
   await f.success();
   await advance(270_000);
-  expect(f.ctx.compact).toHaveBeenCalledTimes(2);
+  expect(f.ctx.compact).toHaveBeenCalledTimes(1);
 });
 
 it("revalidates settings at arming and preserves a thirty-second launch margin", async () => {
   const f = fixture();
-  await f.command("on 1m");
+  f.configure("1m");
   await f.start();
   settings({ contextRecap: { enabled: false } });
   f.response();
   await f.emit("agent_settled", { aborted: false });
   expect(vi.getTimerCount()).toBe(0);
-  await f.command("on");
-  expect(f.ctx.ui.notify.mock.lastCall?.[0]).toContain("remains off");
-  settings({});
-  await f.command("on 1m");
+  f.configure("1m");
   await f.success();
   await advance(29_999);
   expect(f.ctx.compact).not.toHaveBeenCalled();
@@ -364,35 +333,26 @@ it("revalidates settings at arming and preserves a thirty-second launch margin",
   expect(f.ctx.compact).toHaveBeenCalledTimes(1);
 });
 
-it("drops only the runtime duration on model selection and leaves no persisted controls", async () => {
-  const f = fixture();
-  await f.command("on 5m");
-  await f.emit("model_select");
-  await f.success();
-  await advance(300_000);
-  expect(f.ctx.compact).not.toHaveBeenCalled();
-  await f.command("status");
-  expect(f.ctx.ui.notify.mock.lastCall?.[0]).toContain("unknown");
-  await f.command("off");
-  await f.command("status");
-  expect(f.ctx.ui.notify.mock.lastCall?.[0]).toContain("Automatic context recap off");
-});
-
 it.each(["rpc", "print", "json"])("leaves native %s compaction unchanged", async (mode) => {
   const f = fixture();
   f.ctx.mode = mode;
-  await f.command("on 5m");
-  await f.command("now");
+  await f.command();
   expect(await f.emit("session_before_compact")).toBeUndefined();
+  await f.success();
+  await advance(300_000);
   expect(f.ctx.compact).not.toHaveBeenCalled();
 });
 
-it.each(["unknown", "on invalid", "on 5m extra", "now extra", "off extra"])(
-  "rejects invalid command %s without acquisition",
-  async (args) => {
-    const f = fixture();
-    await f.command(args);
-    expect(f.ctx.ui.notify.mock.lastCall?.[1]).toBe("warning");
-    expect(f.ctx.compact).not.toHaveBeenCalled();
-  },
-);
+it("status is read-only and rejects arguments without changing eligibility", async () => {
+  const f = fixture();
+  await f.command();
+  expect(f.ctx.ui.notify.mock.lastCall?.[0]).toContain("waiting for a fresh successful run");
+  expect(vi.getTimerCount()).toBe(0);
+  await f.success();
+  await f.command();
+  expect(f.ctx.ui.notify.mock.lastCall?.[0]).toContain("scheduled for");
+  await f.command("status");
+  expect(f.ctx.ui.notify.mock.lastCall?.[1]).toBe("warning");
+  await advance(270_000);
+  expect(f.ctx.compact).toHaveBeenCalledTimes(1);
+});

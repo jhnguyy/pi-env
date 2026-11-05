@@ -1,14 +1,13 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getChildContext } from "../_shared/child-context";
 import { generateRecap, RecapFailure, recapFailureMessage } from "./recap";
-import { duration, modelKey, requestLifetime } from "./lifetime";
-import { loadPolicy, type RuntimeOverride } from "./config";
+import { modelKey, requestLifetime } from "./lifetime";
+import { loadPolicy } from "./config";
 
 type Reservation = {
   done: Promise<void>;
   release(): void;
   invalidated: boolean;
-  phase: "acquiring" | "generating" | "handed-off";
 };
 type Request = { anchor: number; key: string; ttl: ReturnType<typeof requestLifetime> };
 type Run = { generation: number; request?: Request };
@@ -36,7 +35,6 @@ function identity(ctx: ExtensionContext): string {
 
 export default function contextRecap(pi: Pick<ExtensionAPI, "on" | "registerCommand">) {
   if (getChildContext()) return;
-  let runtime: RuntimeOverride | undefined;
   let disposed = false;
   let active: AbortController | undefined;
   let reservation: Reservation | undefined;
@@ -73,7 +71,6 @@ export default function contextRecap(pi: Pick<ExtensionAPI, "on" | "registerComm
       }),
       release: () => release(),
       invalidated: false,
-      phase: "acquiring",
     };
     reservation = owned;
     const finish = (success: boolean) => {
@@ -97,13 +94,6 @@ export default function contextRecap(pi: Pick<ExtensionAPI, "on" | "registerComm
       finish(false);
     }
   };
-
-  const refresh = (ctx: ExtensionContext) => {
-    if (!rootTui(ctx)) return;
-    const policy = loadPolicy(ctx.cwd, ctx.model, runtime);
-    if (policy.blocked) reason = policy.blocked;
-  };
-  pi.on("session_start", (_event, ctx) => refresh(ctx));
 
   pi.on("input", async (_event, ctx) => {
     if (!rootTui(ctx)) return;
@@ -152,15 +142,14 @@ export default function contextRecap(pi: Pick<ExtensionAPI, "on" | "registerComm
   });
 
   const arm = (fresh: Request, ctx: ExtensionContext) => {
-    const policy = loadPolicy(ctx.cwd, ctx.model, runtime);
+    const policy = loadPolicy(ctx.cwd, ctx.model);
     if (policy.blocked || !policy.enabled) {
       reason = policy.blocked ?? "automatic scheduling off for this provider";
       return;
     }
     const ttl = typeof fresh.ttl === "string" ? undefined : (fresh.ttl ?? policy.estimate);
     if (!ttl) {
-      reason =
-        "cache lifetime unknown or caching disabled; optionally use on <duration> for an unknown endpoint";
+      reason = "cache lifetime unknown or caching disabled";
       return;
     }
     const lead = Math.max(30_000, ttl * 0.1);
@@ -190,7 +179,7 @@ export default function contextRecap(pi: Pick<ExtensionAPI, "on" | "registerComm
         captured !== identity(ctx)
       )
         return;
-      const current = loadPolicy(ctx.cwd, ctx.model, runtime);
+      const current = loadPolicy(ctx.cwd, ctx.model);
       if (JSON.stringify(current) !== JSON.stringify(policy)) {
         reason = current.blocked ?? "automatic policy changed; waiting for a fresh successful run";
         return;
@@ -210,12 +199,7 @@ export default function contextRecap(pi: Pick<ExtensionAPI, "on" | "registerComm
   pi.on("session_before_switch", activity);
   pi.on("session_before_fork", activity);
   pi.on("user_bash", activity);
-  pi.on("model_select", (_event, ctx) => {
-    if (!rootTui(ctx)) return;
-    if (runtime) runtime = { enabled: runtime.enabled };
-    invalidate();
-    refresh(ctx);
-  });
+  pi.on("model_select", activity);
   pi.on("ui_prompt_start", (_event, ctx) => {
     if (rootTui(ctx)) {
       uiBusy = true;
@@ -242,14 +226,12 @@ export default function contextRecap(pi: Pick<ExtensionAPI, "on" | "registerComm
     if (!owned) invalidate();
     const operation = new AbortController();
     active = operation;
-    if (owned) owned.phase = "generating";
     const captured = generation;
     const capturedIdentity = identity(ctx);
     try {
       const result = await generateRecap(event, ctx, operation.signal);
       if (captured !== generation || capturedIdentity !== identity(ctx))
         throw new RecapFailure("cancelled");
-      if (owned) owned.phase = "handed-off";
       return {
         compaction: {
           ...result,
@@ -266,104 +248,28 @@ export default function contextRecap(pi: Pick<ExtensionAPI, "on" | "registerComm
     }
   });
 
-  const turnOn = (lifetime: string | undefined, ctx: ExtensionContext) => {
-    const ttl = lifetime ? duration(lifetime) : undefined;
-    if (lifetime && (!ttl || !ctx.model)) {
-      ctx.ui.notify(
-        "Use a lifetime longer than 30s, such as 5m, with a selected model.",
-        "warning",
-      );
-      return;
-    }
-    invalidate();
-    runtime = { enabled: true, estimate: ttl ? { key: modelKey(ctx), ttl } : undefined };
-    const policy = loadPolicy(ctx.cwd, ctx.model, runtime);
-    ctx.ui.notify(
-      policy.blocked ??
-        (policy.enabled
-          ? `Automatic context recap on for future fresh successful runs${ttl ? "; runtime estimate, not a cache guarantee" : ""}.`
-          : "Automatic context recap remains off: contextRecap.enabled is false in settings.json."),
-      policy.blocked || !policy.enabled ? "warning" : "info",
-    );
-  };
-  const cancel = (off: boolean, ctx: ExtensionContext) => {
-    const wasActive = !!active || !!reservation;
-    const wasScheduled = candidate !== undefined;
-    const handedOff = reservation?.phase === "handed-off";
-    invalidate();
-    if (off) {
-      runtime = { enabled: false };
-    }
-    let message = off
-      ? "Automatic context recap off."
-      : wasScheduled
-        ? "Scheduled context recap cancelled."
-        : "No active context recap to cancel.";
-    if (wasActive)
-      message = `${off ? "Automatic context recap off. " : ""}Active context recap cancelled.`;
-    if (handedOff)
-      message = `${off ? "Automatic context recap off. " : ""}Recap proposal handed to Pi; cannot retract it here. Native Esc can cancel compaction.`;
-    ctx.ui.notify(message, "info");
-  };
-  const now = (ctx: ExtensionContext) => {
-    invalidate();
-    if (busy(ctx) || preflightPending || run) {
-      ctx.ui.notify(
-        "Context recap skipped: session must be idle with no queued messages.",
-        "warning",
-      );
-      return;
-    }
-    launch(ctx);
-  };
-  const status = (ctx: ExtensionContext) => {
-    const policy = loadPolicy(ctx.cwd, ctx.model, runtime);
-    let state = candidate?.description ?? reason;
-    if (run) state = "agent run starting or active";
-    if (preflightPending) state = "unresolved latest input preflight; waiting for a successful run";
-    if (active) state = "generating";
-    if (reservation) {
-      state = reservation.phase;
-      if (reservation.invalidated) state += "; cancellation requested (native completion pending)";
-    }
-    ctx.ui.notify(
-      `Automatic context recap ${policy.enabled ? "on" : "off"}; ${state}.${policy.blocked ? ` ${policy.blocked}.` : ""}${!candidate && policy.source ? ` Source: ${policy.source}.` : ""}`,
-      "info",
-    );
-  };
-
   pi.registerCommand("context-recap", {
-    description: "Context recap: on [duration] | off | status | now | cancel",
+    description: "Show automatic context recap status",
     handler: async (args, ctx) => {
       if (!rootTui(ctx)) {
         if (ctx.hasUI)
           ctx.ui.notify("Context recap is available only in the root TUI session.", "warning");
         return;
       }
-      const [action = "status", lifetime, ...extra] = args.trim().split(/\s+/).filter(Boolean);
-      if (extra.length || (lifetime && action !== "on")) {
-        ctx.ui.notify("Usage: /context-recap on [duration]|off|status|now|cancel", "warning");
+      if (args.trim()) {
+        ctx.ui.notify("Usage: /context-recap (status only; no arguments)", "warning");
         return;
       }
-      switch (action) {
-        case "on":
-          turnOn(lifetime, ctx);
-          break;
-        case "off":
-          cancel(true, ctx);
-          break;
-        case "cancel":
-          cancel(false, ctx);
-          break;
-        case "now":
-          now(ctx);
-          break;
-        case "status":
-          status(ctx);
-          break;
-        default:
-          ctx.ui.notify("Usage: /context-recap on [duration]|off|status|now|cancel", "warning");
-      }
+      const policy = loadPolicy(ctx.cwd, ctx.model);
+      const state = active
+        ? "generating"
+        : reservation
+          ? "compacting"
+          : (candidate?.description ?? reason);
+      ctx.ui.notify(
+        `Automatic context recap ${policy.blocked ? "suppressed" : policy.enabled ? "enabled" : "disabled"}; ${state}.${policy.blocked ? ` ${policy.blocked}.` : ""}${!candidate && policy.source ? ` Source: ${policy.source}.` : ""}`,
+        "info",
+      );
     },
   });
 }

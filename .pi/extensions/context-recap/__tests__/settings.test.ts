@@ -1,8 +1,7 @@
 import { expect, it } from "vitest";
 import { fauxProvider } from "@earendil-works/pi-ai";
-import { loadPolicy, type RuntimeOverride } from "../config";
+import { loadPolicy } from "../config";
 import type { SettingsEnv } from "../../_shared/settings";
-import { modelKey } from "../lifetime";
 
 function snapshot(global: unknown = {}, project: unknown = {}) {
   const reads: string[] = [];
@@ -46,7 +45,7 @@ it.each([
   (provider, api, baseUrl, enabled, estimate) => {
     const { env, reads } = snapshot();
     const model = { ...fauxProvider().getModel(), provider, api, baseUrl };
-    expect(loadPolicy("/isolated", model, undefined, env)).toMatchObject({ enabled, estimate });
+    expect(loadPolicy("/isolated", model, env)).toMatchObject({ enabled, estimate });
     expect(reads).toEqual(["/isolated/global.json", "/isolated/project.json"]);
   },
 );
@@ -59,43 +58,29 @@ it("shallowly replaces the provider map before applying built-in defaults", () =
     },
     { contextRecap: { providers: { custom: { enabled: true, estimatedLifetime: "1m" } } } },
   );
-  expect(loadPolicy("/isolated", model, undefined, env)).toMatchObject({
-    enabled: true,
-    estimate: 300_000,
-  });
+  expect(loadPolicy("/isolated", model, env)).toMatchObject({ enabled: true, estimate: 300_000 });
   model.provider = "custom";
   model.baseUrl = "https://custom.example";
-  expect(loadPolicy("/isolated", model, undefined, env)).toMatchObject({
+  expect(loadPolicy("/isolated", model, env)).toMatchObject({
     enabled: true,
     estimate: 60_000,
     source: "configured estimate (not a cache guarantee)",
   });
 });
 
-it("honors provider disablement and master off even over runtime on", () => {
-  const model = codex();
-  let f = snapshot({ contextRecap: { providers: { "openai-codex": { enabled: false } } } });
-  expect(loadPolicy("/isolated", model, undefined, f.env).enabled).toBe(false);
-  expect(loadPolicy("/isolated", model, { enabled: true }, f.env).enabled).toBe(true);
-  f = snapshot({ contextRecap: { enabled: false } });
-  expect(loadPolicy("/isolated", model, { enabled: true }, f.env).enabled).toBe(false);
+it.each([
+  { providers: { "openai-codex": { enabled: false } } },
+  { enabled: false, providers: { "openai-codex": { enabled: true } } },
+])("honors persistent provider disablement and master off %#", (contextRecap) => {
+  const { env } = snapshot({ contextRecap });
+  expect(loadPolicy("/isolated", codex(), env).enabled).toBe(false);
 });
 
-it("scopes runtime estimates to the current model and gives configured estimates precedence over defaults", () => {
-  const model = codex();
+it("gives configured estimates precedence over built-in estimates", () => {
   const { env } = snapshot({
     contextRecap: { providers: { "openai-codex": { estimatedLifetime: "1h" } } },
   });
-  const runtime: RuntimeOverride = {
-    enabled: true,
-    estimate: { key: modelKey({ model }), ttl: 60_000 },
-  };
-  expect(loadPolicy("/isolated", model, runtime, env)).toMatchObject({
-    estimate: 60_000,
-    source: "runtime estimate (not a cache guarantee)",
-  });
-  model.id = "different";
-  expect(loadPolicy("/isolated", model, runtime, env)).toMatchObject({
+  expect(loadPolicy("/isolated", codex(), env)).toMatchObject({
     estimate: 3_600_000,
     source: "configured estimate (not a cache guarantee)",
   });
@@ -103,11 +88,9 @@ it("scopes runtime estimates to the current model and gives configured estimates
 
 it("uses only global native warming ownership", () => {
   let f = snapshot({}, { cacheWarming: "idle" });
-  expect(loadPolicy("/isolated", codex(), undefined, f.env).blocked).toBeUndefined();
+  expect(loadPolicy("/isolated", codex(), f.env).blocked).toBeUndefined();
   f = snapshot({ cacheWarming: "idle" }, { cacheWarming: "off" });
-  expect(loadPolicy("/isolated", codex(), undefined, f.env).blocked).toBe(
-    "native idle cache warming enabled",
-  );
+  expect(loadPolicy("/isolated", codex(), f.env).blocked).toBe("native idle cache warming enabled");
 });
 
 it.each([
@@ -119,7 +102,7 @@ it.each([
   { contextRecap: { enabled: "SENSITIVE_SENTINEL" } },
 ])("suppresses automatic recap on invalid settings %# without raw values", (value) => {
   const f = snapshot(value);
-  const policy = loadPolicy("/isolated", codex(), { enabled: true }, f.env);
+  const policy = loadPolicy("/isolated", codex(), f.env);
   expect(policy.enabled).toBe(false);
   expect(policy.blocked).toContain("repair contextRecap/cacheWarming in settings.json");
   expect(policy.blocked).not.toContain("SENSITIVE_SENTINEL");

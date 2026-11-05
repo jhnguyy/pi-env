@@ -35,8 +35,6 @@ Use `pi config` to select package resources. Use `/skill:dependency-update` to a
 
 Repository conventions and area-specific documentation live under `docs/`.
 
-- [Context recap](docs/context-recap.md): root TUI compaction customization, provider-default idle scheduling, and cost/fidelity tradeoffs.
-
 ## License
 
 pi-env is available under the [MIT License](LICENSE).

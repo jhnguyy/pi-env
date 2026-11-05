@@ -1,61 +1,47 @@
 # Context recap
 
-The `context-recap` extension customizes native compaction summaries in root TUI sessions and schedules idle recaps for supported providers by default. Child sessions, RPC, print, and JSON modes keep native behavior. Pi owns compaction thresholds, retained-history selection, queues, persistence, and cache warming. After building, reload or restart Pi; see [extension conventions](conventions/extensions.md).
+Context recap customizes native compaction summaries in root TUI sessions and enables provider-aware idle scheduling by default. **Automatic recap makes an additional, potentially paid inference request even if you never resume the session.** It does not guarantee cache hits, lower costs, or semantic completeness.
 
-## Commands and settings
+Child sessions, RPC, print, and JSON modes keep native behavior. Build changes, then reload or restart Pi; see [extension conventions](conventions/extensions.md).
 
-| Command                        | Effect                                                                                                                                                                                                                      |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/context-recap status`        | Show scheduling state, target, lifetime and source, suppression reason, or native reservation phase.                                                                                                                        |
-| `/context-recap on [duration]` | Temporarily enable scheduling for future fresh successful runs. Optional `s`, `m`, or `h` duration longer than 30 seconds supplies a current-model estimate, not a cache guarantee. Model selection discards that duration. |
-| `/context-recap off`           | Temporarily disable scheduling and cancel local recap work; summary customization remains active.                                                                                                                           |
-| `/context-recap now`           | Request native compaction when idle with no queued input or blocking UI; independent of automatic settings and warming.                                                                                                     |
-| `/context-recap cancel`        | Consume the candidate and signal local cancellation without disabling future scheduling or aborting ordinary work.                                                                                                          |
+## Operating controls
 
-Commands never persist settings. Optional configuration belongs in global `settings.json` or `<cwd>/.pi/settings.json`:
+Use `/context-recap` to inspect automatic scheduling state, the scheduled lifetime and its source, or the last outcome or suppression reason. It is read-only and accepts no arguments. Use native `/compact [instructions]` for manual compaction and native Esc to cancel acquired compaction. Disabling automatic recap does not disable summary customization.
+
+To disable automatic scheduling persistently, put this in global `settings.json` or `<cwd>/.pi/settings.json`:
+
+```json
+{
+  "contextRecap": { "enabled": false }
+}
+```
+
+For an unknown provider, explicitly enable it and supply a scheduling estimate:
 
 ```json
 {
   "contextRecap": {
-    "enabled": true,
     "providers": {
-      "openai-codex": { "enabled": true, "estimatedLifetime": "5m" },
       "my-provider": { "enabled": true, "estimatedLifetime": "10m" }
     }
   }
 }
 ```
 
-`enabled: false` is a master automatic-off switch, including runtime `on`; manual `now` and native compaction customization still work. Provider keys are exact, case-sensitive IDs, not model patterns. Project block fields shallowly override global fields: a project `providers` map replaces the entire global map, then built-in defaults apply. An explicitly enabled provider can use a custom endpoint. Enablement alone cannot schedule an unknown lifetime.
+Provider IDs are exact and case-sensitive. Set a provider's `enabled` to `false` to disable only that provider. Settings use the [shared settings boundary](conventions/extensions.md#settings-boundary): a project `providers` map replaces the entire global map rather than merging its entries. Invalid settings suppress automatic scheduling. Global native idle cache warming also suppresses it; Pi owns warming.
 
-| Default-enabled provider / transport / endpoint                                   | Lifetime source                                                                                                                          |
-| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `anthropic` / `anthropic-messages` / `https://api.anthropic.com`                  | Actual request cache breakpoints only: 5m or 1h, shortest applicable breakpoint. No breakpoint means caching off.                        |
-| `openai` / `openai-responses` or `openai-completions` / `https://api.openai.com`  | Recognized modern request metadata; otherwise a built-in **5m scheduling estimate**.                                                     |
-| `openai-codex` / `openai-codex-responses` / `https://chatgpt.com/backend-api/...` | Explicit recognized metadata when present; otherwise a built-in **5m scheduling estimate**, not a verified expiry or conservative bound. |
+## Scheduling expectations
 
-Other providers, transports and endpoints default off. Configured estimates override built-in estimates; current-model runtime estimates override configured estimates. Recognized actual TTLs override every estimate, while actual caching-off or a different outgoing model always suppresses scheduling. Modern public OpenAI Responses metadata uses `30m` by default and supports `12h` when `supportsExplicitPromptCacheMode` is set; explicit mode without a breakpoint is off. Legacy `24h` retention is not an expiry deadline. Codex's ordinary omitted TTL is not a backend retention guarantee. No inferred model-version catalog is maintained. See [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching), [Codex authentication](https://developers.openai.com/codex/auth/), and [Anthropic prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+Supported provider, transport, and endpoint combinations are defined by [the policy defaults](../.pi/extensions/context-recap/config.ts). Unknown combinations default off. OpenAI and Codex use a built-in five-minute **estimate**, not a verified TTL or retention guarantee. Anthropic requires actual request cache breakpoints. Configured estimates replace built-in estimates; recognized actual request lifetimes take precedence. Actual caching-off or an ineligible outgoing model suppresses scheduling regardless of estimates. [Request lifetime interpretation](../.pi/extensions/context-recap/lifetime.ts) owns the metadata rules.
 
-Only provider-envelope cache metadata participates, never nested user JSON, tool arguments or schemas. Payloads and credentials are not retained or logged; later extensions can still change the outgoing payload. Settings refresh at startup, model selection, arming and launch, using one shared snapshot per refresh. Changed policy or lifetime consumes the old target rather than reusing it. Invalid settings suppress automatic recap with allowlisted repair guidance. Global native `cacheWarming: "idle"` suppresses automatic recap; project warming settings do not own this mode. The extension adds no warmer, probes, retention writes or warming-decision override.
+Only a fresh successful response from the selected physical model can schedule an idle recap. Restored history and status checks do not arm one. Activity or changed settings can consume the target; missed windows do not retry or self-rearm. A successful response and a timer anchor do not prove that caching occurred, and the recap's serialized prompt may not reuse the conversation's cached prefix.
 
-## Scheduling and ownership
+Pi owns retained-history selection, queues, and persistence. Once native TUI compaction acquires the session, Pi queues terminal input. Safety before acquisition assumes ordinary TUI submissions are serialized; arbitrary concurrent SDK operations and earlier-loaded blocking handlers are outside that guarantee. Local cancellation cannot retract a proposal already handed to later native handlers; native Esc remains authoritative through commit.
 
-One unreferenced timer follows a fresh successful final assistant response with no tools, error or abort and a matching physical model. Restored history, enabling, and native idle never arm it. Request metadata refines the early `turn_start` anchor; transports without that hook use the early anchor with an available estimate. Neither an anchor nor a successful response proves caching occurred. The target is request time plus lifetime minus a lead of `max(30 seconds, 10% of lifetime)`; launch must occur within half that lead after the target. Late settlement, late wakeups and backwards clocks skip without retry or self-rearming.
+## Fidelity and limits
 
-Input, new runs, model/thinking changes, user bash, blocking UI, session/tree changes, compaction and shutdown invalidate candidates. Launch rechecks identity, idle state and queued messages. The latest unresolved input preflight blocks automatic and manual acquisition until run start; consumed input or failed authentication recovers on a later clean run. Input during a run suppresses that settlement.
+Recaps preserve four sections: Objective, Plan and Progress, Remaining Work, and Information Sources. Instructions prioritize goals, approvals, decisions, evidence versus assumptions, blockers, and next actions. Inspect consequential recaps: valid headings cannot establish semantic fidelity.
 
-The scheduler reserves ownership and calls public `ctx.compact()` on the same JavaScript stack. Input and `before_agent_start` gates invalidate and cancel synchronously before awaiting native terminal callbacks, then continue input unchanged. Early cancellation survives delayed compaction-hook entry and makes zero recap requests. Reservation ownership lasts through later native handlers and commit; only its terminal callback or shutdown releases it. Once native TUI compaction is acquired, InteractiveMode owns ordinary input queuing. The extension never intercepts raw keys, copies/replays input or broadly aborts agent work.
+The request includes all native prepared sources, prior summary, operator instructions, and full edited retained-history orientation. The extension adds no arbitrary content-length cap. Native serialization omits thinking and truncates individual tool results. Input admission and output capacity depend on the selected model's limits and native token estimates, which are not tokenizer guarantees.
 
-This scope relies on the ordinary TUI main loop serializing idle submissions. Earlier-loaded blocking handlers and arbitrary concurrent SDK operations are outside that guarantee. Native `/compact` attempts do not carry this extension's reservation. A proposal already returned to later native handlers cannot be retracted by local cancellation; native Esc/compaction abort remains authoritative through commit.
-
-## Fidelity, limits and cost
-
-Recaps require four nonempty sections: `Objective`, `Plan and Progress`, `Remaining Work`, and `Information Sources`. Instructions preserve goals, approvals, decisions, verification versus assumptions, blockers and next actions, but cannot guarantee semantic completeness. Inspect consequential recaps.
-
-The request includes all prepared history, split-span prefix, prior summary, operator instructions and full edited projected retained-tail orientation. There are no extension word, character, entry-count or fixed output caps. Native serialization omits thinking and truncates individual tool results to 2,000 characters. Native token estimation admits the composed input with a 512-token framing reserve; output uses the smaller of model output capacity and remaining context capacity. Estimation is not a provider-tokenizer guarantee.
-
-One selected-model attempt requests `cacheRetention: "none"` where supported. Invalid limits or exhausted capacity cancel before inference; malformed, incomplete or failed output cancels without native fallback, retry or another extension request. Combined native/lifecycle signals stop waiting even when a provider ignores abort; late output is not saved, but may still bill. There is no total-generation deadline. Native transports own stall limits; arbitrary custom transports do not inherit a blanket timeout guarantee. Native retained boundaries, token counts, checkpoints and usage persist unchanged.
-
-Automatic recap adds inference work and may cost more if the session never resumes. Its serialized prompt does not guarantee reuse of the conversation's cached prefix, a cache hit, fidelity or savings. Nominal API prices and subscription usage limits differ. Pi's native warmer already owns its economic decision; this extension does not duplicate it. Disable automatic scheduling or use manual recap when those tradeoffs do not fit.
-
-Local qualification uses deterministic inference with isolated settings and real native sessions, including built timer-to-compaction persistence and InteractiveMode input queuing. It does not certify hosted-provider behavior, retention, billing or semantic fidelity.
+Generation makes one selected-model attempt without fallback or retry. Invalid capacity cancels before inference; malformed or failed output leaves no recap. Cancellation stops waiting even if a provider ignores abort, and late output is not saved, but the request may still bill. Custom transports have no blanket generation-timeout guarantee.
