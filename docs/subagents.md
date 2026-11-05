@@ -62,6 +62,12 @@ Custom named-agent definitions are no longer supported. The extension does not s
 
 Native `AGENTS.md` context loading is unchanged. Pi loads target configuration, context, skills, and extensions through its native resource loader. Parent trust applies only to the same canonical cwd. A different target uses its saved decision in Pi's native `ProjectTrustStore`; unknown or denied targets do not receive project trust. Child startup does not prompt for new grants. See [target trust resolution](../.pi/extensions/subagent/resolver.ts) and [native child startup](../.pi/extensions/subagent/native-child.ts).
 
+## Compatibility qualification
+
+The [native composition E2E](../.pi/extensions/subagent/__tests__/e2e.test.ts) qualifies a representative composition of built subagent, notes, and general extensions with deterministic inference and real native tool execution. It checks target-local notes settings against a separate root vault, saved target trust, child print mode without UI, and absence of recursive delegation. A call-through observation of completed `agent_settled` dispatch identifies a distinct target child runner with built general loaded. Both headless sessions remain bell-free. Extension-error checks run after awaited shutdown, tracked-operation settlement, and disposal.
+
+A subsequent explicit built TUI-mode dispatch control on the parent, with no supplied UI and tmux disabled, produces exactly one bell. This control is not a real interactive TUI. Qualification does not extend to arbitrary extensions, hosted providers, interactive child UIs, or restart recovery.
+
 ## Limits and cancellation
 
 One parent supervisor controls blocking runs, background jobs, and idle continuations. Configure its limits in the `subagent` settings block:
