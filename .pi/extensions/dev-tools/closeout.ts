@@ -307,7 +307,7 @@ const selectGitHubRemote = Effect.fnUntraced(function* (
       rank(left.name) - rank(right.name) ||
       (left.name < right.name ? -1 : left.name > right.name ? 1 : 0),
   );
-  const selected = matches[0]!;
+  const selected = matches[0];
   yield* ensure(
     selected.urls.length === 1,
     `Remote ${selected.name} has multiple distinct effective fetch URLs. Configure one fetch URL before closeout.`,
