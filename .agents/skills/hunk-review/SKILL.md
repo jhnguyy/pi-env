@@ -1,21 +1,34 @@
 ---
 name: hunk-review
-description: Guide an interactive Hunk review in a user-opened session, explain changes with inline notes, and collect and answer user feedback.
+description: Launch and drive Hunk diff review sessions, explain changes with inline notes, and collect and answer user feedback.
 ---
 
 # Hunk Review
 
-## Select the review
+## Open and select the review
 
-Have the user run `hunk diff` in the intended worktree, or open the requested comparison in Hunk. Control that window with `hunk session` commands, not an interactive viewer launched by the agent. The CLI and TUI need the same host, OS user, and loopback access; a remote terminal or container may not share that boundary.
+Own the review's launch and navigation; the user reviews the code and responds. Discover live sessions first and reuse one that matches the exact worktree and requested comparison:
 
 ```bash
 hunk session list --json
+```
+
+Otherwise, launch Hunk in a user-visible terminal pane, not inside a blocking agent tool call. In tmux, verify the task's target pane and set `worktree` to its absolute worktree path before opening a side pane:
+
+```bash
+tmux split-window -h -d -t "$TMUX_PANE" -c "$worktree" -P -F '#{pane_id}' hunk diff
+```
+
+Use the requested revision/range and path filters instead of plain `diff` when appropriate. Keep the returned pane ID. If the task window cannot accommodate a split, open a dedicated review window in the same tmux session. Do not repurpose unrelated panes. Without access to a user-visible terminal, report the missing terminal integration rather than asking the user to launch Hunk or starting a hidden viewer. The CLI and TUI need the same host, OS user, and loopback access; a remote terminal or container may not share that boundary.
+
+After launching, use a bounded readiness check with `session list`. Match the new session's terminal location to the created pane where reported, then inspect its worktree and source; a pane existing does not establish that Hunk registered. If registration fails, inspect that pane's output before retrying so an uncertain launch does not create duplicate viewers.
+
+```bash
 hunk session get <session-id> --json
 hunk session review <session-id> --json
 ```
 
-Replace `<session-id>` with the discovered ID. Verify the exact worktree, loaded source, revision or range, and path filters against the requested review. Neither a shared repository nor a single running window establishes the right scope. Resolve ambiguity before steering the window, then use the verified ID throughout.
+Replace `<session-id>` with the verified ID. Check the exact worktree, loaded source, revision or range, and path filters against the requested review. Neither a shared repository nor a single running window establishes the right scope. Resolve ambiguity before steering the window, then use the verified ID throughout.
 
 ## Inspect the changes
 
@@ -67,4 +80,4 @@ Replies inherit the parent note's anchor. Revisit the relevant code before answe
 
 Bring decisions, user feedback, unresolved questions, and verification limits back into the Pi conversation. Hunk's live notes are ephemeral: preserve important discussion before closing a session, replacing its contents, or restarting the daemon. Do not clear notes as routine cleanup.
 
-Ask before disrupting the review with a reload or daemon restart, explaining the possible loss of notes and effect on attached windows. If discovery fails while the user's TUI is open, check the host/user/loopback boundary or reported build mismatch before proposing a restart. After any disruption, rediscover the session and revalidate its worktree, scope, and anchors.
+Ask before disrupting the review with a reload or daemon restart, explaining the possible loss of notes and effect on attached windows. If discovery fails while Hunk is open, check the host/user/loopback boundary or reported build mismatch before proposing a restart. After any disruption, rediscover the session and revalidate its worktree, scope, and anchors. Leave the review available for the user; close only panes created for this review when the user requests cleanup, after preserving feedback.
