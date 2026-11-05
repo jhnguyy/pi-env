@@ -10,11 +10,15 @@ type Reservation = {
   invalidated: boolean;
 };
 type Request = { anchor: number; key: string; ttl: ReturnType<typeof requestLifetime> };
-type Run = { generation: number; request?: Request };
+type Run = { generation: number; request?: Request; responseEntryId?: string };
 
-function completedWithSelectedModel(ctx: ExtensionContext): boolean {
-  const last = ctx.sessionManager.buildSessionProjection().messages.at(-1);
-  if (last?.role !== "assistant" || !ctx.model) return false;
+function completedWithSelectedModel(ctx: ExtensionContext, responseEntryId?: string): boolean {
+  if (!responseEntryId || !ctx.model) return false;
+  const contribution = ctx.sessionManager
+    .buildSessionProjection()
+    .entries.findLast((entry) => entry.messages.length > 0);
+  const last = contribution?.messages.at(-1);
+  if (contribution?.sourceEntry.id !== responseEntryId || last?.role !== "assistant") return false;
   return (
     last.stopReason === "stop" &&
     !last.errorMessage &&
@@ -115,6 +119,7 @@ export default function contextRecap(pi: Pick<ExtensionAPI, "on" | "registerComm
     if (!rootTui(ctx)) return;
     clear();
     if (!run || reservation) return;
+    run.responseEntryId = undefined;
     // Custom transports may omit the payload hook. This early anchor is only
     // an estimate, not evidence that a network request was sent.
     run.request = { anchor: Date.now(), key: modelKey(ctx), ttl: undefined };
@@ -127,6 +132,9 @@ export default function contextRecap(pi: Pick<ExtensionAPI, "on" | "registerComm
       ttl: requestLifetime(event.payload, ctx.model),
     };
   });
+  pi.on("turn_end", (event, ctx) => {
+    if (rootTui(ctx) && run) run.responseEntryId = event.messageEntryId;
+  });
   pi.on("agent_settled", (event, ctx) => {
     if (!rootTui(ctx)) return;
     const settled = run;
@@ -135,7 +143,8 @@ export default function contextRecap(pi: Pick<ExtensionAPI, "on" | "registerComm
     const suppressed = preflightPending || settled?.generation !== generation;
     if (suppressed) reason = "unresolved latest input preflight; waiting for a successful run";
     if (suppressed || event.aborted || !fresh || busy(ctx)) return;
-    if (!completedWithSelectedModel(ctx) || fresh.key !== modelKey(ctx)) return;
+    if (!completedWithSelectedModel(ctx, settled.responseEntryId) || fresh.key !== modelKey(ctx))
+      return;
     preflightPending = false;
     reason = "fresh successful run; automatic scheduling off";
     arm(fresh, ctx);
@@ -164,7 +173,8 @@ export default function contextRecap(pi: Pick<ExtensionAPI, "on" | "registerComm
     const armedGeneration = generation;
     const description = `scheduled for ${new Date(target).toISOString()}; TTL ${ttl / 1000}s; source: ${fresh.ttl === undefined ? policy.source : "request cache metadata"}`;
     const timer = setTimeout(() => {
-      clear();
+      if (candidate !== owned) return;
+      candidate = undefined;
       const now = Date.now();
       reason = "candidate consumed; waiting for a fresh successful run";
       if (
@@ -187,7 +197,8 @@ export default function contextRecap(pi: Pick<ExtensionAPI, "on" | "registerComm
       launch(ctx);
     }, target - armedAt);
     timer.unref();
-    candidate = { timer, description };
+    const owned = { timer, description };
+    candidate = owned;
   };
 
   const activity = (_event: unknown, ctx: ExtensionContext) => {

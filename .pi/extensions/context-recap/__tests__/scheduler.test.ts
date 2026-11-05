@@ -38,12 +38,16 @@ function fixture(automatic = true) {
   const emit = (name: string, event = {}) =>
     pi.on.mock.calls.find(([n]) => n === name)?.[1](event, ctx);
   const command = (args = "") => pi.registerCommand.mock.calls[0][1].handler(args, ctx);
-  const response = () =>
-    sessionManager.appendMessage({
+  const response = (
+    message = {
       ...fauxAssistantMessage("completed"),
       provider: ctx.model.provider,
       model: ctx.model.id,
-    });
+    },
+  ) => {
+    const messageEntryId = sessionManager.appendMessage(message);
+    emit("turn_end", { messageEntryId });
+  };
   const start = async () => {
     await emit("input");
     await emit("before_agent_start");
@@ -78,7 +82,7 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-it("enables known Codex by default, never arms from history, and never rearms itself", async () => {
+it("schedules known Codex only after fresh successful runs, not history or recap completion", async () => {
   const f = fixture(false);
   Object.assign(f.ctx.model, {
     provider: "openai-codex",
@@ -101,6 +105,9 @@ it("enables known Codex by default, never arms from history, and never rearms it
   f.ctx.compact.mock.calls[0][0].onComplete();
   await advance(900_000);
   expect(f.ctx.compact).toHaveBeenCalledTimes(1);
+  await f.success();
+  await advance(270_000);
+  expect(f.ctx.compact).toHaveBeenCalledTimes(2);
 });
 
 it.each(["default", "enabled", "estimated"])("unknown provider scheduling: %s", async (policy) => {
@@ -289,7 +296,7 @@ it.each(["aborted", "wrong physical model", "tool calls", "error", "missed windo
       response.content.push({ type: "toolCall", id: "pending", name: "read", arguments: {} });
     if (cause === "error") response.stopReason = "error";
     if (cause === "missed window") await advance(280_000);
-    f.ctx.sessionManager.appendMessage(response);
+    f.response(response);
     await f.emit("agent_settled", { aborted: cause === "aborted" });
     await advance(900_000);
     expect(f.ctx.compact).not.toHaveBeenCalled();
