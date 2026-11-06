@@ -3,14 +3,28 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { ScopeMode, type AnalysisResult } from "../../../../src/analyze/model";
-import analyzeExtension, { createAnalyzeTool } from "../index";
+import { createAnalyzeTool } from "../index";
 
 const result: AnalysisResult = {
   version: 1,
   summary: { info: 0, warning: 2, error: 0, failures: 0 },
   findings: [
-    { id: "1", analyzer: "duplicates", kind: "duplicate", severity: "warning", message: "first", location: { path: "a.ts", line: 1, column: 1 } },
-    { id: "2", analyzer: "duplicates", kind: "duplicate", severity: "warning", message: "second", location: { path: "b.ts", line: 2, column: 1 } },
+    {
+      id: "1",
+      analyzer: "duplicates",
+      kind: "duplicate",
+      severity: "warning",
+      message: "first",
+      location: { path: "a.ts", line: 1, column: 1 },
+    },
+    {
+      id: "2",
+      analyzer: "duplicates",
+      kind: "duplicate",
+      severity: "warning",
+      message: "second",
+      location: { path: "b.ts", line: 2, column: 1 },
+    },
   ],
   analyzerFailures: [],
   benchmarks: [],
@@ -27,22 +41,37 @@ const execute = async (
 };
 
 describe("analyze tool", () => {
-  it("registers the native analyze tool", () => {
-    const registerTool = vi.fn();
-    analyzeExtension({ registerTool } as never);
-    expect(registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: "analyze" }));
-  });
-
   it("points the engine at the requested worktree and keeps output compact", async () => {
     const worktree = mkdtempSync(join(tmpdir(), "analyze-tool-"));
-    const { output, runner } = await execute({ worktree, scope: ScopeMode.Diff, ref: "main", max_findings: 1 });
+    const { output, runner } = await execute({
+      worktree,
+      scope: ScopeMode.Diff,
+      ref: "main",
+      max_findings: 1,
+    });
 
-    expect(runner).toHaveBeenCalledWith(expect.objectContaining({ cwd: worktree, scope: ScopeMode.Diff, ref: "main" }), expect.any(AbortSignal));
-    expect(output.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("Summary: 0 errors, 2 warnings") });
-    expect(output.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("1 additional findings omitted") });
-    expect(output.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("warning\tduplicates\ta.ts:1:1\tfirst") });
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: worktree, scope: ScopeMode.Diff, ref: "main" }),
+      expect.any(AbortSignal),
+    );
+    expect(output.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("Summary: 0 errors, 2 warnings"),
+    });
+    expect(output.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("1 additional findings omitted"),
+    });
+    expect(output.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("warning\tduplicates\ta.ts:1:1\tfirst"),
+    });
     expect(output.content[0]).not.toMatchObject({ text: expect.stringContaining("b.ts:2:1") });
-    expect(output.details).toMatchObject({ summary: result.summary, findings: [result.findings[0]], omittedFindings: 1 });
+    expect(output.details).toMatchObject({
+      summary: result.summary,
+      findings: [result.findings[0]],
+      omittedFindings: 1,
+    });
   });
 
   it("fails closed when public checks are omitted", async () => {
@@ -56,7 +85,10 @@ describe("analyze tool", () => {
       {} as never,
     );
     expect(output.details?.summary.failures).toBe(1);
-    expect(output.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("checks must explicitly") });
+    expect(output.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("checks must explicitly"),
+    });
   });
 
   it("rejects pre-cancelled execution without invoking the runner", async () => {

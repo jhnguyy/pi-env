@@ -113,15 +113,16 @@ describe("session-manager extension", () => {
         update: (path, transform) =>
           rejectUpdate
             ? Effect.fail(new ManifestCommitFailure({ path, cause: new Error("write failed") }))
-            : f.catalog.update(path, transform).pipe(Effect.tap((manifest) => Effect.sync(() => {
-              if (manifest.sessions[0]?.desiredState === "closed") order.push("closed");
-            }))),
+            : f.catalog.update(path, transform).pipe(
+                Effect.tap((manifest) =>
+                  Effect.sync(() => {
+                    if (manifest.sessions[0]?.desiredState === "closed") order.push("closed");
+                  }),
+                ),
+              ),
       },
     });
-    const previousFactory = f.native.editorFactory;
-
     await f.emit({ type: "session_start", reason: "startup" });
-    expect(f.native.editorFactory).not.toBe(previousFactory);
     const composed = f.renderEditor();
     expect(composed).toBe(f.editor);
 

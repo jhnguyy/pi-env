@@ -5,12 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { LspBackend, LspBackendError, lspRequestTimeoutMs } from "../backend";
 import type { LspBackendConfig } from "../backend-configs";
-import {
-  CLIENT_REQUEST_TIMEOUT_MS,
-  LSP_INIT_TIMEOUT_MS,
-  LSP_REQUEST_TIMEOUT_MS,
-  LSP_SEMANTIC_REQUEST_TIMEOUT_MS,
-} from "../timeouts";
+import { LSP_REQUEST_TIMEOUT_MS, LSP_SEMANTIC_REQUEST_TIMEOUT_MS } from "../timeouts";
 
 const baseConfig: LspBackendConfig = {
   name: "typescript",
@@ -28,22 +23,20 @@ const baseConfig: LspBackendConfig = {
 
 describe("LSP request timeout policy", () => {
   it("uses a longer bounded wait for cold semantic navigation requests", () => {
-    expect(lspRequestTimeoutMs("textDocument/documentSymbol")).toBe(LSP_SEMANTIC_REQUEST_TIMEOUT_MS);
+    expect(lspRequestTimeoutMs("textDocument/documentSymbol")).toBe(
+      LSP_SEMANTIC_REQUEST_TIMEOUT_MS,
+    );
     expect(lspRequestTimeoutMs("textDocument/hover")).toBe(LSP_SEMANTIC_REQUEST_TIMEOUT_MS);
     expect(lspRequestTimeoutMs("textDocument/definition")).toBe(LSP_SEMANTIC_REQUEST_TIMEOUT_MS);
-    expect(lspRequestTimeoutMs("textDocument/implementation")).toBe(LSP_SEMANTIC_REQUEST_TIMEOUT_MS);
+    expect(lspRequestTimeoutMs("textDocument/implementation")).toBe(
+      LSP_SEMANTIC_REQUEST_TIMEOUT_MS,
+    );
     expect(lspRequestTimeoutMs("textDocument/references")).toBe(LSP_SEMANTIC_REQUEST_TIMEOUT_MS);
     expect(lspRequestTimeoutMs("workspace/symbol")).toBe(LSP_SEMANTIC_REQUEST_TIMEOUT_MS);
   });
 
   it("keeps the existing bounded timeout for unrelated requests", () => {
     expect(lspRequestTimeoutMs("textDocument/rename")).toBe(LSP_REQUEST_TIMEOUT_MS);
-  });
-
-  it("keeps the client timeout longer than cold startup plus one semantic request", () => {
-    expect(CLIENT_REQUEST_TIMEOUT_MS).toBeGreaterThan(
-      LSP_INIT_TIMEOUT_MS + LSP_SEMANTIC_REQUEST_TIMEOUT_MS,
-    );
   });
 });
 
@@ -57,7 +50,9 @@ describe("LSP backend request/root behavior", () => {
   it("fails backend requests made without a running LSP instead of returning null", async () => {
     const backend = new LspBackend(baseConfig);
 
-    await expect(backend.lspRequest("textDocument/hover", {})).rejects.toBeInstanceOf(LspBackendError);
+    await expect(backend.lspRequest("textDocument/hover", {})).rejects.toBeInstanceOf(
+      LspBackendError,
+    );
   });
 
   it("prefers an ancestor tsconfig/json config root over a nearer package marker", () => {

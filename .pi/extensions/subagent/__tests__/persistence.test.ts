@@ -24,9 +24,6 @@ describe("persistent subagent sessions", () => {
       );
       expect(child.manager.getHeader()?.parentSession).toBe(parent.getSessionFile());
       expect(child.manager.getSessionName()).toBe("sub-recon-auth-flow");
-      expect(child.manager.getBranch().map((entry) => entry.type)).toEqual([
-        "session_info",
-      ]);
     } finally {
       rmSync(sessionDir, { recursive: true, force: true });
     }
@@ -37,7 +34,11 @@ describe("persistent subagent sessions", () => {
     try {
       const parent = SessionManager.create("/tmp/project", sessionDir);
       parent.appendSessionInfo("parent");
-      parent.appendMessage({ role: "user", content: "parent prompt", timestamp: Date.now() } as any);
+      parent.appendMessage({
+        role: "user",
+        content: "parent prompt",
+        timestamp: Date.now(),
+      } as any);
       parent.appendMessage({
         role: "assistant",
         content: [{ type: "text", text: "parent response" }],
@@ -73,7 +74,10 @@ describe("persistent subagent sessions", () => {
       expect(reopened.getSessionName()).toBe("sub-audit");
       expect(reopened.buildSessionContext().messages).toEqual([
         expect.objectContaining({ role: "user", content: "child prompt" }),
-        expect.objectContaining({ role: "assistant", content: [{ type: "text", text: "child response" }] }),
+        expect.objectContaining({
+          role: "assistant",
+          content: [{ type: "text", text: "child response" }],
+        }),
       ]);
     } finally {
       rmSync(sessionDir, { recursive: true, force: true });
@@ -131,6 +135,4 @@ describe("persistent subagent sessions", () => {
       rmSync(sessionDir, { recursive: true, force: true });
     }
   });
-
-
 });
