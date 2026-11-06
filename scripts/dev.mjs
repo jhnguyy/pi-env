@@ -38,9 +38,6 @@ async function verify(args) {
     console.log(
       `Global inputs not qualified by local test selection:\n${unqualified.map((file) => `  ${file}`).join("\n")}`,
     );
-    console.log(
-      "Run nub run verify:full in an environment with adequate capacity to qualify these inputs.",
-    );
   }
   if (list) {
     console.log(listPlan(steps).join("\n"));

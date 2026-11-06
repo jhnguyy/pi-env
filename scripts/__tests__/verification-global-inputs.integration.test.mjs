@@ -7,10 +7,7 @@ import { expect, test } from "vitest";
 
 const cli = fileURLToPath(new URL("../dev.mjs", import.meta.url));
 const heading = "Global inputs not qualified by local test selection:";
-const followup =
-  "Run nub run verify:full in an environment with adequate capacity to qualify these inputs.";
-
-test("lists exact unqualified global inputs and full-verification guidance only for a changed delta", async ({
+test("reports local coverage gaps without recommending full local verification", async ({
   onTestFinished,
 }) => {
   const root = await mkdtemp(join(tmpdir(), "verification-global-inputs-"));
@@ -37,12 +34,16 @@ test("lists exact unqualified global inputs and full-verification guidance only 
   const empty = list();
   expect(empty).toContain("Verification scope: 0 changed paths");
   expect(empty).not.toContain(heading);
-  expect(empty).not.toContain(followup);
+  expect(empty).not.toContain("nub run verify:full");
 
   await writeFile(join(root, "package.json"), '{"private":true}\n');
   await writeFile(join(root, "vitest.config.ts"), "export default { test: {} };\n");
 
   const changed = list();
   expect(changed).toContain("Verification scope: 2 changed paths");
-  expect(changed).toContain(`${heading}\n  package.json\n  vitest.config.ts\n${followup}\n`);
+  expect(changed).toContain(`${heading}\n  package.json\n  vitest.config.ts\n`);
+  expect(changed).toContain(
+    "Local feedback does not replace CI's changed-file policy and integration checks.",
+  );
+  expect(changed).not.toContain("nub run verify:full");
 });
