@@ -7,7 +7,7 @@ description: Deliver scoped repository changes with fidelity to user intent, wor
 
 ## Establish scope and isolate work
 
-Locate the target repository root and task worktree before running repository commands. If the target is ambiguous, ask before proceeding. Read its `README.md`, `CONTRIBUTING.md`, and applicable area instructions for local branch, base synchronization, worktree placement, and initialization requirements.
+Locate the target repository root and task worktree before running repository commands. If the target is ambiguous, ask before proceeding. Read its `README.md`, `CONTRIBUTING.md`, and applicable area instructions for the contribution workflow.
 
 Perform repository changes in a dedicated worktree, inspecting Git state before you create or resume it. Keep the base worktree unchanged on the base branch, and avoid worktrees another session may own. Preserve local work and stop if safe synchronization requires a decision that repository policy does not resolve.
 
@@ -23,7 +23,7 @@ Prefer simplification over additional machinery. Favor cohesive abstractions tha
 
 ## Implement and verify
 
-Implement the scoped outcome, then review the whole diff for unnecessary additions, unsupported assumptions, and opportunities to simplify.
+Implement the requested outcome, then review the whole diff for scope fidelity and simplicity.
 
 Run repository-required checks and the tests relevant to the affected behavior. Verify the integrated result. Report completed checks and material gaps without claiming more than the evidence establishes.
 
@@ -31,4 +31,4 @@ Run repository-required checks and the tests relevant to the affected behavior. 
 
 Inspect `git status` and the diff before committing so the commit includes only intended changes.
 
-Before preparing a pull request, read contribution guidance and applicable templates. Explain the behavioral outcome and rationale, including consequential decisions, validation, risks, and follow-up work.
+Prepare pull requests using the repository's contribution guidance and applicable templates.

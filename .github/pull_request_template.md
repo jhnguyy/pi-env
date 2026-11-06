@@ -1,10 +1,10 @@
 ## Behavior
 
-<!-- What changes for users, operators, agents, or maintainers? -->
+<!-- What changes? -->
 
 ## Decisions and risks
 
-<!-- Why this approach? What constraints, tradeoffs, and reviewer attention areas matter? For new responsibilities or module boundaries, include the reuse decision. -->
+<!-- Why this approach? What should reviewers consider? -->
 
 ## Validation
 
