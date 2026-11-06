@@ -1,13 +1,13 @@
 import { EventEmitter } from "node:events";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { connect as netConnect, createServer, type Server, type Socket } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChildProcess } from "node:child_process";
 import { it as effectIt } from "@effect/vitest";
 import { Deferred, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { testTempDirSync } from "../../../../src/testing/temp-dir";
 import {
   ClientClosedError,
   ClientTransportError,
@@ -122,7 +122,7 @@ describe("LspClient", () => {
   let clients: LspClient[];
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "lsp-c-"));
+    tmpDir = testTempDirSync("lsp-c-");
     socketPath = join(tmpDir, "t.sock");
     server = null;
     serverConnections = 0;
@@ -133,9 +133,6 @@ describe("LspClient", () => {
   afterEach(async () => {
     for (const client of clients) client.close();
     await closeServer();
-    try {
-      rmSync(tmpDir, { recursive: true });
-    } catch {}
   });
 
   function track(client: LspClient): LspClient {

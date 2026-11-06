@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { lstat, mkdir, readFile, symlink, utimes, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { testTempDir } from "../../../../src/testing/temp-dir";
 import lockfile from "proper-lockfile";
 import { it as effectIt } from "@effect/vitest";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import {
@@ -17,11 +17,8 @@ import {
 } from "../contracts.js";
 import { createFileSessionCatalog, nodeStorage, type StorageAdapter } from "../storage.js";
 
-const roots: string[] = [];
-
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "session-catalog-"));
-  roots.push(root);
+  const root = await testTempDir("session-catalog-");
   const cwd = join(root, "workspace");
   const agentDir = join(root, "agent");
   await mkdir(cwd);
@@ -35,10 +32,6 @@ function withStorage(overrides: Partial<StorageAdapter>): StorageAdapter {
 async function failureOf<A, E>(effect: Effect.Effect<A, E>): Promise<E> {
   return Effect.runPromise(effect.pipe(Effect.flip));
 }
-
-afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
-});
 
 describe("session catalog storage", () => {
   effectIt.effect("uses the Effect clock for commit timestamps", () =>

@@ -1,9 +1,9 @@
 import "../../__tests__/tui-setup";
 import { componentText, expansionHints } from "../../__tests__/rendering";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Effect, Fiber } from "effect";
+import { testTempDirSync } from "../../../../src/testing/temp-dir";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import webContextExtension, {
   WebFetchFailureKind,
@@ -28,25 +28,14 @@ import {
   type OpenAIWebToolSettings,
 } from "../openai-tools";
 
-const roots: string[] = [];
 function settingsProject(): string {
-  const root = mkdtempSync(join(tmpdir(), "web-context-test-"));
-  roots.push(root);
+  const root = testTempDirSync("web-context-test-");
   vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
   return root;
 }
 
 afterEach(() => {
   vi.unstubAllEnvs();
-  const failures: unknown[] = [];
-  for (const root of roots.splice(0)) {
-    try {
-      rmSync(root, { recursive: true, force: true });
-    } catch (error) {
-      failures.push(error);
-    }
-  }
-  if (failures.length) throw new AggregateError(failures, "Web-context fixture cleanup failed");
 });
 
 const mockTheme = {

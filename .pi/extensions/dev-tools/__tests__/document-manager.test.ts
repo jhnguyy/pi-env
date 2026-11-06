@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DocumentManager } from "../document-manager";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 function testResolveLanguageId(): string {
@@ -13,15 +13,12 @@ describe("DocumentManager", () => {
   let dm: DocumentManager;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "lsp-dm-"));
+    tmpDir = testTempDirSync("lsp-dm-");
     dm = new DocumentManager(testResolveLanguageId, () => tmpDir);
   });
 
   afterEach(() => {
     dm.clear();
-    try {
-      rmSync(tmpDir, { recursive: true });
-    } catch {}
   });
 
   function mkFile(name: string, content: string): string {

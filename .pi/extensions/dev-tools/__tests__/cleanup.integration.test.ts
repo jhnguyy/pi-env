@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import { testTempDirSync } from "../../../../src/testing/temp-dir";
 import {
   applyCleanupPlan,
   buildCleanupPlan,
@@ -13,19 +13,12 @@ import {
   parseWorktreePorcelain,
 } from "../cleanup-core";
 
-const fixtureRoots: string[] = [];
-
-afterEach(() => {
-  for (const root of fixtureRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
 }
 
 function createCleanupFixture() {
-  const root = mkdtempSync(join(tmpdir(), "pi-cleanup-test-"));
-  fixtureRoots.push(root);
+  const root = testTempDirSync("pi-cleanup-test-");
   const repo = join(root, "repo");
   execFileSync("git", ["init", "--initial-branch=main", repo], { encoding: "utf8" });
   git(repo, "config", "user.email", "test@example.com");

@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { testTempDir } from "../../../../src/testing/temp-dir";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -28,17 +28,12 @@ type NativeContext = Pick<ExtensionContext, "mode" | "cwd" | "shutdown"> & {
 };
 
 export async function createExtensionFixture() {
-  const root = await mkdtemp(join(tmpdir(), "session-extension-"));
+  const root = await testTempDir("session-extension-");
   let close = async () => {};
   onTestFinished(async () => {
     const failures: unknown[] = [];
     try {
       await close();
-    } catch (error) {
-      failures.push(error);
-    }
-    try {
-      await rm(root, { recursive: true, force: true });
     } catch (error) {
       failures.push(error);
     }

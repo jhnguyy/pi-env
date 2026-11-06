@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempDisposableSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import * as ChildFixture from "./child-process-fixture.ts";
@@ -21,8 +21,9 @@ function readFixturePid(path: string): number {
 
 export function processTreeFixture(script = "supervised-process-tree.ts") {
   const cleanup = new DisposableStack();
-  const directory = mkdtempSync(join(tmpdir(), "pi-supervised-tree-"));
-  cleanup.defer(() => rmSync(directory, { recursive: true, force: true }));
+  const { path: directory } = cleanup.use(
+    mkdtempDisposableSync(join(tmpdir(), "pi-supervised-tree-")),
+  );
   const pidFile = join(directory, "child-pid");
   const kill = () => {
     const groupFile = `${pidFile}.parent`;

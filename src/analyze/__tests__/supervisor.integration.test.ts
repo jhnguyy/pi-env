@@ -1,5 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-node";
 import { describe, expect, it } from "vitest";
@@ -8,8 +7,9 @@ import { ANALYZE_LIMITS, type SafeAnalyzeRequest } from "../policy.js";
 import { runPublicAnalyze } from "../public.js";
 import { superviseAnalyze } from "../supervisor.js";
 import { AnalyzeDiagnosticEventType, AnalyzeSpanName } from "../diagnostics.js";
+import { testTempDirSync } from "../../testing/temp-dir";
 
-const fixtureRoot = (): string => mkdtempSync(join(tmpdir(), "pi-analyze-supervisor-"));
+const fixtureRoot = (): string => testTempDirSync("pi-analyze-supervisor-");
 const disabledEnv = { PI_ENV_ANALYZE_JOURNAL_ENABLED: "false" } as const;
 
 type PathsSafeRequest = Extract<SafeAnalyzeRequest, { readonly scope: typeof ScopeMode.Paths }>;

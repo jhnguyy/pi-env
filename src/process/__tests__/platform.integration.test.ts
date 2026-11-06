@@ -1,11 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect, Fiber, Result } from "effect";
 import { describe, expect, it, live } from "@effect/vitest";
 import { onTestFinished } from "vitest";
 import { ProcessFailureKind, resolveNodeCommand, runProcess, streamProcess } from "../platform";
+import { testTempDirSync } from "../../testing/temp-dir";
 
 const node = resolveNodeCommand();
 
@@ -30,10 +30,6 @@ function isAlive(pid: number): boolean {
   } catch {
     return false;
   }
-}
-
-function temporaryDirectory(prefix: string): string {
-  return mkdtempSync(join(tmpdir(), prefix));
 }
 
 describe("process platform streamProcess", () => {
@@ -159,7 +155,7 @@ describe("process platform streamProcess", () => {
   it.runIf(process.platform !== "win32")(
     "awaits process-tree cleanup before rejecting combined overflow",
     async () => {
-      const root = temporaryDirectory("pi-process-overflow-");
+      const root = testTempDirSync("pi-process-overflow-");
       const pidPaths = [join(root, "parent.pid"), join(root, "child.pid")];
       const controller = new AbortController();
       const running = Effect.runPromise(
@@ -177,17 +173,13 @@ describe("process platform streamProcess", () => {
       onTestFinished(async () => {
         controller.abort();
         await running.catch(() => {});
-        try {
-          // The fixture's independent watchdog bounds leaks even if process cleanup regresses.
-          await eventually(() => {
-            for (const path of pidPaths) {
-              if (existsSync(path)) expect(isAlive(Number(readFileSync(path, "utf8")))).toBe(false);
-            }
-          }, 400);
-          for (const path of pidPaths) expect(existsSync(`${path}.watchdog`)).toBe(false);
-        } finally {
-          rmSync(root, { recursive: true, force: true });
-        }
+        // The fixture's independent watchdog bounds leaks even if process cleanup regresses.
+        await eventually(() => {
+          for (const path of pidPaths) {
+            if (existsSync(path)) expect(isAlive(Number(readFileSync(path, "utf8")))).toBe(false);
+          }
+        }, 400);
+        for (const path of pidPaths) expect(existsSync(`${path}.watchdog`)).toBe(false);
       });
       await expect(running).rejects.toMatchObject({ kind: ProcessFailureKind.OutputLimit });
       for (const path of pidPaths) expect(isAlive(Number(readFileSync(path, "utf8")))).toBe(false);
@@ -239,21 +231,10 @@ describe("process platform streamProcess", () => {
   ])(
     "$name",
     async ({ ignoreTerm }) => {
-      const directory = temporaryDirectory("pi-process-interrupt-");
+      const directory = testTempDirSync("pi-process-interrupt-");
       let fiber: Fiber.Fiber<unknown, unknown> | undefined;
       onTestFinished(async () => {
-        const failures: unknown[] = [];
-        try {
-          if (fiber) await Effect.runPromise(Fiber.interrupt(fiber));
-        } catch (error) {
-          failures.push(error);
-        }
-        try {
-          rmSync(directory, { recursive: true, force: true });
-        } catch (error) {
-          failures.push(error);
-        }
-        if (failures.length) throw new AggregateError(failures, "Process fixture cleanup failed.");
+        if (fiber) await Effect.runPromise(Fiber.interrupt(fiber));
       });
       const pidFile = join(directory, "pid");
       const script = `${ignoreTerm ? "process.on('SIGTERM',()=>{});" : ""}require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(()=>{}, 1000)`;
@@ -274,10 +255,7 @@ describe("process platform streamProcess", () => {
     "terminates a ready TERM-ignoring POSIX descendant after its parent closes",
     () =>
       Effect.gen(function* () {
-        const directory = temporaryDirectory("pi-process-tree-");
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => rmSync(directory, { recursive: true, force: true })),
-        );
+        const directory = testTempDirSync("pi-process-tree-");
         const marker = join(directory, "marker");
         const childPidFile = join(directory, "child-pid");
         const script = join(directory, "parent.mjs");

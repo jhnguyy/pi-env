@@ -1,11 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 // @ts-ignore - the extension-level inferred LSP project does not see root devDependencies; root tsc resolves vitest.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserClient, type BrowserLike, type PlaywrightLoader } from "../browser";
 import type { BrowserClientConfig } from "../config";
 import type { LocatorLike, PageLike } from "../locators";
+import { testTempDir } from "../../../../src/testing/temp-dir";
 
 describe("BrowserClient downloads with a fake browser", () => {
   let artifactDir: string;
@@ -14,14 +14,10 @@ describe("BrowserClient downloads with a fake browser", () => {
   let loadPlaywright: PlaywrightLoader;
 
   beforeEach(async () => {
-    artifactDir = await mkdtemp(join(tmpdir(), "pi-browser-test-"));
+    artifactDir = await testTempDir("pi-browser-test-");
     page = fakePage();
     connectOverCDP = vi.fn(async () => fakeBrowser(page));
     loadPlaywright = async () => ({ chromium: { connectOverCDP } });
-  });
-
-  afterEach(async () => {
-    await rm(artifactDir, { recursive: true, force: true });
   });
 
   it("registers the listener before clicking and saves returned bytes under the artifact directory", async () => {

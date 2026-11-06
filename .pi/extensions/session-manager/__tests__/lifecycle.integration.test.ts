@@ -1,7 +1,7 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { testTempDir } from "../../../../src/testing/temp-dir";
+import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import type { SessionManifest } from "../contracts.js";
 import { CloseSource } from "../domain.js";
@@ -16,7 +16,6 @@ import {
 import { SessionFileInvalid, nodeSessionFileProbe } from "../session-file.js";
 import { createFileSessionCatalog } from "../storage.js";
 
-const roots: string[] = [];
 const window: CurrentWindow = {
   socketPath: "/tmp/tmux.sock",
   tmuxSessionId: "$1",
@@ -31,8 +30,7 @@ const host: SessionHostShape = {
 };
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "session-lifecycle-"));
-  roots.push(root);
+  const root = await testTempDir("session-lifecycle-");
   const cwd = join(root, "workspace");
   await mkdir(cwd);
   const catalog = createFileSessionCatalog(join(root, "agent"));
@@ -54,10 +52,6 @@ async function fixture() {
 async function failureOf<A, E>(effect: Effect.Effect<A, E>): Promise<E> {
   return Effect.runPromise(effect.pipe(Effect.flip));
 }
-
-afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
-});
 
 describe("session lifecycle", () => {
   it("enrolls eligible pending sessions without assigning names", async () => {

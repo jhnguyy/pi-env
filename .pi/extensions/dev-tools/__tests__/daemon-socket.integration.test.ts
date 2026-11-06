@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connect, Server, Socket } from "node:net";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Effect } from "effect";
+import { testTempDirSync } from "../../../../src/testing/temp-dir";
 import { noopToolingTelemetryRuntime } from "../../../../src/telemetry/tooling";
 import { LspDaemon } from "../daemon";
 import { parseResponse, serializeRequest, type DaemonResponse } from "../protocol";
@@ -62,7 +62,7 @@ describe("daemon socket lifecycle", () => {
   const sockets: Socket[] = [];
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "daemon-socket-"));
+    root = testTempDirSync("daemon-socket-");
     socketPath = join(root, "daemon.sock");
     pidPath = join(root, "daemon.pid");
     backend = new ControlledBackend(root);
@@ -98,11 +98,6 @@ describe("daemon socket lifecycle", () => {
       if (error !== expectedShutdownError) failures.push(error);
     }
     vi.restoreAllMocks();
-    try {
-      rmSync(root, { recursive: true, force: true });
-    } catch (error) {
-      failures.push(error);
-    }
     if (failures.length) throw new AggregateError(failures, "Socket fixture teardown failed");
   });
 

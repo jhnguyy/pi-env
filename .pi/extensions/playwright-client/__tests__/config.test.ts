@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { BrowserClient } from "../browser";
 import { loadBrowserClientConfig } from "../config";
+import { testTempDirSync } from "../../../../src/testing/temp-dir";
 
 const BROWSER_ENV_KEYS = [
   "PI_BROWSER_PROFILE",
@@ -14,7 +14,6 @@ const BROWSER_ENV_KEYS = [
 const ENV_KEYS = ["PI_CODING_AGENT_DIR", ...BROWSER_ENV_KEYS] as const;
 
 const savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
-const tempDirs: string[] = [];
 
 beforeEach(() => {
   process.env.PI_CODING_AGENT_DIR = tempProject();
@@ -26,7 +25,6 @@ afterEach(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
-  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 describe("playwright-client config", () => {
@@ -138,8 +136,7 @@ function clearBrowserEnv(): void {
 }
 
 function tempProject(settings?: Record<string, unknown>): string {
-  const dir = mkdtempSync(join(tmpdir(), "pi-env-browser-config-"));
-  tempDirs.push(dir);
+  const dir = testTempDirSync("pi-env-browser-config-");
   if (settings) {
     mkdirSync(join(dir, ".pi"), { recursive: true });
     writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify(settings));

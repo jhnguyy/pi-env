@@ -1,7 +1,7 @@
-import { describe, expect, it, onTestFinished } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { testTempDirSync } from "../../../../src/testing/temp-dir";
 
 import { assertUnderSessionDir, formatDigestList, listSessionDigests } from "../sessions";
 
@@ -10,9 +10,7 @@ function lines(...entries: object[]): string[] {
 }
 
 function temporarySessionDir(): string {
-  const root = mkdtempSync(join(tmpdir(), "introspection-sessions-"));
-  onTestFinished(() => rmSync(root, { recursive: true, force: true }));
-  return root;
+  return testTempDirSync("introspection-sessions-");
 }
 
 function digestLines(entries: string[], filename: string) {

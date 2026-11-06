@@ -1,6 +1,5 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "@effect/vitest";
 import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-node";
@@ -31,8 +30,9 @@ import {
   parseAnalyzeWorkerEvent,
   parseAnalyzeWorkerRequest,
 } from "../protocol.js";
+import { testTempDirSync } from "../../testing/temp-dir";
 
-const fixtureRoot = (): string => mkdtempSync(join(tmpdir(), "pi-analyze-diagnostics-"));
+const fixtureRoot = (): string => testTempDirSync("pi-analyze-diagnostics-");
 
 function event(
   runId: string,

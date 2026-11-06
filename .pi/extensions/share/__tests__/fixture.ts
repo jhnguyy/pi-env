@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import * as nodeFiles from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -12,6 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, expect } from "vitest";
 import share, { type ShareFiles } from "../index";
+import { testTempDirSync } from "../../../../src/testing/temp-dir";
 
 const run = promisify(execFile);
 const piCli = join(
@@ -56,8 +56,7 @@ export const exampleShare = {
 export function fixture(...repositories: unknown[]) {
   if (repositories.length === 0) repositories.push(privateRepository);
   let checks = 0;
-  const root = mkdtempSync(join(tmpdir(), "pi-share-test-"));
-  roots.push(root);
+  const root = testTempDirSync("pi-share-test-");
   const settings = join(root, "settings.json");
   const projectSettings = join(root, "project-settings.json");
   writeFileSync(settings, JSON.stringify({ theme: "dark" }));

@@ -1,7 +1,7 @@
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { lstat, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { testTempDir } from "../../../../src/testing/temp-dir";
 import { handleRename, type RenameBackend, type RenameHandlerDeps } from "../handlers";
 import { pathToUri } from "../utils";
 import { applyWorkspaceEdit } from "../workspace-edit";
@@ -21,7 +21,7 @@ describe("rename action", () => {
   let usageContent: string;
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), "dev-tools-rename-"));
+    root = await testTempDir("dev-tools-rename-");
     declarationPath = join(root, "declaration.ts");
     usagePath = join(root, "usage.ts");
     declarationContent = 'export const userName = "Ada";\n';
@@ -30,10 +30,6 @@ describe("rename action", () => {
       writeFile(declarationPath, declarationContent, "utf8"),
       writeFile(usagePath, usageContent, "utf8"),
     ]);
-  });
-
-  afterEach(async () => {
-    await rm(root, { recursive: true, force: true });
   });
 
   function dependencies(workspaceEdit: unknown) {
@@ -377,111 +373,99 @@ describe("rename action", () => {
   });
 
   it("rejects a mixed in-scope and out-of-scope edit without partial writes", async () => {
-    const outsideRoot = await mkdtemp(join(tmpdir(), "dev-tools-rename-outside-"));
+    const outsideRoot = await testTempDir("dev-tools-rename-outside-");
     const outsidePath = join(outsideRoot, "outside.ts");
     const outsideContent = "console.log(userName);\n";
-    try {
-      await writeFile(outsidePath, outsideContent, "utf8");
-      const { deps, invalidate } = dependencies({
-        changes: {
-          [pathToUri(declarationPath)]: [{ range: range(0, 13, 0, 21), newText: "accountName" }],
-          [pathToUri(outsidePath)]: [{ range: range(0, 12, 0, 20), newText: "accountName" }],
-        },
-      });
+    await writeFile(outsidePath, outsideContent, "utf8");
+    const { deps, invalidate } = dependencies({
+      changes: {
+        [pathToUri(declarationPath)]: [{ range: range(0, 13, 0, 21), newText: "accountName" }],
+        [pathToUri(outsidePath)]: [{ range: range(0, 12, 0, 20), newText: "accountName" }],
+      },
+    });
 
-      const response = await handleRename(
-        {
-          id: 5,
-          action: "rename",
-          path: declarationPath,
-          line: 1,
-          character: 14,
-          newName: "accountName",
-        },
-        deps,
-      );
+    const response = await handleRename(
+      {
+        id: 5,
+        action: "rename",
+        path: declarationPath,
+        line: 1,
+        character: 14,
+        newName: "accountName",
+      },
+      deps,
+    );
 
-      expect(response.ok).toBe(false);
-      await expect(readFile(declarationPath, "utf8")).resolves.toBe(declarationContent);
-      await expect(readFile(outsidePath, "utf8")).resolves.toBe(outsideContent);
-      expect(invalidate).not.toHaveBeenCalled();
-    } finally {
-      await rm(outsideRoot, { recursive: true, force: true });
-    }
+    expect(response.ok).toBe(false);
+    await expect(readFile(declarationPath, "utf8")).resolves.toBe(declarationContent);
+    await expect(readFile(outsidePath, "utf8")).resolves.toBe(outsideContent);
+    expect(invalidate).not.toHaveBeenCalled();
   });
 
   it("rejects a symlink escape without writes", async () => {
-    const outsideRoot = await mkdtemp(join(tmpdir(), "dev-tools-rename-symlink-"));
+    const outsideRoot = await testTempDir("dev-tools-rename-symlink-");
     const outsideTarget = join(outsideRoot, "target.ts");
     const linkPath = join(root, "escape.ts");
-    try {
-      await writeFile(outsideTarget, declarationContent, "utf8");
-      await symlink(outsideTarget, linkPath);
-      const { deps, invalidate } = dependencies({
-        changes: {
-          [pathToUri(linkPath)]: [{ range: range(0, 13, 0, 21), newText: "accountName" }],
-        },
-      });
+    await writeFile(outsideTarget, declarationContent, "utf8");
+    await symlink(outsideTarget, linkPath);
+    const { deps, invalidate } = dependencies({
+      changes: {
+        [pathToUri(linkPath)]: [{ range: range(0, 13, 0, 21), newText: "accountName" }],
+      },
+    });
 
-      const response = await handleRename(
-        {
-          id: 6,
-          action: "rename",
-          path: linkPath,
-          line: 1,
-          character: 14,
-          newName: "accountName",
-        },
-        deps,
-      );
+    const response = await handleRename(
+      {
+        id: 6,
+        action: "rename",
+        path: linkPath,
+        line: 1,
+        character: 14,
+        newName: "accountName",
+      },
+      deps,
+    );
 
-      expect(response.ok).toBe(false);
-      await expect(readFile(outsideTarget, "utf8")).resolves.toBe(declarationContent);
-      expect((await lstat(linkPath)).isSymbolicLink()).toBe(true);
-      expect(invalidate).not.toHaveBeenCalled();
-    } finally {
-      await rm(outsideRoot, { recursive: true, force: true });
-    }
+    expect(response.ok).toBe(false);
+    await expect(readFile(outsideTarget, "utf8")).resolves.toBe(declarationContent);
+    expect((await lstat(linkPath)).isSymbolicLink()).toBe(true);
+    expect(invalidate).not.toHaveBeenCalled();
   });
 
   it("rejects an allowed symlink whose real target has an unsupported backend before writes", async () => {
-    const secondRoot = await mkdtemp(join(tmpdir(), "dev-tools-rename-symlink-backend-"));
+    const secondRoot = await testTempDir("dev-tools-rename-symlink-backend-");
     const realTarget = join(secondRoot, "target.ts");
     const linkPath = join(root, "cross-backend-link.ts");
-    try {
-      await writeFile(realTarget, declarationContent, "utf8");
-      await symlink(realTarget, linkPath);
-      const { backend, deps, invalidate } = dependencies({
-        changes: {
-          [pathToUri(linkPath)]: [{ range: range(0, 13, 0, 21), newText: "accountName" }],
-        },
-      });
-      backend.projectRoots = [root, secondRoot];
-      const originalGetBackend = deps.getBackend;
-      deps.getBackend = (path: string) => {
-        if (path === realTarget) throw new Error("Unsupported file type: target.ts");
-        return originalGetBackend(path);
-      };
+    await writeFile(realTarget, declarationContent, "utf8");
+    await symlink(realTarget, linkPath);
+    const { backend, deps, invalidate } = dependencies({
+      changes: {
+        [pathToUri(linkPath)]: [{ range: range(0, 13, 0, 21), newText: "accountName" }],
+      },
+    });
+    backend.projectRoots = [root, secondRoot];
+    const originalGetBackend = deps.getBackend;
+    deps.getBackend = (path: string) => {
+      if (path === realTarget) throw new Error("Unsupported file type: target.ts");
+      return originalGetBackend(path);
+    };
 
-      const response = await handleRename(
-        {
-          id: 7,
-          action: "rename",
-          path: linkPath,
-          line: 1,
-          character: 14,
-          newName: "accountName",
-        },
-        deps,
-      );
+    const response = await handleRename(
+      {
+        id: 7,
+        action: "rename",
+        path: linkPath,
+        line: 1,
+        character: 14,
+        newName: "accountName",
+      },
+      deps,
+    );
 
-      expect(response.ok).toBe(false);
-      await expect(readFile(realTarget, "utf8")).resolves.toBe(declarationContent);
-      expect((await lstat(linkPath)).isSymbolicLink()).toBe(true);
-      expect(invalidate).not.toHaveBeenCalled();
-    } finally {
-      await rm(secondRoot, { recursive: true, force: true });
-    }
+    expect(response.ok).toBe(false);
+    await expect(readFile(realTarget, "utf8")).resolves.toBe(declarationContent);
+    expect((await lstat(linkPath)).isSymbolicLink()).toBe(true);
+    expect(invalidate).not.toHaveBeenCalled();
   });
 
   it("rejects an unsupported target before any write", async () => {

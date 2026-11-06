@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import ts from "typescript";
 import { Effect, Result } from "effect";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   asyncRisksEffect,
   duplicatesEffect,
@@ -55,6 +55,7 @@ import {
   type Scope,
 } from "../scope.js";
 import { resolveNodeCommand } from "../../process/platform.js";
+import { testTempDirSync } from "../../testing/temp-dir";
 
 const allScope: Scope = { mode: ScopeMode.All, files: [], hunks: new Map() };
 const pathScope = (
@@ -63,10 +64,7 @@ const pathScope = (
 ): Scope => ({ mode: ScopeMode.Paths, files, hunks });
 const node = resolveNodeCommand();
 function fixtureRoot(): string {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-analyze-"));
-  // Register before project writes or startup so failed setup is owned too.
-  onTestFinished(() => rmSync(cwd, { recursive: true, force: true }));
-  return cwd;
+  return testTempDirSync("pi-analyze-");
 }
 const zeroRuntime = {
   now: () => 0,

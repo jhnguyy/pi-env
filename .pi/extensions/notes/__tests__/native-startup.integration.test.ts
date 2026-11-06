@@ -1,6 +1,6 @@
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { testTempDir } from "../../../../src/testing/temp-dir";
 import { expect, it } from "vitest";
 import { fauxProvider, fauxToolCall, fauxAssistantMessage } from "@earendil-works/pi-ai";
 import {
@@ -18,7 +18,7 @@ import sessionManagerExtension from "../../session-manager/index";
 // Only inference is scripted. Resource loading, native tool dispatch, session files, and vaults
 // are real. The native provider extension is loaded separately for each owner.
 it("keeps simultaneous native owners' configured vaults independent through shutdown", async () => {
-  const root = await mkdtemp(join(tmpdir(), "native-notes-owners-"));
+  const root = await testTempDir("native-notes-owners-");
   const sessions: AgentSession[] = [];
   const closed = new Set<AgentSession>();
   const close = async (session: AgentSession) => {
@@ -150,11 +150,6 @@ it("keeps simultaneous native owners' configured vaults independent through shut
       } catch (error) {
         failures.push(error);
       }
-    }
-    try {
-      await rm(root, { recursive: true, force: true });
-    } catch (error) {
-      failures.push(error);
     }
   }
   if (failures.length) throw new AggregateError(failures, "Native notes owner scenario failed");
