@@ -6,7 +6,7 @@ Start with [README](README.md) for setup modes and the [code-contribution skill]
 
 Use Node compatible with [`package.json#engines`](package.json) and Nub on `PATH`. Check the [prerequisites](docs/prerequisites.md) and follow the [setup guidance](docs/setup.md) for Nix-managed or portable environments.
 
-Keep dependency links and generated bundles local to each checkout. Installation runs [hydration](scripts/hydrate.mjs), which prepares bundles and the Effect language service and restarts the LSP daemon. For an additional worktree, initialize those artifacts:
+Keep dependency links and generated bundles local to each checkout. Installation runs [hydration](scripts/hydrate.mjs). For an additional worktree, initialize those artifacts:
 
 ```bash
 nub run --no-check worktree:init

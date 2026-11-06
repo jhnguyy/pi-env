@@ -37,7 +37,6 @@ test_agent_guidelines_are_created_from_the_managed_source() {
   assert_file_count "$agents_file" "$END_MARKER" 1
   assert_managed_content "$agents_file"
 
-  rm -rf "$tmp"
 }
 
 test_agent_guidelines_are_reconciled_idempotently() {
@@ -74,7 +73,6 @@ test_agent_guidelines_are_reconciled_idempotently() {
   after="$(sha256sum "$agents_file")"
   assert_eq "$after" "$before" 'a repeated setup must not change AGENTS.md'
 
-  rm -rf "$tmp"
 }
 
 test_agent_guidelines_are_created_from_the_managed_source

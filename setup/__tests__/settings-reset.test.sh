@@ -5,132 +5,103 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 source "$ROOT/setup/options.sh"
 source "$ROOT/setup/context.sh"
 NODE=$(node_bin)
-EVIDENCE=$(mktemp -d "${PI_ENV_SETUP_EVIDENCE_DIR:-${TMPDIR:-/tmp}}/pi-env-settings-XXXXXX")
-printf 'Settings workflow evidence: %s\n' "$EVIDENCE"
-exec 3>&1
-exec >>"$EVIDENCE/workflow.log" 2>&1
-phase=initialization
-finish() {
-  local status=$?
-  EVIDENCE="$EVIDENCE" STATUS="$status" PHASE="$phase" "$NODE" --input-type=module <<'JS'
-import fs from 'node:fs';
-const {EVIDENCE: dir, STATUS: status, PHASE: phase} = process.env;
-fs.writeFileSync(`${dir}/result.json`, JSON.stringify({
-  inputs: 'personal.json and metadata-only auth fixtures',
-  expected: 'normal preferences survive; reset replaces baseline/packages; registration failures restore exact settings',
-  actual: {phase, exitStatus: Number(status)}, verdict: status === '0' ? 'pass' : 'fail',
-  reproduce: 'bash setup/__tests__/settings-reset.test.sh',
-  inspect: 'workflow.log, before/after JSON, and home/.pi/agent/settings.json.backup-*',
-}, null, 2) + '\n');
-JS
-  printf 'Settings workflow exit: %s (%s)\n' "$status" "$phase" >&3
-  exit "$status"
+TMP=$(with_temp_dir)
+
+# Exact bytes, including the trailing newline that $(...) would strip.
+same_bytes() {
+  cmp -s "$1" <(printf '%s\n' "$2")
 }
-trap finish EXIT
-export HOME="$EVIDENCE/home"
+
+export HOME="$TMP/home"
 export AGENTS_DIR="$HOME/.agents" XDG_CONFIG_HOME="$HOME/.config" GHOSTTY_CONFIG_DIR="$HOME/.config/ghostty"
 unset PI_AGENT_DIR
-export PI_CODING_AGENT_DIR="$EVIDENCE/selected-agent"
+export PI_CODING_AGENT_DIR="$TMP/selected-agent"
+UNSELECTED='{"defaultThinkingLevel":"high"}'
 mkdir -p "$HOME/.pi/agent"
-printf '%s\n' '{"defaultThinkingLevel":"high"}' > "$HOME/.pi/agent/settings.json"
-cp "$HOME/.pi/agent/settings.json" "$EVIDENCE/unselected-settings.json"
-phase='native agent-directory selection'
+printf '%s\n' "$UNSELECTED" > "$HOME/.pi/agent/settings.json"
+
 setup_init_context "$ROOT/setup"
 assert_eq "$PI_AGENT_DIR" "$PI_CODING_AGENT_DIR" 'setup uses the native agent directory'
 export REPO SETTINGS_FILE="$PI_AGENT_DIR/settings.json"
-export PI_ENV_SETUP_MODE=portable PI_ENV_SKIP_TERMINAL=1 PI_ENV_SKIP_REPO_HOOKS=1 PI_ENV_SKIP_HOME_MANAGER=1
+export PI_ENV_SETUP_MODE=portable
 configure() {
   setup_parse_args "$@" --no-terminal --no-repo-hooks --no-home-manager
-  "$NODE" "$ROOT/setup/configure.mjs" pi "$NODE"
+  quiet "$NODE" "$ROOT/setup/configure.mjs" pi "$NODE"
 }
 mkdir -p "$PI_AGENT_DIR"
 printf '%s\n' '{"openai":{"type":"oauth"},"openai-codex":{"type":"oauth"}}' > "$PI_AGENT_DIR/auth.json"
-phase='fresh settings'
+
 configure
-cp "$SETTINGS_FILE" "$EVIDENCE/initial.json"
-cat > "$EVIDENCE/personal.json" <<'JSON'
-{
+INITIAL=$(cat "$SETTINGS_FILE")
+PERSONAL='{
   "defaultProvider": "anthropic", "defaultModel": "personal", "defaultThinkingLevel": "high",
   "defaultTools": [], "npmCommand": ["personal-command"], "theme": "personal-theme",
   "extensions": ["personal"], "custom": {"keep": true}, "packages": ["npm:personal-package"],
   "httpIdleTimeoutMs": 0,
   "retry": {"enabled": false, "maxAgentDelayMs": 5000, "provider": {"maxRetries": 4, "keep": true}}
-}
-JSON
-cp "$EVIDENCE/personal.json" "$SETTINGS_FILE"
-phase='normal personal settings registration'
+}'
+printf '%s\n' "$PERSONAL" > "$SETTINGS_FILE"
 configure
-cp "$SETTINGS_FILE" "$EVIDENCE/normal.json"
-phase='explicit reset'
+NORMAL=$(cat "$SETTINGS_FILE")
 configure --reset
-cp "$SETTINGS_FILE" "$EVIDENCE/reset.json"
-phase='normal rerun'
+RESET=$(cat "$SETTINGS_FILE")
 configure
-cp "$SETTINGS_FILE" "$EVIDENCE/rerun.json"
-phase='preference assertions'
+RERUN=$(cat "$SETTINGS_FILE")
+
 PRIMARY_REPO=$(git -C "$ROOT" worktree list --porcelain | awk '/^worktree / { print substr($0, 10); exit }')
-EVIDENCE="$EVIDENCE" PRIMARY_REPO="$PRIMARY_REPO" "$NODE" --input-type=module <<'JS'
+INITIAL="$INITIAL" PERSONAL="$PERSONAL" NORMAL="$NORMAL" RESET="$RESET" RERUN="$RERUN" \
+  PRIMARY_REPO="$PRIMARY_REPO" "$NODE" --input-type=module <<'JS'
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-const dir = process.env.EVIDENCE;
-const read = name => JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
+const env = process.env;
 const managed = {
   httpIdleTimeoutMs: 120000,
   retry: {enabled: true, maxRetries: 3, baseDelayMs: 7500,
     provider: {timeoutMs: 30000, maxRetries: 0, maxRetryDelayMs: 60000}},
 };
-const personal = read('personal.json');
-const normal = read('normal.json');
+const personal = JSON.parse(env.PERSONAL);
+const normal = JSON.parse(env.NORMAL);
 // Managed keys win on every run; unmanaged siblings in managed objects survive.
 assert.deepEqual({...normal, packages: personal.packages}, {
   ...personal, httpIdleTimeoutMs: managed.httpIdleTimeoutMs,
   retry: {...managed.retry, maxAgentDelayMs: 5000, provider: {...managed.retry.provider, keep: true}},
 });
 const registeredSources = settings => settings.packages.map(source =>
-  source.startsWith('npm:') ? source : path.resolve(path.dirname(process.env.SETTINGS_FILE), source)).sort();
-assert.deepEqual(registeredSources(normal), [...personal.packages, process.env.PRIMARY_REPO].sort());
-const reset = read('reset.json');
+  source.startsWith('npm:') ? source : path.resolve(path.dirname(env.SETTINGS_FILE), source)).sort();
+assert.deepEqual(registeredSources(normal), [...personal.packages, env.PRIMARY_REPO].sort());
+const reset = JSON.parse(env.RESET);
 const {packages, theme, ...baseline} = reset;
 assert.deepEqual(baseline, {
   defaultProvider: 'openai', defaultModel: 'gpt-6.1-sol', defaultThinkingLevel: 'medium',
   defaultTools: ['+codemode', '+tool_search'], npmCommand: ['nub'],
   ...managed,
 });
-assert.deepEqual(registeredSources(reset), [process.env.PRIMARY_REPO]);
-assert.deepEqual(read('initial.json'), reset);
-assert.deepEqual(read('rerun.json'), reset);
-const agent = process.env.PI_AGENT_DIR;
-const backups = fs.readdirSync(agent).filter(name => name.startsWith('settings.json.backup-'));
+assert.deepEqual(registeredSources(reset), [env.PRIMARY_REPO]);
+assert.deepEqual(JSON.parse(env.INITIAL), reset);
+assert.deepEqual(JSON.parse(env.RERUN), reset);
+const backups = fs.readdirSync(env.PI_AGENT_DIR).filter(name => name.startsWith('settings.json.backup-'));
 assert.equal(backups.length, 1);
-assert.equal(fs.readFileSync(path.join(agent, backups[0]), 'utf8'), fs.readFileSync(path.join(dir, 'normal.json'), 'utf8'));
+assert.equal(fs.readFileSync(path.join(env.PI_AGENT_DIR, backups[0]), 'utf8'), `${env.NORMAL}\n`);
 JS
-cp "$EVIDENCE/personal.json" "$SETTINGS_FILE"
-for mode in normal reset; do
-  phase="$mode registration rollback"
-  args=()
-  if [ "$mode" = reset ]; then args=(--reset); fi
-  if "$NODE" "$ROOT/setup/apply-managed-settings.mjs" "$SETTINGS_FILE" "$EVIDENCE/missing-repo" "${args[@]}"; then
-    fail 'registration failure should fail'
+
+for args in "" --reset; do
+  printf '%s\n' "$PERSONAL" > "$SETTINGS_FILE"
+  if "$NODE" "$ROOT/setup/apply-managed-settings.mjs" "$SETTINGS_FILE" "$TMP/missing-repo" $args 2>/dev/null; then
+    fail "registration failure should fail (${args:-normal})"
   fi
-  "$NODE" "$ROOT/setup/__tests__/assert-files-equal.mjs" "$SETTINGS_FILE" "$EVIDENCE/personal.json" || fail 'registration failure did not restore exact personal settings'
+  same_bytes "$SETTINGS_FILE" "$PERSONAL" || fail "registration failure did not restore exact settings (${args:-normal})"
 done
-for metadata in codex neither; do
-  phase="provider metadata: $metadata"
-  if [ "$metadata" = codex ]; then
-    printf '%s\n' '{"openai-codex":{"type":"oauth"}}' > "$PI_AGENT_DIR/auth.json"
-    expected=openai-codex
-  else
-    printf '{}\n' > "$PI_AGENT_DIR/auth.json"
-    expected=openai
-  fi
+
+for case in 'openai-codex:{"openai-codex":{"type":"oauth"}}' 'openai:{}'; do
+  printf '%s\n' "${case#*:}" > "$PI_AGENT_DIR/auth.json"
   configure --reset
-  "$NODE" -e 'const s = require(process.argv[1]); if (s.defaultProvider !== process.argv[2]) process.exit(1)' "$SETTINGS_FILE" "$expected"
-  cp "$SETTINGS_FILE" "$EVIDENCE/$metadata.json"
+  assert_eq "$("$NODE" -p 'require(process.argv[1]).defaultProvider' "$SETTINGS_FILE")" "${case%%:*}" \
+    "provider from auth metadata ${case#*:}"
 done
-phase='conflicting agent directories'
-if PI_AGENT_DIR="$HOME/.pi/agent" PI_CODING_AGENT_DIR="$EVIDENCE/selected-agent" "$ROOT/setup.sh" --reset --help; then
+
+if PI_AGENT_DIR="$HOME/.pi/agent" PI_CODING_AGENT_DIR="$TMP/selected-agent" "$ROOT/setup.sh" --reset --help >/dev/null 2>&1; then
   fail 'conflicting agent directories must fail before provisioning or writes'
 fi
-"$NODE" "$ROOT/setup/__tests__/assert-files-equal.mjs" "$HOME/.pi/agent/settings.json" "$EVIDENCE/unselected-settings.json" || fail 'setup changed the unselected settings'
-phase=complete
+same_bytes "$HOME/.pi/agent/settings.json" "$UNSELECTED" || fail 'setup changed the unselected settings'
+echo "settings reset tests passed"

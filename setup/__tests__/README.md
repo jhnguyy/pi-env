@@ -2,16 +2,6 @@
 
 Setup tests exercise shell entrypoints and Node setup modules with temporary homes, repos, and PATHs.
 
-## Shared helpers
-
-Source `helpers.sh` instead of redefining common glue:
-
-- `ROOT` — repository root derived from the calling test file.
-- `fail` — consistent failure output.
-- `node_bin` / `run_node` — Node resolution that follows repo setup rules.
-- `run_configure` — a `setup/configure.mjs` command against an isolated home.
-- `assert_eq`, `assert_file_contains`, `assert_file_count` — common assertions.
-- `with_temp_dir` — temporary workspace allocation.
-- `make_executable` — small fake command creation.
+Source `helpers.sh` for shared fixtures and assertions. It creates one temporary root per test process and removes it on exit, so tests need no cleanup of their own. Stubs report calls on stderr; tests capture that output rather than writing call logs.
 
 Keep behavior-heavy setup code in `setup/*.mjs` or `setup/*.sh`. Tests should assemble fixtures and assert outcomes rather than reimplementing setup logic.

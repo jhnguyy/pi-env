@@ -17,5 +17,5 @@ Kernel locks survive pauses and are released on process exit; no stale lease can
 expire underneath a live owner. A short-lived helper holds the lock until the
 operation finishes or Pi closes its pipe (including after `kill -9`). Shutdown
 drains in-flight tmux operations before unlocking. Missing `flock` or lock
-contention past five seconds fails enrollment rather than mutating an unprotected
+contention past a bounded wait fails enrollment rather than mutating an unprotected
 binding. See [prerequisites](prerequisites.md#tmux-session-ownership) for `flock`.

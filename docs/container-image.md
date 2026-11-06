@@ -34,7 +34,7 @@ External runtime state:
 
 - GitHub auth and SSH signing keys
 - Git identity/signing config
-- pi sessions, handoffs, auth, model credentials, settings, local overrides
+- pi sessions, auth, model credentials, settings, local overrides
 - homelab notes
 - runtime worktrees/deployment config
 

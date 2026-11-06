@@ -44,65 +44,26 @@ test_granular_flags() {
   [ "$PI_ENV_HOME_MANAGER_SYNC" = "1" ] || fail "--sync-home-manager should request the update"
 }
 
-# Inject an external launcher failure without realizing a Nix store or installing dependencies.
-test_auto_nix_entrypoint_uses_nix_setup_app() (
-  local tmp output node status
+# A stub nix reports its argv on stdout, which exec passes through setup.sh.
+test_nix_entrypoints_delegate_to_nix_setup_app() {
+  local tmp output status=0
   tmp="$(with_temp_dir)"
-  node=$(node_bin)
-  printf 'Nix launcher evidence: %s\n' "$tmp"
-  record_result() {
-    local code=$?
-    DIR="$tmp" STATUS="$code" "$node" --input-type=module <<'JS'
-import fs from 'node:fs';
-const dir = process.env.DIR;
-fs.writeFileSync(`${dir}/result.json`, JSON.stringify({
-  inputs: 'successful launcher and injected exit 37',
-  expected: 'public setup delegates to Nix; launcher failure propagates without portable setup or settings writes',
-  actual: {exitStatus: Number(process.env.STATUS), launcherOutput: fs.existsSync(`${dir}/out`) ? fs.readFileSync(`${dir}/out`, 'utf8') : null},
-  verdict: process.env.STATUS === '0' ? 'pass' : 'fail',
-  reproduce: 'bash setup/__tests__/setup-options.test.sh', inspect: 'out, failure.log, and home/',
-}, null, 2) + '\n');
-JS
+  make_executable "$tmp/nix" '#!/bin/sh
+printf "%s\n" "$*"'
+  run_setup() {
+    env -u PI_ENV_SETUP_MODE -u PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_AUTO_NIX=1 \
+      HOME="$tmp/home" PI_AGENT_DIR="$tmp/agent" PI_CODING_AGENT_DIR="$tmp/agent" \
+      PATH="$tmp:$PATH" "$ROOT/setup.sh" "$@"
   }
-  trap record_result EXIT
-  export HOME="$tmp/home" PI_AGENT_DIR="$tmp/home/.pi/agent" PI_CODING_AGENT_DIR="$tmp/home/.pi/agent"
-  mkdir -p "$HOME"
-  output="$tmp/out"
-  cat > "$tmp/nix" <<'SH'
-#!/bin/sh
-printf '%s\n' "$*" > "$PI_ENV_TEST_NIX_OUT"
-SH
-  chmod +x "$tmp/nix"
 
-  env -u PI_ENV_SETUP_MODE -u PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_AUTO_NIX=1 PATH="$tmp:$PATH" PI_ENV_TEST_NIX_OUT="$output" "$ROOT/setup.sh" --no-terminal
-
-  [ "$(cat "$output")" = "run .#setup -- --no-terminal" ] || fail "plain ./setup.sh should auto-run nix setup when available"
+  assert_eq "$(run_setup --no-terminal)" "run .#setup -- --no-terminal" "plain ./setup.sh should auto-run nix setup"
+  assert_eq "$(run_setup --use-nix --no-terminal)" "run .#setup -- --no-terminal" "--use-nix should re-exec nix setup"
 
   make_executable "$tmp/nix" '#!/bin/sh
 exit 37'
-  status=0
-  env -u PI_ENV_SETUP_MODE -u PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_AUTO_NIX=1 PATH="$tmp:$PATH" "$ROOT/setup.sh" --reset >"$tmp/failure.log" 2>&1 || status=$?
+  run_setup --reset >/dev/null 2>&1 || status=$?
   assert_eq "$status" 37 'Nix failure remains visible'
-  [ ! -e "$PI_AGENT_DIR/settings.json" ] || fail 'Nix failure must not retry/reset through portable setup'
-)
-
-test_use_nix_entrypoint_reexecs_nix_setup_app() {
-  local tmp old_path output
-  tmp="$(with_temp_dir)"
-  old_path="$PATH"
-  output="$tmp/out"
-  cat > "$tmp/nix" <<'SH'
-#!/bin/sh
-printf '%s\n' "$*" > "$PI_ENV_TEST_NIX_OUT"
-SH
-  chmod +x "$tmp/nix"
-
-  env -u PI_ENV_SETUP_MODE -u PI_ENV_CONFIG_MANAGED_BY_NIX PATH="$tmp:$PATH" PI_ENV_TEST_NIX_OUT="$output" "$ROOT/setup.sh" --use-nix --no-terminal
-
-  [ "$(cat "$output")" = "run .#setup -- --no-terminal" ] || fail "--use-nix should re-exec nix run .#setup with remaining args"
-
-  PATH="$old_path"
-  rm -rf "$tmp"
+  [ ! -e "$tmp/agent/settings.json" ] || fail 'Nix failure must not fall back to portable setup'
 }
 
 test_later_portable_overrides_nix_managed() {
@@ -116,8 +77,7 @@ test_defaults_to_portable
 test_nix_managed_sets_skip_signal
 test_nix_managed_env_selects_nix_mode
 test_granular_flags
-test_auto_nix_entrypoint_uses_nix_setup_app
-test_use_nix_entrypoint_reexecs_nix_setup_app
+test_nix_entrypoints_delegate_to_nix_setup_app
 test_later_portable_overrides_nix_managed
 
 echo "setup option tests passed"

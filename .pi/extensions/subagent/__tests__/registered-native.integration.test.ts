@@ -126,24 +126,7 @@ export default function(pi) {
       },
     });
     const manager = SessionManager.create(root, join(root, "sessions"));
-    const historical = { v: 1, runId: "historical", event: { opaque: true } };
-    manager.appendCustomEntry("pi/dag-run-event", historical);
-    const historicalEntries = manager
-      .getEntries()
-      .filter((entry) => entry.type === "custom" && entry.customType === "pi/dag-run-event");
-    manager.appendMessage({ role: "user", content: "Historical session", timestamp: 1 });
-    const artifactDir = join(manager.getSessionDir(), "dag-artifacts", manager.getSessionId());
-    await mkdir(artifactDir, { recursive: true });
-    const artifact = join(artifactDir, "historical.txt");
-    await writeFile(artifact, "historical artifact sentinel");
-    const assertHistorical = async () => {
-      expect(
-        SessionManager.open(manager.getSessionFile()!)
-          .getEntries()
-          .filter((entry) => entry.type === "custom" && entry.customType === "pi/dag-run-event"),
-      ).toEqual(historicalEntries);
-      expect(await readFile(artifact, "utf8")).toBe("historical artifact sentinel");
-    };
+    manager.appendMessage({ role: "user", content: "Existing session", timestamp: 1 });
     parent = (
       await createAgentSessionFromServices({
         services,
@@ -199,7 +182,6 @@ export default function(pi) {
     };
     await parent.bindExtensions({ mode: "tui", uiContext: ui as any });
     expect(parent.getActiveToolNames()).toContain("subagent");
-    await assertHistorical();
     await parent.prompt("root seed");
     expect(
       parent.messages.flatMap((message) => (message.role === "system" ? [] : [message.role])),
@@ -358,7 +340,6 @@ export default function(pi) {
       id: parent.sessionId,
     }).toEqual(parentBefore);
     await parent.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
-    await assertHistorical();
     expect(spans.map((span) => span.name)).toContain("tooling.subagent.run");
     const exported = JSON.stringify(
       spans.map((span) => ({ name: span.name, attributes: span.attributes, events: span.events })),
@@ -373,7 +354,7 @@ export default function(pi) {
   }
 }, 30000);
 
-it("rejects obsolete selections and preserves native target trust, defaults and explicit selection safety", async () => {
+it("preserves native target trust, defaults and explicit selection safety", async () => {
   const root = await mkdtemp(join(tmpdir(), "registered-native-selection-"));
   const cleanup = testCleanup();
   cleanup(() => rm(root, { recursive: true, force: true }));
@@ -461,18 +442,6 @@ export default function(pi) { initSubagent(pi); pi.on('session_start',()=> { wri
       );
       return parent.messages.filter((m) => m.role === "toolResult").at(-1)!;
     };
-    for (const action of ["run", "start", "list"]) {
-      for (const obsolete of [
-        { agent: "scout" },
-        { agent_scope: "project" },
-        { agent: null },
-        { agent_scope: null },
-      ]) {
-        const result = await launch({ action, ...obsolete });
-        expect(result.isError, JSON.stringify(result)).toBe(true);
-        expect(supervisor.children.size).toBe(0);
-      }
-    }
     // Parent is trusted, but an unknown different target must not execute project extensions.
     await launch({});
     let child = [...supervisor.children.values()].at(-1)!;

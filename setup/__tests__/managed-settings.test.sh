@@ -42,28 +42,12 @@ test_rejects_malformed_package_entry_before_writing() {
   [ "$(cat "$settings")" = "$before" ] || fail "malformed package failure should not rewrite settings"
   [ ! -s "$tmp/stdout" ] || fail "malformed package failure should not report success"
 
-  rm -rf "$tmp"
 }
 
 # This boundary needs an isolated worktree rather than provisioning a second checkout.
-test_registers_primary_checkout_when_run_from_worktree() (
-  local tmp settings repo worktree result node
+test_registers_primary_checkout_when_run_from_worktree() {
+  local tmp settings repo worktree result
   tmp="$(with_temp_dir)"
-  node=$(node_bin)
-  printf 'Worktree registration evidence: %s\n' "$tmp"
-  record_result() {
-    local status=$?
-    DIR="$tmp" STATUS="$status" "$node" --input-type=module <<'JS'
-import fs from 'node:fs';
-fs.writeFileSync(`${process.env.DIR}/result.json`, JSON.stringify({
-  inputs: 'temporary primary checkout, worktree, and user settings',
-  expected: 'registration canonicalizes to the primary checkout without duplicate packages',
-  actual: {exitStatus: Number(process.env.STATUS)}, verdict: process.env.STATUS === '0' ? 'pass' : 'fail',
-  reproduce: 'bash setup/__tests__/managed-settings.test.sh', inspect: 'normal.json, repo/, worktree/',
-}, null, 2) + '\n');
-JS
-  }
-  trap record_result EXIT
   settings="$tmp/settings.json"
   repo="$tmp/repo"
   worktree="$tmp/worktree"
@@ -82,11 +66,10 @@ JS
 JSON
 
   result=$(apply_settings "$settings" "$worktree")
-  cp "$settings" "$tmp/normal.json"
   [ "$result" = "updated" ] || fail "worktree run should update package registration, got $result"
   [ "$(json_get "$settings" 's.packages.length')" = "1" ] || fail "worktree package registration should dedupe to one package"
   [ "$(resolved_package_path "$settings" 0)" = "$repo" ] || fail "worktree setup should register primary checkout"
-)
+}
 
 test_rejects_noncanonical_settings_filename() {
   local tmp settings repo
@@ -106,7 +89,6 @@ test_rejects_noncanonical_settings_filename() {
   [ "$(cat "$settings")" = '{}' ] || fail "filename failure should not rewrite settings"
   [ ! -e "$tmp/settings.json" ] || fail "filename failure should not write a sibling settings file"
 
-  rm -rf "$tmp"
 }
 
 test_rejects_malformed_package_entry_before_writing
