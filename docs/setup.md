@@ -26,6 +26,8 @@ The [runtime adapter](../setup/runtime.mjs) owns CLI installation and session la
 
 The exported [Home Manager module](../nix/home-manager.nix) can provision Pi and terminal integration from a locked flake input. When it does, editing a working checkout does not replace those activated artifacts. Update the consuming input and activate its generation when those are the intended changes. Builder access, binary-cache trust, and host activation belong to that consuming infrastructure, not portable setup; use isolated state rather than a live profile to validate setup changes.
 
+With `pi-env.homeManager.sync.enable`, setup compares the consuming flake's pi-env input with the primary checkout's `main` and reports drift. Setup also runs from the post-merge hook, so it updates the input and runs `home-manager switch` only when you pass `--sync-home-manager`, and only when local `main` matches its upstream. After a switch, setup loads the new generation's session variables before installing the Pi CLI. Worktrees, other branches, and `--no-home-manager` skip the check.
+
 ### Externally managed tools with checkout-owned Pi
 
 An external provisioner can supply Node, Nub, and command-line tools through `packages.<system>.tools`. Pi then comes from the checkout's Nub-installed dependencies, not the Nix Pi package.
@@ -44,12 +46,6 @@ The provisioner must make `/bin/node` executable and put Nub and the other tools
 Leave `PI_PACKAGE_DIR` and `PI_ENV_PI_EXECUTABLE` unset during setup and subsequent sessions. Do not enable `PI_ENV_CLI_MANAGED_BY_NIX`: setup must write the user-local Pi wrapper. The provisioner must put `${PI_BIN_DIR:-$HOME/.local/bin}` before other Pi executables on `PATH`. `--nix-managed` leaves shell profiles and terminal configuration to the provisioner. See [runtime integration](#runtime-integration) for setup implementation owners.
 
 After updating the application checkout, rerun the same setup command. Reuse the tools package while it satisfies the checkout's [runtime requirements](../package.json). The consumer owns source revision selection, persistent state, setup sequencing, and session restarts. Existing sessions do not reload the updated runtime automatically.
-
-## Analysis diagnostics
-
-Analyze keeps a bounded local NDJSON journal under `$XDG_STATE_HOME/pi-env/analyze`, or `~/.local/state/pi-env/analyze` when that variable is absent. It provides diagnostic context for worker failures. Set `PI_ENV_ANALYZE_JOURNAL_DIR` to choose another location or `PI_ENV_ANALYZE_JOURNAL_ENABLED=false` to disable it. Preserve relevant failure evidence before later runs rotate it, and review journals before sharing them.
-
-Trace export is off by default. It requires both `PI_ENV_ANALYZE_OTEL_ENABLED=true` and `PI_ENV_ANALYZE_OTEL_ENDPOINT` pointing to the intended OTLP collector. The endpoint is not emitted as telemetry.
 
 ## Gruvbox themes
 

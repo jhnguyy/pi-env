@@ -26,6 +26,7 @@ SETUP_TESTS=(
   setup/__tests__/runtime-install-safety.test.sh
   setup/__tests__/node-resolution.test.sh
   setup/__tests__/pi-cli-wrapper.test.sh
+  setup/__tests__/home-manager-sync.test.sh
   setup/__tests__/verify-install.test.sh
   setup/__tests__/effect-runtime.test.sh
   setup/__tests__/effect-language-service.test.sh
