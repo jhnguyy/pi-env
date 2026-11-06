@@ -9,7 +9,7 @@
       inputs.systems.url = "github:nix-systems/default/da67096a3b9bf56a91d16901293e51ba5b49a27e";
     };
     nub = {
-      url = "github:nubjs/nub/v0.9.6";
+      url = "github:nubjs/nub/v0.10.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     pi = {

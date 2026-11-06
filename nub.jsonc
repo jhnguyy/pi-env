@@ -1,5 +1,5 @@
 {
-  "$schema": "https://nubjs.com/schema/v0.9.json",
+  "$schema": "https://nubjs.com/schema/v0.10.json",
 
   // Refuse to run repository scripts against a stale dependency tree.
   "verifyDeps": "error",

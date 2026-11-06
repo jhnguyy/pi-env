@@ -152,16 +152,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1790809683,
-        "narHash": "sha256-I+2bKFZvpZw7YR6xAi0htWIQL5AbWsK06RYKRzPjOnM=",
+        "lastModified": 1793952805,
+        "narHash": "sha256-vngRaIEtI0NyqEBQlsr60JIZLVjJDSWlGHsxbNVoNv8=",
         "owner": "nubjs",
         "repo": "nub",
-        "rev": "fdf8d313125b4dfc15a5900477077876284aa5a3",
+        "rev": "8c4e5d195d9024719ccd226188cbad700cf97565",
         "type": "github"
       },
       "original": {
         "owner": "nubjs",
-        "ref": "v0.9.6",
+        "ref": "v0.10.0",
         "repo": "nub",
         "type": "github"
       }

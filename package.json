@@ -123,7 +123,7 @@
   "engines": {
     "node": ">=24.19.0"
   },
-  "packageManager": "nub@0.9.6",
+  "packageManager": "nub@0.10.0",
   "allowScripts": {
     "@google/genai": true,
     "esbuild": true
