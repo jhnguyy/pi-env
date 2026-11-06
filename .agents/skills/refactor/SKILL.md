@@ -6,7 +6,7 @@ description: Assess evidence-backed refactor opportunities, module seams, and te
 
 # Refactor
 
-Assess opportunities without changing code. An assessment is not implementation authorization. Use the [planning skill](../planning/SKILL.md) for delivery and rollout decisions.
+Assess opportunities without changing code. An assessment is not implementation authorization.
 
 ## Establish the design problem
 
@@ -28,7 +28,7 @@ Compare credible alternatives, including leaving the design unchanged, simplifyi
 
 ## Establish preservation and migration evidence
 
-Identify affected callers and the contracts that must remain true, including relevant permissions, data integrity, persistence, readiness, completion, cancellation, and resource release. Distinguish intentional behavior changes from structural changes so preservation claims remain testable. Follow the [testing-practices skill](../testing-practices/SKILL.md) for independent expectations, coverage comparison, and real-integration qualification.
+Identify affected callers and the contracts that must remain true, including relevant permissions, data integrity, persistence, readiness, completion, cancellation, and resource release. Distinguish intentional behavior changes from structural changes so preservation claims remain testable.
 
 Propose functional vertical slices: each should preserve or deliver one observable behavior through the responsibilities needed to establish it, rather than moving every layer before anything can be checked. A slice can end at a meaningful internal seam; it need not cross every deployment boundary. Identify baseline evidence, affected-call-site checks, compatibility needs, and the evidence required before switching or removing an old path. Account for partial migration, rollback, and temporary-path removal; treat uncertain preservation and big-bang migration as design costs.
 

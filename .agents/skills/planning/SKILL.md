@@ -1,6 +1,6 @@
 ---
 name: planning
-description: Define a change's scope, success criteria, implementation sequence, and rollout evidence. Use when defining a change, planning delivery, or reviewing a design or architecture proposal.
+description: Develop an implementation or rollout plan. Use when asked to plan a change or compare delivery approaches.
 ---
 
 # Planning
@@ -21,6 +21,6 @@ For deployment, include the compatibility and recovery measures the change needs
 
 ## What evidence?
 
-Choose evidence while the approach can still change, using the [testing-practices skill](../testing-practices/SKILL.md). Identify where the outcome can be observed and which claims require real operating conditions.
+Choose evidence while the approach can still change. Identify where the outcome can be observed and which claims require real operating conditions.
 
 Deployment evidence proves arrival, not success. Verify the changed behavior in the relevant environment, compare the evidence with the success criteria, and report material remaining gaps.
