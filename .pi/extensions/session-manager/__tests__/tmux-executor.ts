@@ -1,12 +1,9 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { onTestFinished } from "vitest";
+import { testTempDirSync } from "../../../../src/testing/temp-dir";
 import type { Exec } from "../host.js";
 
 export function testSocket(): string {
-  const root = mkdtempSync(join(tmpdir(), "pi-session-host-"));
-  onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+  const root = testTempDirSync("pi-session-host-");
   return join(root, "tmux.sock");
 }
 

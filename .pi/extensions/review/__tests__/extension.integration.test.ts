@@ -1,5 +1,4 @@
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   ExtensionAPI,
@@ -9,6 +8,7 @@ import type {
 import { Check } from "typebox/value";
 import { expect, it, vi } from "vitest";
 import reviewExtension from "../index";
+import { testTempDir } from "../../../../src/testing/temp-dir";
 
 const url = "https://github.com/o/r/pull/1";
 function fixture() {
@@ -177,7 +177,7 @@ it("supports only get [url] in the slash command and reports needs_url separatel
 });
 
 it("leaves isolated historical artifacts and session entries inert", async () => {
-  const root = await mkdtemp(join(tmpdir(), "review-retirement-"));
+  const root = await testTempDir("review-retirement-");
   vi.stubEnv("PI_CODING_AGENT_DIR", root);
   try {
     const artifact = join(root, "pr-review", "artifacts", "historical", "state.json");
@@ -192,6 +192,5 @@ it("leaves isolated historical artifacts and session entries inert", async () =>
     expect(f.appendEntry).not.toHaveBeenCalled();
   } finally {
     vi.unstubAllEnvs();
-    await rm(root, { recursive: true, force: true });
   }
 });

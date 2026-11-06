@@ -1,21 +1,15 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { testTempDir } from "../../../../src/testing/temp-dir";
+import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { OpenSessionRecord } from "../contracts.js";
 import { createWorkspaceReconciler, ensureCoordinator } from "../coordinator.js";
 import { SessionHostFailure, type CurrentWindow, type SessionHostShape } from "../host.js";
 import { createFileSessionCatalog } from "../storage.js";
 
-const roots: string[] = [];
-afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
-});
-
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "session-coordinator-"));
-  roots.push(root);
+  const root = await testTempDir("session-coordinator-");
   const cwd = join(root, "workspace");
   await mkdir(cwd);
   return { root, cwd, catalog: createFileSessionCatalog(join(root, "agent")) };

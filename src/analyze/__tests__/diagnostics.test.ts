@@ -1,6 +1,5 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "@effect/vitest";
 import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-node";
@@ -31,8 +30,9 @@ import {
   parseAnalyzeWorkerEvent,
   parseAnalyzeWorkerRequest,
 } from "../protocol.js";
+import { testTempDirSync } from "../../testing/temp-dir";
 
-const fixtureRoot = (): string => mkdtempSync(join(tmpdir(), "pi-analyze-diagnostics-"));
+const fixtureRoot = (): string => testTempDirSync("pi-analyze-diagnostics-");
 
 function event(
   runId: string,
@@ -99,7 +99,6 @@ describe("analyze diagnostic contracts", () => {
         attributes: { scope_mode: "diff", stage: "preflight", run_id: runId },
       }),
     ]);
-
   });
 
   it("records the engine's expected spans and events through an injected diagnostics seam", async () => {
@@ -271,10 +270,12 @@ describe("analyze worker protocol", () => {
 
   it.effect("accepts bounded versioned diff and paths requests", () =>
     Effect.gen(function* () {
-      expect(yield* parseAnalyzeWorkerRequest(JSON.stringify({ ...request, ref: "main" }))).toEqual({
-        ...request,
-        ref: "main",
-      });
+      expect(yield* parseAnalyzeWorkerRequest(JSON.stringify({ ...request, ref: "main" }))).toEqual(
+        {
+          ...request,
+          ref: "main",
+        },
+      );
       const pathsRequest = { ...request, scope: "paths", paths: ["src/a.ts"] } as const;
       expect(yield* parseAnalyzeWorkerRequest(JSON.stringify(pathsRequest))).toEqual(pathsRequest);
     }),

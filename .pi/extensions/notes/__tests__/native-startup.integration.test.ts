@@ -1,6 +1,6 @@
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { testTempDir } from "../../../../src/testing/temp-dir";
 import { expect, it } from "vitest";
 import { fauxProvider, fauxToolCall, fauxAssistantMessage } from "@earendil-works/pi-ai";
 import {
@@ -18,17 +18,27 @@ import sessionManagerExtension from "../../session-manager/index";
 // Only inference is scripted. Resource loading, native tool dispatch, session files, and vaults
 // are real. The native provider extension is loaded separately for each owner.
 it("keeps simultaneous native owners' configured vaults independent through shutdown", async () => {
-  const root = await mkdtemp(join(tmpdir(), "native-notes-owners-"));
+  const root = await testTempDir("native-notes-owners-");
   const sessions: AgentSession[] = [];
   const closed = new Set<AgentSession>();
   const close = async (session: AgentSession) => {
     if (closed.has(session)) return;
     const failures: unknown[] = [];
-    try { await session.abort(); } catch (error) { failures.push(error); }
+    try {
+      await session.abort();
+    } catch (error) {
+      failures.push(error);
+    }
     try {
       await session.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
-    } catch (error) { failures.push(error); }
-    try { session.dispose(); } catch (error) { failures.push(error); }
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      session.dispose();
+    } catch (error) {
+      failures.push(error);
+    }
     if (failures.length) throw new AggregateError(failures, "Notes session cleanup failed");
     closed.add(session);
   };
@@ -48,31 +58,36 @@ it("keeps simultaneous native owners' configured vaults independent through shut
         }),
       );
       await mkdir(join(cwd, ".pi"));
-      await writeFile(join(cwd, ".pi", "settings.json"), JSON.stringify({
-        notes: { vaultPath: vault },
-      }));
+      await writeFile(
+        join(cwd, ".pi", "settings.json"),
+        JSON.stringify({
+          notes: { vaultPath: vault },
+        }),
+      );
       const provider = fauxProvider({ provider: `notes-${name}` });
-      const services = await ChildContext.withChildContext({ cwd, agentDir }, () => createAgentSessionServices({
-        cwd,
-        agentDir,
-        settingsManager: SettingsManager.create(cwd, agentDir, { projectTrusted: false }),
-        resourceLoaderOptions: {
-          extensionFactories: [
-            {
-              name: "test-provider",
-              factory: (pi) => {
-                pi.registerProvider(provider.provider);
+      const services = await ChildContext.withChildContext({ cwd, agentDir }, () =>
+        createAgentSessionServices({
+          cwd,
+          agentDir,
+          settingsManager: SettingsManager.create(cwd, agentDir, { projectTrusted: false }),
+          resourceLoaderOptions: {
+            extensionFactories: [
+              {
+                name: "test-provider",
+                factory: (pi) => {
+                  pi.registerProvider(provider.provider);
+                },
               },
-            },
-            {
-              name: "notes",
-              factory: notesExtension,
-            },
-            { name: "review", factory: reviewExtension },
-            { name: "session-manager", factory: sessionManagerExtension },
-          ],
-        },
-      }));
+              {
+                name: "notes",
+                factory: notesExtension,
+              },
+              { name: "review", factory: reviewExtension },
+              { name: "session-manager", factory: sessionManagerExtension },
+            ],
+          },
+        }),
+      );
       expect(ChildContext.getChildContext()).toBeUndefined();
       expect(services.diagnostics.filter((item) => item.type === "error")).toEqual([]);
       const { session, extensionsResult } = await createAgentSessionFromServices({
@@ -84,8 +99,10 @@ it("keeps simultaneous native owners' configured vaults independent through shut
       sessions.push(session);
       expect(extensionsResult.errors).toEqual([]);
       // Both root factories loaded successfully but installed no root-only resources.
-      const rootExtensions = extensionsResult.extensions.filter((extension) =>
-        extension.path.includes("review") || extension.path.includes("session-manager"));
+      const rootExtensions = extensionsResult.extensions.filter(
+        (extension) =>
+          extension.path.includes("review") || extension.path.includes("session-manager"),
+      );
       expect(rootExtensions).toHaveLength(2);
       for (const extension of rootExtensions) {
         expect(extension.handlers.size).toBe(0);
@@ -128,9 +145,12 @@ it("keeps simultaneous native owners' configured vaults independent through shut
     failures.push(error);
   } finally {
     for (const session of sessions) {
-      try { await close(session); } catch (error) { failures.push(error); }
+      try {
+        await close(session);
+      } catch (error) {
+        failures.push(error);
+      }
     }
-    try { await rm(root, { recursive: true, force: true }); } catch (error) { failures.push(error); }
   }
   if (failures.length) throw new AggregateError(failures, "Native notes owner scenario failed");
 });

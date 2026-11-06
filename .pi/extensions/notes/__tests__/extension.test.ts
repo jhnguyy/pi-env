@@ -1,6 +1,6 @@
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { testTempDir } from "../../../../src/testing/temp-dir";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -10,16 +10,16 @@ import { resolveNotesProvider } from "../provider-registry";
 import * as AgentTools from "../../_shared/agent-tools";
 import type { SettingsEnv } from "../../_shared/settings";
 
-const roots: string[] = [];
 const shutdowns: Array<() => void> = [];
 
 afterEach(async () => {
   const failures: unknown[] = [];
   for (const shutdown of shutdowns.splice(0)) {
-    try { shutdown(); } catch (error) { failures.push(error); }
-  }
-  for (const root of roots.splice(0)) {
-    try { await rm(root, { recursive: true, force: true }); } catch (error) { failures.push(error); }
+    try {
+      shutdown();
+    } catch (error) {
+      failures.push(error);
+    }
   }
   if (failures.length) throw new AggregateError(failures, "Notes extension fixture cleanup failed");
 });
@@ -184,8 +184,7 @@ describe("notes extension", () => {
     expect(() => resolveNotesProvider("notes-assistant")).toThrow("not registered");
   });
   it("registers the configured Obsidian provider as a native Pi tool", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "pi-notes-extension-"));
-    roots.push(root);
+    const root = await testTempDir("pi-notes-extension-");
     const vault = path.join(root, "vault");
     await mkdir(vault);
     const testHarness = harness();

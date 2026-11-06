@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { beforeEach, describe, expect, it } from "vitest";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { testTempDirSync } from "../../../../src/testing/temp-dir";
 import { createDaemonRequestExecutor } from "../daemon-request";
 import { FileCache } from "../file-cache";
 import type { DaemonRequest, DaemonResponse, LspResult } from "../protocol";
@@ -39,7 +39,7 @@ describe("parsed daemon requests", () => {
   };
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "daemon-request-"));
+    root = testTempDirSync("daemon-request-");
     backend = new ControlledBackend(root);
     execute = createDaemonRequestExecutor({
       backends: [backend],
@@ -47,8 +47,6 @@ describe("parsed daemon requests", () => {
       getIdleMs: () => 123,
     });
   });
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
-
   it("returns running status, pid, prior idle time and request ID", async () => {
     const response = await execute(request("status"));
     expect(response.id).toBe(41);

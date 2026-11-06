@@ -1,15 +1,9 @@
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { AnalyzerName, ScopeMode } from "../model.js";
-import {
-  ANALYZE_LIMITS,
-  classifyAnalyzeRequest,
-  type PublicAnalyzeRequest,
-} from "../policy.js";
+import { ANALYZE_LIMITS, classifyAnalyzeRequest, type PublicAnalyzeRequest } from "../policy.js";
+import { testTempDirSync } from "../../testing/temp-dir";
 
-const fixtureRoot = (): string => mkdtempSync(join(tmpdir(), "pi-analyze-policy-"));
+const fixtureRoot = (): string => testTempDirSync("pi-analyze-policy-");
 
 describe("safe analyze policy", () => {
   it("parses safe checks with diff or bounded relative paths", () => {

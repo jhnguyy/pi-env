@@ -1,9 +1,9 @@
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import { testTempDirSync } from "../../../../src/testing/temp-dir";
 import { closeoutPullRequest, parseCloseoutArgs, type CloseoutRequest } from "../closeout";
 
 const ok = (stdout = ""): ExecResult => ({
@@ -13,19 +13,13 @@ const ok = (stdout = ""): ExecResult => ({
   killed: false,
   truncated: false,
 });
-const fixtureRoots: string[] = [];
-
-afterEach(() => {
-  for (const root of fixtureRoots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
 }
 
 function createCloseoutFixture() {
-  const root = mkdtempSync(join(tmpdir(), "pi-closeout-test-"));
-  fixtureRoots.push(root);
+  const root = testTempDirSync("pi-closeout-test-");
   const repo = join(root, "repo");
   const origin = join(root, "origin.git");
   execFileSync("git", ["init", "--initial-branch=main", repo], { encoding: "utf8" });

@@ -1,8 +1,8 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
+import { testTempDirSync } from "../../../../src/testing/temp-dir";
 import { LspBackend, LspBackendError, lspRequestTimeoutMs } from "../backend";
 import type { LspBackendConfig } from "../backend-configs";
 import { LSP_REQUEST_TIMEOUT_MS, LSP_SEMANTIC_REQUEST_TIMEOUT_MS } from "../timeouts";
@@ -41,12 +41,6 @@ describe("LSP request timeout policy", () => {
 });
 
 describe("LSP backend request/root behavior", () => {
-  const tempDirs: string[] = [];
-
-  afterEach(() => {
-    for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-  });
-
   it("fails backend requests made without a running LSP instead of returning null", async () => {
     const backend = new LspBackend(baseConfig);
 
@@ -56,8 +50,7 @@ describe("LSP backend request/root behavior", () => {
   });
 
   it("prefers an ancestor tsconfig/json config root over a nearer package marker", () => {
-    const root = mkdtempSync(join(tmpdir(), "pi-lsp-root-"));
-    tempDirs.push(root);
+    const root = testTempDirSync("pi-lsp-root-");
     const pkg = join(root, "packages", "leaf");
     mkdirSync(join(pkg, "src"), { recursive: true });
     writeFileSync(join(root, "tsconfig.json"), "{}", "utf8");

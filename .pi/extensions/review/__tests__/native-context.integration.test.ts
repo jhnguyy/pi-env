@@ -1,5 +1,4 @@
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fauxProvider, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import {
@@ -10,9 +9,10 @@ import {
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
+import { testTempDir } from "../../../../src/testing/temp-dir";
 
 it("loads the built get-only extension and natively discovers and expands the review skill", async () => {
-  const root = await mkdtemp(join(tmpdir(), "native-review-context-"));
+  const root = await testTempDir("native-review-context-");
   const agentDir = join(root, "agent");
   let session: AgentSession | undefined;
   const failures: unknown[] = [];
@@ -99,7 +99,6 @@ it("loads the built get-only extension and natively discovers and expands the re
       () => session?.abort(),
       () => session?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" }),
       () => session?.dispose(),
-      () => rm(root, { recursive: true, force: true }),
     ]) {
       try {
         await release();

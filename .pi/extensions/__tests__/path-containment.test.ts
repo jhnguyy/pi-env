@@ -1,18 +1,12 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, symlinkSync } from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { isPathContained } from "../_shared/path-containment";
-
-const roots: string[] = [];
-afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
+import { testTempDirSync } from "../../../src/testing/temp-dir";
 
 describe("canonical path containment", () => {
   it("rejects a symlinked directory that resolves outside the root", () => {
-    const fixture = mkdtempSync(path.join(tmpdir(), "path-containment-"));
-    roots.push(fixture);
+    const fixture = testTempDirSync("path-containment-");
     const root = path.join(fixture, "root");
     const outside = path.join(fixture, "outside");
     mkdirSync(root);
