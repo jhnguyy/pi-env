@@ -163,12 +163,14 @@ describe("analyze supervisor", () => {
     ).rejects.toThrow("invalid protocol");
   });
 
-  it.runIf(process.platform !== "win32")("cleans descendants after a valid worker exits successfully", async () => {
-    const cwd = fixtureRoot();
-    const pidFile = join(cwd, "successful-descendant.pid");
-    const worker = writeWorker(
-      cwd,
-      `const { spawn } = await import("node:child_process");
+  it.runIf(process.platform !== "win32")(
+    "cleans descendants after a valid worker exits successfully",
+    async () => {
+      const cwd = fixtureRoot();
+      const pidFile = join(cwd, "successful-descendant.pid");
+      const worker = writeWorker(
+        cwd,
+        `const { spawn } = await import("node:child_process");
 const { writeFileSync } = await import("node:fs");
 const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
 descendant.unref();
@@ -176,13 +178,14 @@ writeFileSync(${JSON.stringify(pidFile)}, String(descendant.pid));
 emit({ version: 1, type: "started", runId: request.runId });
 emit({ version: 1, type: "result", runId: request.runId, result: ${emptyResult} });
 emit({ version: 1, type: "complete", runId: request.runId });`,
-    );
-    await expect(
-      superviseAnalyze(safeRequest(cwd), { workerPath: worker, env: disabledEnv }),
-    ).resolves.toMatchObject({ summary: { failures: 0 } });
-    const descendantPid = Number(readFileSync(pidFile, "utf8"));
-    await waitFor(() => !isAlive(descendantPid));
-  });
+      );
+      await expect(
+        superviseAnalyze(safeRequest(cwd), { workerPath: worker, env: disabledEnv }),
+      ).resolves.toMatchObject({ summary: { failures: 0 } });
+      const descendantPid = Number(readFileSync(pidFile, "utf8"));
+      await waitFor(() => !isAlive(descendantPid));
+    },
+  );
 
   it("reports a cumulative-output-limit failure from a worker", async () => {
     const cwd = fixtureRoot();
@@ -257,11 +260,7 @@ emit({ version: 1, type: "complete", runId: request.runId });`,
     const result = await superviseAnalyze(
       safeRequest(cwd, {
         paths: ["src/analyze"],
-        checks: [
-          AnalyzerName.AsyncRisk,
-          AnalyzerName.Duplicates,
-          AnalyzerName.TestDuplicates,
-        ],
+        checks: [AnalyzerName.AsyncRisk, AnalyzerName.Duplicates, AnalyzerName.TestDuplicates],
         timeoutMs: 20_000,
       }),
       { env: disabledEnv },
@@ -274,26 +273,35 @@ describe("public analyze boundary", () => {
   it("reports scoped duplicates through the bounded worker", async () => {
     const cwd = fixtureRoot();
     mkdirSync(join(cwd, "src"));
-    writeFileSync(join(cwd, "src/dupes.ts"), `
+    writeFileSync(
+      join(cwd, "src/dupes.ts"),
+      `
       export function alpha(input: number) { const values = [1,2,3,4]; let total = 0; for (const value of values) { if (value > input) total += value * 2; else total += value; } return total; }
       export function beta(other: number) { const values = [1,2,3,4]; let total = 0; for (const value of values) { if (value > other) total += value * 2; else total += value; } return total; }
-    `);
+    `,
+    );
     const result = await runPublicAnalyze(
       { cwd, scope: ScopeMode.Paths, paths: ["src"], checks: [AnalyzerName.Duplicates] },
       { env: disabledEnv },
     );
     expect(result.analyzerFailures).toEqual([]);
     expect(result.findings).toHaveLength(1);
-    expect(result.findings[0]).toMatchObject({ analyzer: AnalyzerName.Duplicates, message: "Structurally duplicate function" });
+    expect(result.findings[0]).toMatchObject({
+      analyzer: AnalyzerName.Duplicates,
+      message: "Structurally duplicate function",
+    });
   }, 30_000);
 
   it("reports scoped duplicate test callbacks through the bounded worker", async () => {
     const cwd = fixtureRoot();
     mkdirSync(join(cwd, "src"));
-    writeFileSync(join(cwd, "src/example.test.ts"), `
+    writeFileSync(
+      join(cwd, "src/example.test.ts"),
+      `
       it("first", () => { const values = [1,2,3,4]; let total = 0; for (const value of values) { if (value > 2) total += value * 2; else total += value; } expect(total).toBeGreaterThan(0); });
       test("second", () => { const entries = [5,6,7,8]; let sum = 0; for (const entry of entries) { if (entry > 9) sum += entry * 3; else sum += entry; } expect(sum).toBeGreaterThan(10); });
-    `);
+    `,
+    );
 
     const result = await runPublicAnalyze(
       {

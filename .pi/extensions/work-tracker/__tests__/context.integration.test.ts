@@ -27,7 +27,11 @@ function makeRepo(track: (path: string) => void): string {
 function removeDirectories(directories: string[]): void {
   const failures: unknown[] = [];
   for (const directory of directories.splice(0).reverse()) {
-    try { rmSync(directory, { recursive: true, force: true }); } catch (error) { failures.push(error); }
+    try {
+      rmSync(directory, { recursive: true, force: true });
+    } catch (error) {
+      failures.push(error);
+    }
   }
   if (failures.length) throw new AggregateError(failures, "Work-tracker fixture cleanup failed");
 }
@@ -138,8 +142,8 @@ describe("buildStatusLine", () => {
 
     const line = buildStatusLine(config());
     expect(line).toContain("worktrees: feat/foo");
-    expect(line).not.toContain("main (");       // no branch label
-    expect(line).not.toContain("protected");    // no protected warning
+    expect(line).not.toContain("main ("); // no branch label
+    expect(line).not.toContain("protected"); // no protected warning
   });
 
   it("shows dirty warning when primary tree has uncommitted changes", () => {

@@ -3,11 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { AnalyzerName, ScopeMode } from "../model.js";
-import {
-  ANALYZE_LIMITS,
-  classifyAnalyzeRequest,
-  type PublicAnalyzeRequest,
-} from "../policy.js";
+import { ANALYZE_LIMITS, classifyAnalyzeRequest, type PublicAnalyzeRequest } from "../policy.js";
 
 const fixtureRoot = (): string => mkdtempSync(join(tmpdir(), "pi-analyze-policy-"));
 

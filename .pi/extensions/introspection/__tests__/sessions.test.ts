@@ -3,11 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import {
-  assertUnderSessionDir,
-  formatDigestList,
-  listSessionDigests,
-} from "../sessions";
+import { assertUnderSessionDir, formatDigestList, listSessionDigests } from "../sessions";
 
 function lines(...entries: object[]): string[] {
   return entries.map((entry) => JSON.stringify(entry));
@@ -40,9 +36,29 @@ describe("session digests", () => {
     const result = digestLines(
       lines(
         { type: "session", id: "s1", cwd: "/repo" },
-        { type: "message", id: "u1", parentId: null, message: { role: "user", content: [{ type: "text", text: "Please fix setup" }] } },
-        { type: "message", id: "a1", parentId: "u1", message: { role: "assistant", content: [{ type: "text", text: "I'll inspect it" }] } },
-        { type: "message", id: "t1", parentId: "a1", message: { role: "toolResult", toolName: "bash", isError: true, content: [{ type: "text", text: "very noisy failure output" }] } },
+        {
+          type: "message",
+          id: "u1",
+          parentId: null,
+          message: { role: "user", content: [{ type: "text", text: "Please fix setup" }] },
+        },
+        {
+          type: "message",
+          id: "a1",
+          parentId: "u1",
+          message: { role: "assistant", content: [{ type: "text", text: "I'll inspect it" }] },
+        },
+        {
+          type: "message",
+          id: "t1",
+          parentId: "a1",
+          message: {
+            role: "toolResult",
+            toolName: "bash",
+            isError: true,
+            content: [{ type: "text", text: "very noisy failure output" }],
+          },
+        },
         { type: "label", targetId: "u1", label: "checkpoint" },
       ),
       "2026-03-06T23-15-17-780Z_abc123.jsonl",
@@ -60,7 +76,10 @@ describe("session digests", () => {
       [
         "not json",
         JSON.stringify({ type: "session", id: "s1", cwd: "/repo" }),
-        JSON.stringify({ type: "message", message: { role: "user", content: [{ type: "text", text: "Valid prompt" }] } }),
+        JSON.stringify({
+          type: "message",
+          message: { role: "user", content: [{ type: "text", text: "Valid prompt" }] },
+        }),
       ],
       "x.jsonl",
     );
@@ -72,11 +91,15 @@ describe("session digests", () => {
 
 describe("session directory guard", () => {
   it("accepts files under the configured session directory", () => {
-    expect(assertUnderSessionDir("/tmp/sessions/project/a.jsonl", "/tmp/sessions")).toBe("/tmp/sessions/project/a.jsonl");
+    expect(assertUnderSessionDir("/tmp/sessions/project/a.jsonl", "/tmp/sessions")).toBe(
+      "/tmp/sessions/project/a.jsonl",
+    );
   });
 
   it("rejects sibling paths with the same prefix", () => {
-    expect(() => assertUnderSessionDir("/tmp/sessions-evil/a.jsonl", "/tmp/sessions")).toThrow("restricted");
+    expect(() => assertUnderSessionDir("/tmp/sessions-evil/a.jsonl", "/tmp/sessions")).toThrow(
+      "restricted",
+    );
   });
 
   it("rejects the session directory itself", () => {
@@ -93,7 +116,10 @@ describe("session listing", () => {
       join(projectDir, "2026-03-06T23-15-17-780Z_abc123.jsonl"),
       lines(
         { type: "session", id: "s1", cwd: "/repo" },
-        { type: "message", message: { role: "user", content: [{ type: "text", text: "Alpha migration" }] } },
+        {
+          type: "message",
+          message: { role: "user", content: [{ type: "text", text: "Alpha migration" }] },
+        },
       ).join("\n"),
     );
 
@@ -114,13 +140,19 @@ describe("session listing", () => {
       lines(
         { type: "session", id: "child-1", cwd: "/repo", parentSession: "/sessions/parent.jsonl" },
         { type: "session_info", id: "info-1", parentId: null, name: "sub-audit" },
-        { type: "message", message: { role: "user", content: [{ type: "text", text: "Inspect nested storage" }] } },
+        {
+          type: "message",
+          message: { role: "user", content: [{ type: "text", text: "Inspect nested storage" }] },
+        },
       ).join("\n"),
     );
 
     const matches = listSessionDigests({ sessionDir: root, query: "sub-audit", limit: 10 });
 
     expect(matches).toHaveLength(1);
-    expect(matches[0]).toMatchObject({ name: "sub-audit", firstUserPrompt: "Inspect nested storage" });
+    expect(matches[0]).toMatchObject({
+      name: "sub-audit",
+      firstUserPrompt: "Inspect nested storage",
+    });
   });
 });

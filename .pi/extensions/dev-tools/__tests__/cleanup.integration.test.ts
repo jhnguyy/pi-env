@@ -57,14 +57,22 @@ function createCleanupFixture() {
 
 describe("/cleanup command", () => {
   it("parses dry-run, apply, force, no-fetch, and base args", () => {
-    expect(parseCleanupArgs(undefined)).toEqual({ apply: false, force: false, fetch: true, baseRef: undefined, repoPath: undefined });
-    expect(parseCleanupArgs("apply --force --no-fetch --base origin/develop --repo /repo")).toEqual({
-      apply: true,
-      force: true,
-      fetch: false,
-      baseRef: "origin/develop",
-      repoPath: "/repo",
+    expect(parseCleanupArgs(undefined)).toEqual({
+      apply: false,
+      force: false,
+      fetch: true,
+      baseRef: undefined,
+      repoPath: undefined,
     });
+    expect(parseCleanupArgs("apply --force --no-fetch --base origin/develop --repo /repo")).toEqual(
+      {
+        apply: true,
+        force: true,
+        fetch: false,
+        baseRef: "origin/develop",
+        repoPath: "/repo",
+      },
+    );
     expect(parseCleanupArgs("--apply --base=upstream/main --repo=/tmp/repo")).toMatchObject({
       apply: true,
       baseRef: "upstream/main",
@@ -86,7 +94,9 @@ describe("/cleanup command", () => {
   });
 
   it("parses git worktree porcelain output", () => {
-    const worktrees = parseWorktreePorcelain(`worktree /repo\nHEAD aaa\nbranch refs/heads/main\n\nworktree /tmp/repo-feature\nHEAD bbb\nbranch refs/heads/feat/example\n\nworktree /tmp/repo-detached\nHEAD ccc\ndetached\n`);
+    const worktrees = parseWorktreePorcelain(
+      `worktree /repo\nHEAD aaa\nbranch refs/heads/main\n\nworktree /tmp/repo-feature\nHEAD bbb\nbranch refs/heads/feat/example\n\nworktree /tmp/repo-detached\nHEAD ccc\ndetached\n`,
+    );
 
     expect(worktrees).toEqual([
       { path: "/repo", head: "aaa", branch: "main", detached: false },
@@ -114,7 +124,8 @@ describe("/cleanup command", () => {
           kind: CleanupTargetKind.Branch,
           branch: "fix/squashed",
           disposition: CleanupDisposition.NeedsForce,
-          reason: "remote branch is gone, but local commits are not ancestors of the base ref (common after squash merge)",
+          reason:
+            "remote branch is gone, but local commits are not ancestors of the base ref (common after squash merge)",
           proof: ["remote branch is gone after fetch --prune"],
         },
         {
@@ -142,7 +153,12 @@ describe("/cleanup command", () => {
 
   it("classifies ancestor, dirty worktree, and remote-gone squash cleanup paths", () => {
     const { repo, dirtyWorktree } = createCleanupFixture();
-    const plan = buildCleanupPlan(repo, { apply: false, force: false, fetch: false, baseRef: "origin/main" });
+    const plan = buildCleanupPlan(repo, {
+      apply: false,
+      force: false,
+      fetch: false,
+      baseRef: "origin/main",
+    });
 
     const ancestor = plan.targets.find((target) => target.branch === "feat/ancestor");
     expect(ancestor?.disposition).toBe(CleanupDisposition.Safe);
@@ -165,16 +181,36 @@ describe("/cleanup command", () => {
       expect(git(repo, "branch", "--list", "feat/dirty")).toContain("feat/dirty");
       expect(git(repo, "worktree", "list", "--porcelain")).toContain(`worktree ${dirtyWorktree}`);
     };
-    const safeOnlyPlan = buildCleanupPlan(repo, { apply: true, force: false, fetch: false, baseRef: "origin/main" });
+    const safeOnlyPlan = buildCleanupPlan(repo, {
+      apply: true,
+      force: false,
+      fetch: false,
+      baseRef: "origin/main",
+    });
 
-    const safeActions = applyCleanupPlan(safeOnlyPlan, { apply: true, force: false, fetch: false, baseRef: "origin/main" });
+    const safeActions = applyCleanupPlan(safeOnlyPlan, {
+      apply: true,
+      force: false,
+      fetch: false,
+      baseRef: "origin/main",
+    });
     expectDirtyPreserved();
     expect(safeActions).toContain("deleted branch feat/ancestor");
     expect(git(repo, "branch", "--list", "feat/ancestor")).toBe("");
     expect(git(repo, "branch", "--list", "fix/squashed")).toContain("fix/squashed");
 
-    const forcePlan = buildCleanupPlan(repo, { apply: true, force: true, fetch: false, baseRef: "origin/main" });
-    const forceActions = applyCleanupPlan(forcePlan, { apply: true, force: true, fetch: false, baseRef: "origin/main" });
+    const forcePlan = buildCleanupPlan(repo, {
+      apply: true,
+      force: true,
+      fetch: false,
+      baseRef: "origin/main",
+    });
+    const forceActions = applyCleanupPlan(forcePlan, {
+      apply: true,
+      force: true,
+      fetch: false,
+      baseRef: "origin/main",
+    });
     expectDirtyPreserved();
     expect(forceActions).toContain("deleted branch fix/squashed");
     expect(git(repo, "branch", "--list", "fix/squashed")).toBe("");

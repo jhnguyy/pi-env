@@ -19,7 +19,9 @@ it("limits session trust to the canonical parent cwd and honors saved target dec
     Fs.symlinkSync(parent, alias);
     const ctx = { cwd: alias, isProjectTrusted: () => true };
     expect(Resolver.isProjectTrustedForCwd(ctx, parent)).toBe(true);
-    expect(Resolver.isProjectTrustedForCwd({ ...ctx, isProjectTrusted: () => false }, parent)).toBe(false);
+    expect(Resolver.isProjectTrustedForCwd({ ...ctx, isProjectTrusted: () => false }, parent)).toBe(
+      false,
+    );
     expect(Resolver.isProjectTrustedForCwd(ctx, target)).toBe(false);
     const store = new ProjectTrustStore(getAgentDir());
     store.set(target, true);

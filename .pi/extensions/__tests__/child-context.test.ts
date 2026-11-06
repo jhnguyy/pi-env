@@ -12,20 +12,37 @@ it("shares creation context across bundles and restores nested, failed, and conc
   try {
     const bundle = await build({
       entryPoints: [resolve(".pi/extensions/_shared/child-context.ts")],
-      bundle: true, platform: "node", format: "esm", write: false,
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      write: false,
     });
-    await Promise.all(["one", "two"].map((name) => writeFile(join(root, `${name}.mjs`), bundle.outputFiles[0].text)));
-    const [one, two] = await Promise.all(["one", "two"].map((name) => import(/* @vite-ignore */ pathToFileURL(join(root, `${name}.mjs`)).href)));
+    await Promise.all(
+      ["one", "two"].map((name) =>
+        writeFile(join(root, `${name}.mjs`), bundle.outputFiles[0].text),
+      ),
+    );
+    const [one, two] = await Promise.all(
+      ["one", "two"].map(
+        (name) => import(/* @vite-ignore */ pathToFileURL(join(root, `${name}.mjs`)).href),
+      ),
+    );
     const originalCwd = process.cwd();
-    await Promise.all(["a", "b"].map((id) => ChildContext.withChildContext({ cwd: `/${id}`, agentDir: `/agent/${id}`, id }, async () => {
-      await Promise.resolve();
-      expect(one.getChildContext()).toEqual({ cwd: `/${id}`, agentDir: `/agent/${id}`, id });
-      expect(() => two.withChildContext({ cwd: "/nested", agentDir: "/nested-agent" }, () => {
-        expect(ChildContext.getChildContext()?.cwd).toBe("/nested");
-        throw new Error("factory failed");
-      })).toThrow("factory failed");
-      expect(two.getChildContext()?.id).toBe(id);
-    })));
+    await Promise.all(
+      ["a", "b"].map((id) =>
+        ChildContext.withChildContext({ cwd: `/${id}`, agentDir: `/agent/${id}`, id }, async () => {
+          await Promise.resolve();
+          expect(one.getChildContext()).toEqual({ cwd: `/${id}`, agentDir: `/agent/${id}`, id });
+          expect(() =>
+            two.withChildContext({ cwd: "/nested", agentDir: "/nested-agent" }, () => {
+              expect(ChildContext.getChildContext()?.cwd).toBe("/nested");
+              throw new Error("factory failed");
+            }),
+          ).toThrow("factory failed");
+          expect(two.getChildContext()?.id).toBe(id);
+        }),
+      ),
+    );
     expect(ChildContext.getChildContext()).toBeUndefined();
     expect(one.getChildContext()).toBeUndefined();
     expect(process.cwd()).toBe(originalCwd);

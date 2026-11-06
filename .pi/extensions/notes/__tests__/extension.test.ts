@@ -16,10 +16,18 @@ const shutdowns: Array<() => void> = [];
 afterEach(async () => {
   const failures: unknown[] = [];
   for (const shutdown of shutdowns.splice(0)) {
-    try { shutdown(); } catch (error) { failures.push(error); }
+    try {
+      shutdown();
+    } catch (error) {
+      failures.push(error);
+    }
   }
   for (const root of roots.splice(0)) {
-    try { await rm(root, { recursive: true, force: true }); } catch (error) { failures.push(error); }
+    try {
+      await rm(root, { recursive: true, force: true });
+    } catch (error) {
+      failures.push(error);
+    }
   }
   if (failures.length) throw new AggregateError(failures, "Notes extension fixture cleanup failed");
 });

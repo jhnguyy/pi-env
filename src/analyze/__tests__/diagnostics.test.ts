@@ -99,7 +99,6 @@ describe("analyze diagnostic contracts", () => {
         attributes: { scope_mode: "diff", stage: "preflight", run_id: runId },
       }),
     ]);
-
   });
 
   it("records the engine's expected spans and events through an injected diagnostics seam", async () => {
@@ -271,10 +270,12 @@ describe("analyze worker protocol", () => {
 
   it.effect("accepts bounded versioned diff and paths requests", () =>
     Effect.gen(function* () {
-      expect(yield* parseAnalyzeWorkerRequest(JSON.stringify({ ...request, ref: "main" }))).toEqual({
-        ...request,
-        ref: "main",
-      });
+      expect(yield* parseAnalyzeWorkerRequest(JSON.stringify({ ...request, ref: "main" }))).toEqual(
+        {
+          ...request,
+          ref: "main",
+        },
+      );
       const pathsRequest = { ...request, scope: "paths", paths: ["src/a.ts"] } as const;
       expect(yield* parseAnalyzeWorkerRequest(JSON.stringify(pathsRequest))).toEqual(pathsRequest);
     }),

@@ -300,9 +300,11 @@ describe("LspClient", () => {
         );
         yield* Deferred.await(spawnStarted);
         yield* waitUntil(() => client.connectionWaiterCount === requests.length);
-        yield* Effect.promise(() => startMockServer((request, socket) => {
-          socket.write(serializeResponse(okResponse(request.id, statusResult())));
-        }));
+        yield* Effect.promise(() =>
+          startMockServer((request, socket) => {
+            socket.write(serializeResponse(okResponse(request.id, statusResult())));
+          }),
+        );
         child.emit("spawn");
         yield* Effect.forEach(requests, Fiber.join, { discard: true });
 
@@ -679,5 +681,4 @@ describe("LspClient", () => {
       expect(resolveDaemonNodeBinary({ PI_ENV_NODE_BIN: "  /opt/pi/node  " })).toBe("/opt/pi/node");
     });
   });
-
 });

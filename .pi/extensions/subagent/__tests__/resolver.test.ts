@@ -14,7 +14,8 @@ describe("subagent cwd validation", () => {
       expect(ok._tag).toBe(Resolver.ResolutionResultTag.Ok);
       if (ok._tag === Resolver.ResolutionResultTag.Ok) expect(ok.value).toBe(realpathSync(dir));
       expect(Resolver.resolveEffectiveCwd({ task: "x" }, alias)).toEqual({
-        _tag: Resolver.ResolutionResultTag.Ok, value: realpathSync(dir),
+        _tag: Resolver.ResolutionResultTag.Ok,
+        value: realpathSync(dir),
       });
       const relative = Resolver.resolveEffectiveCwd({ task: "x", cwd: "relative" }, dir);
       expect(relative._tag).toBe(Resolver.ResolutionResultTag.Error);
@@ -25,10 +26,12 @@ describe("subagent cwd validation", () => {
       const notDir = Resolver.resolveEffectiveCwd({ task: "x", cwd: file }, dir);
       expect(notDir._tag).toBe(Resolver.ResolutionResultTag.Error);
       const implicit = Resolver.resolveEffectiveCwd({ task: "x" }, "/missing/default");
-      expect(implicit).toEqual({ _tag: Resolver.ResolutionResultTag.Ok, value: "/missing/default" });
+      expect(implicit).toEqual({
+        _tag: Resolver.ResolutionResultTag.Ok,
+        value: "/missing/default",
+      });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
-
 });
