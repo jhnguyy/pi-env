@@ -18,7 +18,7 @@ Before decomposing work, define:
 - constraints, non-goals, and accepted risks
 - unresolved assumptions that could change the plan
 
-Use a design document to work through consequential decisions and gather feedback. Include implementation and delivery details when reviewers need them to assess the proposal.
+Use a design document only when written review would resolve consequential uncertainty or coordinate participants.
 
 ## Derive implementation and verification
 
@@ -26,9 +26,7 @@ Evaluate approaches against the success criteria. Derive implementation, verific
 
 Choose evidence while the design can still change. Identify where the outcome can be observed and which claims require real operating conditions. Follow the [testing-practices skill](../testing-practices/SKILL.md) to select checks and assess their limits.
 
-For each consequential unknown, record the affected decision, how to resolve it, and who will resolve it or when resolution is required. Include operating concerns when they change scope, sequence, verification, rollout, or responsibility.
-
-Identify responsibility for implementation, verification, rollout, and follow-up, including the limits of delegated work.
+Identify consequential unknowns and how to resolve them. Assign responsibilities when work actually requires coordination.
 
 ## Plan rollout and outcome verification
 
@@ -43,6 +41,4 @@ Deployment evidence proves arrival, not success. For changes without deployment,
 
 ## Close the plan
 
-Close work only when evidence meets the success criteria. Give each material remaining item a disposition: completed, assigned, deferred with a trigger or date, blocked with an escalation path, or excluded with rationale.
-
-Identify who needs an update, what they need to know, and who owns any further action or delayed-effect checks.
+Compare the evidence with the success criteria and report material remaining gaps.

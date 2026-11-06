@@ -17,17 +17,13 @@ Define the requested outcome and the evidence that would establish it. Distingui
 
 Inspect the affected code, callers, and tests to check the premise and find the existing owner. Use existing capabilities where they fit. Keep independently useful improvements separate; report consequential discoveries rather than silently including them.
 
-Work directly by default. Delegate only when a bounded task benefits from a separate context or parallel work, using the [orchestration skill](../orchestration/SKILL.md). Keep the same outcome and scope across delegation, and check returned work against the request and repository evidence.
-
 ## Prefer reduction
 
 Seek the smallest complete solution. Consider deleting an obsolete path, simplifying the current owner, or reusing an existing capability before adding code, abstractions, configuration, or roles. Add machinery only when the requested outcome or an established contract needs it, not for hypothetical future use.
 
-Reduction means less unnecessary behavior and maintenance, not a line-count target. Preserve required behavior and safety checks. Do not hide complexity in dense code or shift it to callers merely to shorten an implementation.
+Reduce complexity by consolidating scattered implementation details into cohesive abstractions that cover more of the workflow and require less coordination from callers.
 
 ## Implement and verify
-
-Follow the [testing-practices skill](../testing-practices/SKILL.md) for behavioral evidence. Select focused cases that distinguish a plausible failure of the requested behavior from a correct implementation. Reuse, consolidate, or replace existing tests where that gives clearer evidence; do not add tests merely to pin a new implementation or an unrequested assumption. Remove obsolete tests with obsolete behavior, while retaining evidence for current requirements.
 
 Implement the scoped outcome, then review the whole diff for unnecessary additions, unsupported assumptions, and opportunities to simplify. Reconsider the approach when evidence warrants it; a second implementation or separate design stage is not required.
 

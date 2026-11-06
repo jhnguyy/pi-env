@@ -9,13 +9,13 @@ A functional test establishes what a unit promises while leaving it free to chan
 
 Find the target project's guidance through its `README.md`, `CONTRIBUTING.md`, applicable agent instructions, and linked testing conventions. Discover that guidance in the target repository rather than relative to this skill.
 
-Create unit tests for code changes, not configs or templates. Validate configs and templates with native tooling and manual checks.
+Validate configs and templates with native tooling and manual checks.
 
 ## Define the promise
 
-Discover useful units through design. An internal function or module can own a responsibility with independently testable expectations. Choose seams that make its inputs, collaborator outcomes, and ownership controllable; a functional slice need not enter through the application's public CLI or cross every deployment boundary. Test design can reveal scattered policy, unclear ownership, or lifecycle decisions missing from production. Use that evidence to improve production responsibilities; an abstraction should benefit production callers, not only make collaborators mockable.
+Discover useful units through design. An internal function or module can own a responsibility with independently testable expectations. Choose seams that make its inputs, collaborator outcomes, and ownership controllable; a functional slice need not enter through the application's public CLI or cross every deployment boundary.
 
-Describe what follows from those inputs: outputs, state changes, effects, and failures. Include meaningful input distinctions and failure stages, especially where an effect may have occurred before confirmation was lost. Resolve unclear readiness, completion, cancellation, or recovery semantics in the production contract so the test can establish what callers may safely do next.
+Describe what follows from those inputs: outputs, state changes, effects, and failures. Include meaningful input distinctions and failure stages, especially where an effect may have occurred before confirmation was lost. Escalate consequential ambiguities in expected behavior rather than choosing a new production contract through test expectations.
 
 Rely on established collaborator contracts and focus on the target's decisions, translations, composition, and failure handling. Select integration evidence when compatibility, an interaction, or shared lifecycle behavior is itself the promise under examination.
 
