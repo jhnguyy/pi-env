@@ -5,7 +5,7 @@ description: Design functional tests at meaningful responsibility boundaries, se
 
 # Testing Practices
 
-Test behavior callers rely on, not implementation details. A useful test fails for a plausible behavioral defect and still passes after a behavior-preserving refactor.
+Prioritize tests that detect meaningful behavioral failures, not tests that merely confirm an edit. Check static wording by inspection. Behavioral tests should survive behavior-preserving refactors.
 
 Find testing guidance in the target repository. Validate configs and templates with native tooling and manual checks.
 
