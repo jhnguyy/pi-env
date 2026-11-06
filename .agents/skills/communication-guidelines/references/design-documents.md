@@ -38,7 +38,7 @@ Leave inexpensive, reversible implementation choices to implementation unless re
 
 ## Expose decision state
 
-Separate settled decisions, assumptions, and open questions. Apply the planning skill's resolution-path guidance to consequential unknowns. Give reviewers enough context to understand what remains blocked or provisional.
+Separate settled decisions, assumptions, and open questions. Give reviewers enough context to understand what remains blocked or provisional.
 
 When a question is resolved, preserve the decision and non-obvious rationale in the appropriate durable source. Link to supporting discussion when useful. Do not copy the full discussion history into the document by default.
 

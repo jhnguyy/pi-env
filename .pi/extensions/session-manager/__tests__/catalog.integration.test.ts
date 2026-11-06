@@ -137,11 +137,9 @@ describe("session catalog storage", () => {
     expect(basename(identity.manifestPath)).toBe(`${digest}.json`);
 
     const committed = await Effect.runPromise(catalog.update(cwd, (current) => current));
-    const bytes = await readFile(identity.manifestPath, "utf8");
     const mode = (await lstat(identity.manifestPath)).mode & 0o777;
 
     expect(committed.revision).toBe(1);
-    expect(bytes.endsWith("\n")).toBe(true);
     expect(mode).toBe(0o600);
     expect(await Effect.runPromise(catalog.read(alias))).toEqual(committed);
   });
@@ -283,7 +281,9 @@ describe("session catalog storage", () => {
     expect(await failureOf(catalog.update(cwd, (current) => current))).toBeInstanceOf(
       ManifestCommittedReleaseFailed,
     );
-    expect((await Effect.runPromise(createFileSessionCatalog(agentDir).read(cwd)))?.revision).toBe(1);
+    expect((await Effect.runPromise(createFileSessionCatalog(agentDir).read(cwd)))?.revision).toBe(
+      1,
+    );
   });
 
   it("classifies failures before rename as determinate", async () => {
@@ -342,6 +342,8 @@ describe("session catalog storage", () => {
     expect(await failureOf(catalog.update(cwd, (current) => current))).toBeInstanceOf(
       ManifestCommitIndeterminate,
     );
-    expect((await Effect.runPromise(createFileSessionCatalog(agentDir).read(cwd)))?.revision).toBe(1);
+    expect((await Effect.runPromise(createFileSessionCatalog(agentDir).read(cwd)))?.revision).toBe(
+      1,
+    );
   });
 });

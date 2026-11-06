@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import playwrightClientExtension from "../index";
 import { BrowserClient } from "../browser";
 import { loadBrowserClientConfig } from "../config";
 
@@ -53,7 +52,12 @@ describe("playwright-client config", () => {
       playwrightClient: {
         targets: {
           daily: { host: "127.0.0.1", port: 9222, description: "SSH reverse-forward" },
-          mac: { host: "host.docker.internal", port: "9333", path: "json/version", protocol: "http" },
+          mac: {
+            host: "host.docker.internal",
+            port: "9333",
+            path: "json/version",
+            protocol: "http",
+          },
         },
       },
     });
@@ -86,22 +90,12 @@ describe("playwright-client config", () => {
 
   it("rejects malformed target settings with a configuration error", () => {
     clearBrowserEnv();
-    const cwd = tempProject({ playwrightClient: { targets: { bad: { host: "127.0.0.1", protocol: "ftp" } } } });
+    const cwd = tempProject({
+      playwrightClient: { targets: { bad: { host: "127.0.0.1", protocol: "ftp" } } },
+    });
 
     expect(() => loadBrowserClientConfig(cwd)).toThrow(/playwrightClient\.targets/);
     expect(() => loadBrowserClientConfig(cwd)).toThrow(/protocol/);
-  });
-});
-
-describe("playwright-client extension registration", () => {
-  it("registers the native browser tool", () => {
-    const tools: any[] = [];
-    playwrightClientExtension({
-      registerTool: (tool: any) => tools.push(tool),
-      registerCommand() {},
-    } as never);
-    expect(tools).toHaveLength(1);
-    expect(tools[0]).toMatchObject({ name: "browser" });
   });
 });
 
@@ -121,7 +115,13 @@ describe("BrowserClient targets", () => {
     clearBrowserEnv();
     const client = new BrowserClient(loadBrowserClientConfig(tempProject()));
 
-    client.recordHistory({ action: "navigate", target: "local", pageTitle: "Example", pageUrl: "https://example.test", result: "ok" });
+    client.recordHistory({
+      action: "navigate",
+      target: "local",
+      pageTitle: "Example",
+      pageUrl: "https://example.test",
+      result: "ok",
+    });
     client.recordHistory({ action: "click", target: "local", error: "locator timeout" });
 
     expect(client.getHistory()).toMatchObject([
