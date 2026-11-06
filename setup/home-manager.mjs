@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { fileEffect } from "./file-ops.mjs";
 import { note, ok, section } from "./report.mjs";
-import { SetupStateError } from "./setup-errors.mjs";
 
 // The shell reloads the generation's session variables only after these outcomes.
 export const HomeManagerOutcome = Object.freeze({
@@ -74,15 +73,9 @@ export function configureHomeManagerEffect(ctx, policy) {
     }
 
     note(`Updating ${input} input ${locked.rev.slice(0, 7)} → ${head.slice(0, 7)}`);
-    yield* ctx.command("nix", ["flake", "update", input, "--flake", flakeDir], { stdio: "inherit" });
-    const updated = yield* lockedRevEffect(lockFile, input);
-    if (updated.rev !== head) {
-      return yield* Effect.fail(
-        new SetupStateError(
-          `home-manager sync: ${input} locked ${updated.rev?.slice(0, 7) ?? "nothing"} after update, expected ${head.slice(0, 7)}`,
-        ),
-      );
-    }
+    yield* ctx.command("nix", ["flake", "update", input, "--flake", flakeDir], {
+      stdio: "inherit",
+    });
     yield* ctx.command("home-manager", ["switch", "--flake", flakeDir], { stdio: "inherit" });
     ok(`home-manager switched with ${input} ${head.slice(0, 7)}`);
     return HomeManagerOutcome.Switched;

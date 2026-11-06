@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempDisposableSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,8 +9,7 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 const startMarker = "<!-- pi-env:append-system:start -->";
 const endMarker = "<!-- pi-env:append-system:end -->";
 
-function createFixture() {
-  const home = mkdtempSync(join(tmpdir(), "pi-env-append-system-"));
+function createFixture(home) {
   const agentDir = join(home, ".pi/agent");
   const source = readFileSync(join(root, ".pi/agent/APPEND_SYSTEM.md"), "utf8").trim();
   mkdirSync(agentDir, { recursive: true });
@@ -73,10 +72,7 @@ function verifyStaleBlockRepair(fixture, installed) {
   assert.match(rerun.report, /\(managed blocks current\)$/);
 }
 
-const fixture = createFixture();
-try {
-  verifyStaleBlockRepair(fixture, verifyPersonalTextPreserved(fixture));
-  console.log("append-system workflow passed");
-} finally {
-  rmSync(fixture.home, { recursive: true, force: true });
-}
+using home = mkdtempDisposableSync(join(tmpdir(), "pi-env-append-system-"));
+const fixture = createFixture(home.path);
+verifyStaleBlockRepair(fixture, verifyPersonalTextPreserved(fixture));
+console.log("append-system workflow passed");
