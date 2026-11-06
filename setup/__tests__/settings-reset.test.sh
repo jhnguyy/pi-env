@@ -16,7 +16,7 @@ finish() {
 import fs from 'node:fs';
 const {EVIDENCE: dir, STATUS: status, PHASE: phase} = process.env;
 fs.writeFileSync(`${dir}/result.json`, JSON.stringify({
-  inputs: 'personal.json, legacy JSON settings, metadata-only auth fixtures',
+  inputs: 'personal.json and metadata-only auth fixtures',
   expected: 'normal preferences survive; reset replaces baseline/packages; registration failures restore exact settings',
   actual: {phase, exitStatus: Number(status)}, verdict: status === '0' ? 'pass' : 'fail',
   reproduce: 'bash setup/__tests__/settings-reset.test.sh',
@@ -57,10 +57,8 @@ cat > "$EVIDENCE/personal.json" <<'JSON'
   "retry": {"enabled": false, "maxAgentDelayMs": 5000, "provider": {"maxRetries": 4, "keep": true}}
 }
 JSON
-# The expected preferences remain plain JSON, independent of the production parser.
-"$NODE" -e 'const fs = require("fs"); const text = fs.readFileSync(process.argv[1], "utf8"); fs.writeFileSync(process.argv[2], "// legacy personal settings\n" + text.replace(/\n}\s*$/, ",\n}\n"));' "$EVIDENCE/personal.json" "$SETTINGS_FILE"
-cp "$SETTINGS_FILE" "$EVIDENCE/legacy.json"
-phase='normal legacy settings registration'
+cp "$EVIDENCE/personal.json" "$SETTINGS_FILE"
+phase='normal personal settings registration'
 configure
 cp "$SETTINGS_FILE" "$EVIDENCE/normal.json"
 phase='explicit reset'
@@ -107,7 +105,7 @@ const backups = fs.readdirSync(agent).filter(name => name.startsWith('settings.j
 assert.equal(backups.length, 1);
 assert.equal(fs.readFileSync(path.join(agent, backups[0]), 'utf8'), fs.readFileSync(path.join(dir, 'normal.json'), 'utf8'));
 JS
-cp "$EVIDENCE/legacy.json" "$SETTINGS_FILE"
+cp "$EVIDENCE/personal.json" "$SETTINGS_FILE"
 for mode in normal reset; do
   phase="$mode registration rollback"
   args=()
@@ -115,7 +113,7 @@ for mode in normal reset; do
   if "$NODE" "$ROOT/setup/apply-managed-settings.mjs" "$SETTINGS_FILE" "$EVIDENCE/missing-repo" "${args[@]}"; then
     fail 'registration failure should fail'
   fi
-  "$NODE" "$ROOT/setup/__tests__/assert-files-equal.mjs" "$SETTINGS_FILE" "$EVIDENCE/legacy.json" || fail 'registration failure did not restore exact legacy settings'
+  "$NODE" "$ROOT/setup/__tests__/assert-files-equal.mjs" "$SETTINGS_FILE" "$EVIDENCE/personal.json" || fail 'registration failure did not restore exact personal settings'
 done
 for metadata in codex neither; do
   phase="provider metadata: $metadata"

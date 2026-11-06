@@ -58,20 +58,22 @@ function configurePi(fixture) {
   if (result.error) throw result.error;
   assert.equal(result.status, 0, `Pi configuration failed: ${result.stderr}`);
   const report = result.stdout.split("\n").filter((line) => line.includes("APPEND_SYSTEM.md"));
-  assert.equal(report.length, 1, `one status line must cover all APPEND_SYSTEM.md blocks: ${report}`);
+  assert.equal(
+    report.length,
+    1,
+    `one status line must cover all APPEND_SYSTEM.md blocks: ${report}`,
+  );
   return { text: readFileSync(appendFile, "utf8"), report: report[0] };
 }
 
-function verifyLegacyUpgrade(fixture) {
-  const legacy =
-    "<!-- pi-env:append-system -->\n<!-- pi-env:append-system -->\n" +
-    "Keep this personal rule.\n\n  Keep this spacing.  \n";
-  writeFileSync(fixture.appendFile, legacy);
-  writeFileSync(join(fixture.evidence, "legacy.md"), legacy);
+function verifyPersonalTextPreserved(fixture) {
+  const personal = "Keep this personal rule.\n\n  Keep this spacing.  \n";
+  writeFileSync(fixture.appendFile, personal);
+  writeFileSync(join(fixture.evidence, "personal.md"), personal);
   const { text: actual } = configurePi(fixture);
-  writeFileSync(join(fixture.evidence, "upgraded.md"), actual);
-  assert.equal(actual.slice(0, legacy.length), legacy, "legacy text must remain unchanged");
-  assert.ok(actual.includes(fixture.expectedBlock), "legacy setup must install the source block");
+  writeFileSync(join(fixture.evidence, "installed.md"), actual);
+  assert.equal(actual.slice(0, personal.length), personal, "personal text must remain unchanged");
+  assert.ok(actual.includes(fixture.expectedBlock), "setup must install the source block");
   return actual;
 }
 
@@ -84,7 +86,11 @@ function verifyStaleBlockRepair(fixture, installed) {
   const { text: actual, report } = configurePi(fixture);
   writeFileSync(join(fixture.evidence, "reconciled.md"), actual);
   assert.equal(actual, expected, "repair must change only the managed block");
-  assert.match(report, /\(updated: append-system\)$/, "the report must name only the repaired block");
+  assert.match(
+    report,
+    /\(updated: append-system\)$/,
+    "the report must name only the repaired block",
+  );
   const rerun = configurePi(fixture);
   assert.equal(rerun.text, expected, "a rerun must not change APPEND_SYSTEM.md");
   assert.match(rerun.report, /\(managed blocks current\)$/);
@@ -92,14 +98,20 @@ function verifyStaleBlockRepair(fixture, installed) {
 
 const fixture = createFixture();
 try {
-  const installed = verifyLegacyUpgrade(fixture);
+  const installed = verifyPersonalTextPreserved(fixture);
   verifyStaleBlockRepair(fixture, installed);
   writeFileSync(
     join(fixture.evidence, "result.json"),
     JSON.stringify(
       {
         verdict: "pass",
-        checks: ["legacy-upgrade", "stale-repair", "exact-preservation", "single-report", "rerun"],
+        checks: [
+          "personal-text-preserved",
+          "stale-repair",
+          "exact-preservation",
+          "single-report",
+          "rerun",
+        ],
       },
       null,
       2,

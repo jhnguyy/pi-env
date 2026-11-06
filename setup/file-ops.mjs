@@ -2,11 +2,8 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
   readlinkSync,
-  realpathSync,
-  rmdirSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -24,24 +21,6 @@ export function pathExistsOrIsSymlink(path) {
   } catch {
     return false;
   }
-}
-
-function realpathOrNull(path) {
-  try {
-    return realpathSync(path);
-  } catch {
-    return null;
-  }
-}
-
-// Earlier setup wrote links from the shell's logical checkout path, which can differ from the
-// physical path Node reports. Match either spelling, or the same resolved file.
-export function isLinkTo(target, sources) {
-  if (!pathExistsOrIsSymlink(target) || !lstatSync(target).isSymbolicLink()) return false;
-  const current = readlinkSync(target);
-  if (sources.includes(current)) return true;
-  const resolved = realpathOrNull(target);
-  return resolved !== null && sources.some((source) => realpathOrNull(source) === resolved);
 }
 
 export function fileEffect(operation, path, thunk) {
@@ -89,27 +68,5 @@ export function linkPathEffect(source, target, label) {
     mkdirSync(dirname(target), { recursive: true });
     symlinkSync(source, target);
     changed(label);
-  });
-}
-
-// Remove only links that still point at a source setup created; anything else is user-owned.
-export function removeOwnedLinkEffect(sources, target, label) {
-  return fileEffect("remove obsolete link", target, () => {
-    if (!pathExistsOrIsSymlink(target)) return;
-    if (!isLinkTo(target, sources)) {
-      kept(label);
-      return;
-    }
-    unlinkSync(target);
-    changed(`${label} (obsolete link removed)`);
-  });
-}
-
-export function removeEmptyDirectoryEffect(path, label) {
-  return fileEffect("remove obsolete directory", path, () => {
-    if (!pathExistsOrIsSymlink(path) || !lstatSync(path).isDirectory()) return;
-    if (readdirSync(path).length > 0) return;
-    rmdirSync(path);
-    changed(`${label} (empty obsolete directory removed)`);
   });
 }

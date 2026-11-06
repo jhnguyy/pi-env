@@ -19,19 +19,15 @@ hooks_path() {
   git -C "$1" config --local --get core.hooksPath || true
 }
 
-test_sets_hooks_path_and_removes_legacy_links() {
+test_sets_hooks_path() {
   local tmp repo
   tmp="$(with_temp_dir)"
   repo="$tmp/repo"
   new_repo "$repo"
-  ln -s "$ROOT/setup/hooks/post-merge" "$repo/.git/hooks/post-merge"
-  ln -s "$ROOT/setup/hooks/pre-commit" "$repo/.git/hooks/pre-commit"
 
   configure_repo_tools_env "$repo" "$tmp/home" >/dev/null
 
   assert_eq "$(hooks_path "$repo")" "setup/hooks" "core.hooksPath"
-  [ ! -e "$repo/.git/hooks/post-merge" ] && [ ! -L "$repo/.git/hooks/post-merge" ] || fail "legacy post-merge link should be removed"
-  [ ! -e "$repo/.git/hooks/pre-commit" ] && [ ! -L "$repo/.git/hooks/pre-commit" ] || fail "legacy pre-commit link should be removed"
 
   rm -rf "$tmp"
 }
@@ -119,7 +115,7 @@ SH
   echo "Git hook invocation evidence: $tmp"
 }
 
-test_sets_hooks_path_and_removes_legacy_links
+test_sets_hooks_path
 test_custom_hook_keeps_hooks_path_unset
 test_existing_hooks_path_is_not_replaced
 test_global_hooks_path_is_not_overridden

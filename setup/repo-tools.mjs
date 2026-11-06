@@ -1,7 +1,6 @@
-import { unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { fileEffect, isLinkTo, pathExistsOrIsSymlink } from "./file-ops.mjs";
+import { pathExistsOrIsSymlink } from "./file-ops.mjs";
 import { changed, note, ok, section } from "./report.mjs";
 
 // Relative to each worktree root, so every checkout runs its own tracked hooks.
@@ -40,28 +39,14 @@ export function configureRepoToolsEffect(ctx, policy) {
       note(`repo hooks (core.hooksPath already set to ${hooksPath})`);
       return;
     }
-    const hooks = HookNames.map((name) => ({
-      name,
-      src: join(ctx.sourceRoot, HOOKS_PATH, name),
-      dst: join(gitCommonDir, "hooks", name),
-    }));
-    const custom = hooks.filter((hook) => isCustomHook(hook));
+    const custom = HookNames.filter((name) =>
+      pathExistsOrIsSymlink(join(gitCommonDir, "hooks", name)),
+    );
     if (custom.length > 0) {
-      const names = custom.map((hook) => hook.name).join(", ");
-      note(`repo hooks (custom hooks exist in .git/hooks: ${names})`);
+      note(`repo hooks (custom hooks exist in .git/hooks: ${custom.join(", ")})`);
       return;
-    }
-    for (const hook of hooks) {
-      yield* fileEffect("remove legacy git hook link", hook.dst, () => {
-        if (pathExistsOrIsSymlink(hook.dst)) unlinkSync(hook.dst);
-      });
     }
     yield* ctx.git(["config", "--local", "core.hooksPath", HOOKS_PATH]);
     changed(`repo hooks (core.hooksPath=${HOOKS_PATH})`);
   });
-}
-
-// Earlier setup versions linked .git/hooks/<name> to the tracked hook; anything else is user-owned.
-function isCustomHook({ src, dst }) {
-  return pathExistsOrIsSymlink(dst) && !isLinkTo(dst, [src]);
 }
