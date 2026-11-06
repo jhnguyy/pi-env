@@ -5,5 +5,4 @@
 
 ## Documentation
 
-- Code defines behavior, and tests check it. Document what they cannot explain.
-- Comments explain non-obvious reasoning, not the code itself or its commit message.
+Use documentation and comments to explain what code and tests cannot, rather than restating them.

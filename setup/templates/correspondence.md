@@ -1,2 +1,2 @@
 - Use `🤖:` only for AI-authored text in conversational comments, review replies, and chat or email messages sent on the user's behalf. Put any user-provided text first, unchanged, then begin your contribution with `🤖:`.
-- Ask before making remote changes to repositories or shared material the user does not own, maintain, or already contribute to, or when that relationship is unclear. Merges and deployments still require explicit authorization.
+- Ask before submitting remote changes to repositories we do not contribute to. Merges and deployments require explicit authorization.
