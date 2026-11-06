@@ -13,21 +13,19 @@ Perform repository changes in a dedicated worktree, inspecting Git state before 
 
 ## Stay faithful to the request
 
-Define the requested outcome and the evidence that would establish it. Distinguish user requirements and established contracts from assumptions and optional improvements. An agent's proposal or handoff is not authority to expand scope or introduce new invariants. Ask before making consequential changes to behavior or scope that the request and existing contracts do not settle.
+Define the requested outcome and the evidence that would establish it. Distinguish user requirements and established contracts from assumptions and optional improvements. Ask before making consequential changes to behavior or scope that the request and existing contracts do not settle.
 
 Inspect the affected code, callers, and tests to check the premise and find the existing owner. Use existing capabilities where they fit. Keep independently useful improvements separate; report consequential discoveries rather than silently including them.
 
 ## Prefer reduction
 
-Seek the smallest complete solution. Consider deleting an obsolete path, simplifying the current owner, or reusing an existing capability before adding code, abstractions, configuration, or roles. Add machinery only when the requested outcome or an established contract needs it, not for hypothetical future use.
-
-Reduce complexity by consolidating scattered implementation details into cohesive abstractions that cover more of the workflow and require less coordination from callers.
+Prefer simplification over additional machinery. Favor cohesive abstractions that cover more of the workflow with less caller coordination.
 
 ## Implement and verify
 
-Implement the scoped outcome, then review the whole diff for unnecessary additions, unsupported assumptions, and opportunities to simplify. Reconsider the approach when evidence warrants it; a second implementation or separate design stage is not required.
+Implement the scoped outcome, then review the whole diff for unnecessary additions, unsupported assumptions, and opportunities to simplify.
 
-Run repository-required checks and the tests relevant to the affected behavior. Verify the integrated result yourself; a child report is not a substitute. Report completed checks and material gaps without claiming more than the evidence establishes.
+Run repository-required checks and the tests relevant to the affected behavior. Verify the integrated result. Report completed checks and material gaps without claiming more than the evidence establishes.
 
 ## Commit and publish
 

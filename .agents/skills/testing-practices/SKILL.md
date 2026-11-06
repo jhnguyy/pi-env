@@ -15,7 +15,7 @@ Validate configs and templates with native tooling and manual checks.
 
 Discover useful units through design. An internal function or module can own a responsibility with independently testable expectations. Choose seams that make its inputs, collaborator outcomes, and ownership controllable; a functional slice need not enter through the application's public CLI or cross every deployment boundary.
 
-Describe what follows from those inputs: outputs, state changes, effects, and failures. Include meaningful input distinctions and failure stages, especially where an effect may have occurred before confirmation was lost. Escalate consequential ambiguities in expected behavior rather than choosing a new production contract through test expectations.
+Describe what follows from those inputs: outputs, state changes, effects, and failures. Include meaningful input distinctions and failure stages, especially where an effect may have occurred before confirmation was lost.
 
 Rely on established collaborator contracts and focus on the target's decisions, translations, composition, and failure handling. Select integration evidence when compatibility, an interaction, or shared lifecycle behavior is itself the promise under examination.
 
