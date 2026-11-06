@@ -7,7 +7,6 @@
   ],
   "license": "MIT",
   "workspaces": [
-    ".pi/extensions/context-recap",
     ".pi/extensions/analyze",
     ".pi/extensions/general",
     ".pi/extensions/web-context",
@@ -134,7 +133,6 @@
   },
   "pi": {
     "extensions": [
-      ".pi/extensions/context-recap",
       ".pi/extensions/analyze",
       ".pi/extensions/general",
       ".pi/extensions/web-context",

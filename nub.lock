@@ -125,8 +125,6 @@ importers:
 
   .pi/extensions/analyze: {}
 
-  .pi/extensions/context-recap: {}
-
   .pi/extensions/dev-tools:
     dependencies:
       bash-language-server:
