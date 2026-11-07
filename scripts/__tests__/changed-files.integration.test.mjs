@@ -40,18 +40,22 @@ for (const state of ["committed", "staged", "unstaged", "untracked with spaces"]
     expect(workspace.changes()).toEqual({
       base: workspace.base,
       files: [file],
-      existing: [file],
+      edited: [file],
+      renames: [],
     });
   });
 }
 
-it("retains both rename paths for impact selection but only the existing destination for checks", async ({
+it("retains both rename paths for impact selection but checks only renamed content that changed", async ({
   workspace,
 }) => {
   git(workspace.root, "mv", "value.ts", "new name.ts");
+  git(workspace.root, "mv", "unchanged.ts", "moved.ts");
+  await writeFile(join(workspace.root, "new name.ts"), "export const value = 2;\n");
   expect(workspace.changes()).toEqual({
     base: workspace.base,
-    files: ["new name.ts", "value.ts"],
-    existing: ["new name.ts"],
+    files: ["moved.ts", "new name.ts", "unchanged.ts", "value.ts"],
+    edited: ["new name.ts"],
+    renames: [{ from: "unchanged.ts", to: "moved.ts" }],
   });
 });

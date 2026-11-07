@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import ts from "typescript";
 
 const ROOT = process.cwd();
-const SOURCE_ROOTS = [".pi/extensions", "src", "scripts", "setup", ".agents"];
+const SOURCE_ROOTS = ["extensions", "src", "scripts", "setup", "skills"];
 export const GUARDED_EFFECT_COMBINATORS = ["andThen", "catch", "flatMap", "map", "match", "tap"];
 export const TERMINAL_EFFECT_OPERATIONS = [
   "die",
@@ -176,7 +176,7 @@ export function analyzeText(file, text) {
 
   function visit(node) {
     if (
-      file !== ".pi/extensions/_shared/errors.ts" &&
+      file !== "extensions/_shared/errors.ts" &&
       ts.isFunctionDeclaration(node) &&
       node.name?.text === "formatError"
     ) {
@@ -184,7 +184,7 @@ export function analyzeText(file, text) {
         file,
         ...location(sourceFile, node.name),
         message:
-          "Local formatError helper found. Prefer .pi/extensions/_shared/errors.ts unless this is intentionally domain-specific.",
+          "Local formatError helper found. Prefer extensions/_shared/errors.ts unless this is intentionally domain-specific.",
       });
     }
 

@@ -1,6 +1,6 @@
 # Contributing
 
-Start with [README](README.md) for setup modes and the [code-contribution skill](.agents/skills/code-contribution/SKILL.md) for the contribution workflow. This page adds pi-env's development requirements.
+Start with [README](README.md) for setup modes and the [code-contribution skill](skills/code-contribution/SKILL.md) for the contribution workflow. This page adds pi-env's development requirements.
 
 ## Prepare a checkout
 
@@ -22,7 +22,7 @@ nub run build
 
 Reload or restart that session afterward. For activated Nix artifacts, follow [host integration](docs/setup.md#declarative-host-integration) instead of assuming a checkout build replaces them.
 
-Keep tests and setup experiments isolated from personal homes, agent directories, settings, and sessions. Use the [dependency-update skill](.agents/skills/dependency-update/SKILL.md) when changing dependencies and the [documentation conventions](docs/conventions/documentation.md) when changing documentation.
+Keep tests and setup experiments isolated from personal homes, agent directories, settings, and sessions. Use the [dependency-update skill](skills/dependency-update/SKILL.md) when changing dependencies and the [documentation conventions](docs/conventions/documentation.md) when changing documentation.
 
 ## Verification
 

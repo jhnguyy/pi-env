@@ -3,13 +3,13 @@ import { tmpdir } from "node:os";
 import { defineConfig } from "vitest/config";
 
 const testRoots = [
-  ".pi/extensions/**/__tests__/**/*.test.ts",
+  "extensions/**/__tests__/**/*.test.ts",
   "src/**/__tests__/**/*.test.ts",
   "scripts/__tests__/**/*.test.mjs",
   "setup/__tests__/**/*.test.mjs",
 ];
 const integrationTestRoots = [
-  ".pi/extensions/**/__tests__/**/*.integration.test.ts",
+  "extensions/**/__tests__/**/*.integration.test.ts",
   "src/**/__tests__/**/*.integration.test.ts",
   "scripts/__tests__/**/*.integration.test.mjs",
   "setup/__tests__/**/*.integration.test.mjs",
@@ -50,22 +50,22 @@ export default defineConfig({
         extends: true,
         test: {
           name: "e2e",
-          include: [".pi/extensions/**/__tests__/e2e.test.ts"],
-          exclude: [".pi/extensions/session-manager/**"],
+          include: ["extensions/**/__tests__/e2e.test.ts"],
+          exclude: ["extensions/session-manager/**"],
         },
       },
       {
         extends: true,
         test: {
           name: "session-manager-e2e",
-          include: [".pi/extensions/session-manager/__tests__/e2e.test.ts"],
+          include: ["extensions/session-manager/__tests__/e2e.test.ts"],
         },
       },
       {
         extends: true,
         test: {
           name: "real-workspace-canary",
-          include: [".pi/extensions/dev-tools/__tests__/real-workspace-canary.e2e.test.ts"],
+          include: ["extensions/dev-tools/__tests__/real-workspace-canary.e2e.test.ts"],
         },
       },
     ],

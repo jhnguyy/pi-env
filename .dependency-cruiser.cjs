@@ -1,7 +1,7 @@
 const { readdirSync, statSync } = require("node:fs");
 const { join } = require("node:path");
 
-const extensionRoot = ".pi/extensions";
+const extensionRoot = "extensions";
 const extensionNames = readdirSync(extensionRoot)
   .filter((name) => name !== "_shared")
   .filter((name) => statSync(join(extensionRoot, name)).isDirectory())
@@ -26,8 +26,8 @@ module.exports = {
       severity: "error",
       comment:
         "Extensions should depend on their own files or _shared only; cross-extension reuse belongs in _shared so load order and package boundaries stay explicit.",
-      from: { path: `^\\.pi/extensions/${escapeRegex(name)}/` },
-      to: { path: `^\\.pi/extensions/(?!(_shared|${escapeRegex(name)})/)` },
+      from: { path: `^extensions/${escapeRegex(name)}/` },
+      to: { path: `^extensions/(?!(_shared|${escapeRegex(name)})/)` },
     })),
   ],
   options: {

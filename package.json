@@ -7,16 +7,16 @@
   ],
   "license": "MIT",
   "workspaces": [
-    ".pi/extensions/analyze",
-    ".pi/extensions/general",
-    ".pi/extensions/web-context",
-    ".pi/extensions/dev-tools",
-    ".pi/extensions/introspection",
-    ".pi/extensions/notes",
-    ".pi/extensions/review",
-    ".pi/extensions/session-manager",
-    ".pi/extensions/share",
-    ".pi/extensions/subagent"
+    "extensions/analyze",
+    "extensions/general",
+    "extensions/web-context",
+    "extensions/dev-tools",
+    "extensions/introspection",
+    "extensions/notes",
+    "extensions/review",
+    "extensions/session-manager",
+    "extensions/share",
+    "extensions/subagent"
   ],
   "type": "module",
   "scripts": {
@@ -38,7 +38,7 @@
     "format:files": "scripts/tool-node-run.sh node_modules/oxfmt/bin/oxfmt --threads=1",
     "format": "nub run format:files 'scripts/*.{js,mjs}' '.dependency-cruiser*.{cjs,json}' '.ox*.json'",
     "format:check": "nub run format --check",
-    "analyze": "node .pi/extensions/analyze/dist/cli.js",
+    "analyze": "node extensions/analyze/dist/cli.js",
     "lint:sensors": "scripts/tool-node-run.sh node_modules/oxlint/bin/oxlint -c .oxlintrc-sensors.json --threads=1",
     "lint:changed": "nub run lint:sensors --allow no-await-in-loop --deny-warnings --no-error-on-unmatched-pattern",
     "check:duplicates:changed": "nub run analyze --diff --checks duplicates --fail-on warning",
@@ -133,19 +133,19 @@
   },
   "pi": {
     "extensions": [
-      ".pi/extensions/analyze",
-      ".pi/extensions/general",
-      ".pi/extensions/web-context",
-      ".pi/extensions/dev-tools",
-      ".pi/extensions/introspection",
-      ".pi/extensions/notes",
-      ".pi/extensions/review",
-      ".pi/extensions/session-manager",
-      ".pi/extensions/share",
-      ".pi/extensions/subagent"
+      "extensions/analyze",
+      "extensions/general",
+      "extensions/web-context",
+      "extensions/dev-tools",
+      "extensions/introspection",
+      "extensions/notes",
+      "extensions/review",
+      "extensions/session-manager",
+      "extensions/share",
+      "extensions/subagent"
     ],
     "skills": [
-      ".agents/skills"
+      "skills"
     ],
     "themes": [
       "themes"

@@ -7,7 +7,7 @@ The pinned Effect declarations, repository typecheck, and runtime tests are auth
 ## Coverage
 
 - Type-aware Effect diagnostics cover authored TypeScript included by `tsconfig`.
-- The syntax checker covers tracked TS/JS/MJS under `.pi/extensions`, `src`, `scripts`, `setup`, and `.agents`.
+- The syntax checker covers tracked TS/JS/MJS under `extensions`, `src`, `scripts`, `setup`, and `skills`.
 
 ## Data and failure
 

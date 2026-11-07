@@ -13,9 +13,12 @@ THIRD_PARTY_SOURCES
 *.tsbuildinfo
 
 # Extension bundles are rebuilt inside the image from source.
-.pi/extensions/*/dist
+extensions/*/dist
 
-# Local pi state/config and credentials must never enter the image.
+# Local pi state/config and credentials must never enter the image. The repository
+# ships no project-local Pi resources, so these directories hold only local state.
+.pi
+.agents
 auth.json
 settings.json
 models.json
@@ -23,10 +26,6 @@ permissions.json
 permissions-audit.jsonl
 sessions
 sessions/**
-.pi/sessions
-.pi/sessions/**
-.pi/handoffs
-.pi/handoffs/**
 *.env
 *.env.*
 

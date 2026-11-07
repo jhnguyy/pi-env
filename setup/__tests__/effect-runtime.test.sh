@@ -21,7 +21,7 @@ expect_error 1 '^REPO is required$' env REPO= "$NODE_BIN" setup/configure.mjs pi
 export REPO="$ROOT" HOME="$tmp/home"
 mkdir -p "$HOME"
 export PI_AGENT_DIR="$tmp/pi-agent" PI_CODING_AGENT_DIR="$tmp/pi-agent"
-export AGENTS_DIR="$HOME/.agents" XDG_CONFIG_HOME="$tmp/xdg" GHOSTTY_CONFIG_DIR="$tmp/xdg/ghostty"
+export XDG_CONFIG_HOME="$tmp/xdg" GHOSTTY_CONFIG_DIR="$tmp/xdg/ghostty"
 
 expect_error 2 '^unknown configure command: not-a-command$' "$NODE_BIN" setup/configure.mjs not-a-command
 expect_error 1 'no-such-node setup/apply-managed-settings.mjs .* failed to start:' \

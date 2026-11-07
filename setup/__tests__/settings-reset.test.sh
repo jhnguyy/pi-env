@@ -13,7 +13,7 @@ same_bytes() {
 }
 
 export HOME="$TMP/home"
-export AGENTS_DIR="$HOME/.agents" XDG_CONFIG_HOME="$HOME/.config" GHOSTTY_CONFIG_DIR="$HOME/.config/ghostty"
+export XDG_CONFIG_HOME="$HOME/.config" GHOSTTY_CONFIG_DIR="$HOME/.config/ghostty"
 unset PI_AGENT_DIR
 export PI_CODING_AGENT_DIR="$TMP/selected-agent"
 UNSELECTED='{"defaultThinkingLevel":"high"}'

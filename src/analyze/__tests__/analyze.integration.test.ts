@@ -1258,20 +1258,20 @@ describe("external analyzers and parsers", () => {
 describe("bundle entrypoints", () => {
   it("discovers only actual extension index.ts entrypoints", async () => {
     const cwd = writeProject({
-      ".pi/extensions/alpha/index.ts": "export const alpha = 1;",
-      ".pi/extensions/alpha/helper.ts": "export const helper = 1;",
-      ".pi/extensions/beta/index.ts": "export const beta = 1;",
+      "extensions/alpha/index.ts": "export const alpha = 1;",
+      "extensions/alpha/helper.ts": "export const helper = 1;",
+      "extensions/beta/index.ts": "export const beta = 1;",
     });
     writeFileSync(
       join(cwd, "package.json"),
       JSON.stringify({
-        pi: { extensions: [".pi/extensions/alpha"] },
-        workspaces: [".pi/extensions/beta"],
+        pi: { extensions: ["extensions/alpha"] },
+        workspaces: ["extensions/beta"],
       }),
     );
     await expect(Effect.runPromise(discoverExtensionEntrypointsEffect(cwd))).resolves.toEqual([
-      ".pi/extensions/alpha/index.ts",
-      ".pi/extensions/beta/index.ts",
+      "extensions/alpha/index.ts",
+      "extensions/beta/index.ts",
     ]);
   });
 
@@ -1295,11 +1295,11 @@ describe("bundle entrypoints", () => {
       });
     });
     const configured = writeProject({
-      ".pi/extensions/configured/index.ts": 'import "external-package"; export const value = 1;',
+      "extensions/configured/index.ts": 'import "external-package"; export const value = 1;',
     });
     writeFileSync(
       join(configured, "package.json"),
-      JSON.stringify({ pi: { extensions: [".pi/extensions/configured"] } }),
+      JSON.stringify({ pi: { extensions: ["extensions/configured"] } }),
     );
     writeFileSync(
       join(configured, "pi-build.config.json"),
@@ -1313,24 +1313,24 @@ describe("bundle entrypoints", () => {
     });
     expect(requests[0]?.externals).toEqual(["external-package"]);
 
-    const malformed = writeProject({ ".pi/extensions/alpha/index.ts": "export const alpha = 1;" });
+    const malformed = writeProject({ "extensions/alpha/index.ts": "export const alpha = 1;" });
     writeFileSync(join(malformed, "package.json"), "{");
     writeFileSync(join(malformed, "pi-build.config.json"), "{");
     const fallbackFindings = await Effect.runPromise(
       bundleAnalyzerEffect(malformed, allScope, 2048).pipe(Effect.provide(bundleProcess)),
     );
     expect(fallbackFindings[0]).toMatchObject({
-      location: { path: ".pi/extensions/alpha/index.ts" },
+      location: { path: "extensions/alpha/index.ts" },
       data: { externals: [], externalsConfigured: false },
     });
     expect(requests[1]?.externals).toEqual([]);
   });
 
   it("maps bundle worker timeouts into typed analyzer failures", async () => {
-    const cwd = writeProject({ ".pi/extensions/alpha/index.ts": "export const alpha = 1;" });
+    const cwd = writeProject({ "extensions/alpha/index.ts": "export const alpha = 1;" });
     writeFileSync(
       join(cwd, "package.json"),
-      JSON.stringify({ pi: { extensions: [".pi/extensions/alpha"] } }),
+      JSON.stringify({ pi: { extensions: ["extensions/alpha"] } }),
     );
     const outcome = await Effect.runPromise(
       Effect.result(
@@ -1356,13 +1356,13 @@ describe("bundle entrypoints", () => {
 
   it("bundles the owning extension for helper changes but ignores unrelated files", async () => {
     const cwd = writeProject({
-      ".pi/extensions/alpha/index.ts": "export const alpha = 1;",
-      ".pi/extensions/alpha/helper.ts": "export const helper = 1;",
+      "extensions/alpha/index.ts": "export const alpha = 1;",
+      "extensions/alpha/helper.ts": "export const helper = 1;",
       "src/changed.ts": "export const changed = 1;",
     });
     writeFileSync(
       join(cwd, "package.json"),
-      JSON.stringify({ pi: { extensions: [".pi/extensions/alpha"] } }),
+      JSON.stringify({ pi: { extensions: ["extensions/alpha"] } }),
     );
     await expect(
       Effect.runPromise(
@@ -1372,12 +1372,12 @@ describe("bundle entrypoints", () => {
       ),
     ).resolves.toEqual([]);
     const findings = await Effect.runPromise(
-      bundleAnalyzerEffect(cwd, pathScope([".pi/extensions/alpha/helper.ts"]), 2048).pipe(
+      bundleAnalyzerEffect(cwd, pathScope(["extensions/alpha/helper.ts"]), 2048).pipe(
         Effect.provide(processServiceLayer()),
       ),
     );
     expect(findings).toHaveLength(1);
-    expect(findings[0]?.location.path).toBe(".pi/extensions/alpha/index.ts");
+    expect(findings[0]?.location.path).toBe("extensions/alpha/index.ts");
   });
 });
 
@@ -1393,7 +1393,7 @@ describe("explicit path scope integrity and bounds", () => {
       ".analyze-bundle/out.ts": "ignored",
       "tools/local.ts": "export const local = 1;",
       "tools/oxlint/anti-slop/index.ts": "ignored",
-      ".pi/extensions/demo/index.ts": "export const demo = 1;",
+      "extensions/demo/index.ts": "export const demo = 1;",
       "config/app.json": "{}",
     });
     const scope = await Effect.runPromise(
@@ -1402,7 +1402,7 @@ describe("explicit path scope integrity and bounds", () => {
         scope: ScopeMode.Paths,
         paths: [
           "src",
-          ".pi",
+          "extensions",
           "config",
           "tools",
           "dist",
@@ -1414,8 +1414,8 @@ describe("explicit path scope integrity and bounds", () => {
       }).pipe(Effect.provide(processServiceLayer())),
     );
     expect(scope.files).toEqual([
-      ".pi/extensions/demo/index.ts",
       "config/app.json",
+      "extensions/demo/index.ts",
       "src/a.ts",
       "tools/local.ts",
     ]);

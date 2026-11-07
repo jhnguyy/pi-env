@@ -4,6 +4,8 @@ For installation modes and commands, start with [README](../README.md#setup-choi
 
 [Managed settings](../setup/managed-settings-core.mjs) owns the initial baseline and managed keys; use `pi config` to select package resources.
 
+Package resource selections name paths inside pi-env. Setup moves pi-env's selections in your user settings from `.pi/extensions/` and `.agents/skills/` to `extensions/` and `skills/`. Update any project settings that select pi-env resources by those older paths yourself.
+
 ## Explicit reset
 
 Run `./setup.sh --reset` to back up existing settings and restore the baseline with only pi-env registered. Reset replaces only `settings.json`; other agent-directory files and project settings remain. Reinstall local adapters afterward; adapter setup must not reset the base implicitly.
@@ -14,7 +16,7 @@ See [settings registration and rollback](../setup/apply-managed-settings.mjs) fo
 
 After updating guidance, rerun setup, then start a new Pi session or use `/reload`. A trusted project `.pi/APPEND_SYSTEM.md` overrides the agent-directory file.
 
-See [the philosophy](../.pi/agent/APPEND_SYSTEM.md), [guidance installation](../setup/pi-config.mjs), and [managed-block preservation rules](../setup/managed-block.mjs).
+See [the philosophy](../setup/templates/APPEND_SYSTEM.md), [guidance installation](../setup/pi-config.mjs), and [managed-block preservation rules](../setup/managed-block.mjs).
 
 ## Runtime integration
 

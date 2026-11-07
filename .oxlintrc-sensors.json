@@ -4,7 +4,7 @@
     "correctness": "off"
   },
   "ignorePatterns": [
-    ".agents/**",
+    "skills/**",
     "**/node_modules/**",
     "**/dist/**",
     "**/generated/**",

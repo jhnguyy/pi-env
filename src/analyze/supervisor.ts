@@ -57,7 +57,7 @@ function analyzeWorkerPath(
   const adjacentWorker = new URL("./worker.js", import.meta.url).pathname;
   return existsSync(adjacentWorker)
     ? adjacentWorker
-    : new URL("../../.pi/extensions/analyze/dist/worker.js", import.meta.url).pathname;
+    : new URL("../../extensions/analyze/dist/worker.js", import.meta.url).pathname;
 }
 
 function journalEnabled(value: string | undefined): boolean {
@@ -136,7 +136,9 @@ export async function superviseAnalyze(
     type: AnalyzeDiagnosticEventType,
     attributes: Readonly<Record<string, unknown>> = {},
   ): Promise<void> =>
-    Effect.runPromise(diagnostics.record(createAnalysisDiagnosticEvent(runId, Date.now(), type, attributes)));
+    Effect.runPromise(
+      diagnostics.record(createAnalysisDiagnosticEvent(runId, Date.now(), type, attributes)),
+    );
 
   const finish = async (
     type:
@@ -156,17 +158,76 @@ export async function superviseAnalyze(
     });
   };
 
-  const lifecycle = async (): Promise<AnalysisResult> => {
-    await record(AnalyzeDiagnosticEventType.RunStarted, analysisRunAttributes(request));
-    if (options.signal?.aborted) {
-      const error = new AnalyzeSupervisorError("cancelled", "analyze request was cancelled");
+  const rejectIfCancelled = async (): Promise<void> => {
+    if (!options.signal?.aborted) return;
+    const error = new AnalyzeSupervisorError("cancelled", "analyze request was cancelled");
+    await finish(
+      AnalyzeDiagnosticEventType.RunTerminated,
+      AnalyzeOutcome.Interrupted,
+      AnalyzeTerminationReason.Cancelled,
+    );
+    throw error;
+  };
+
+  const sendRequest = async (
+    child: ChildProcess,
+    stop: (kind: AnalyzeSupervisorError["kind"], message: string) => Promise<void>,
+  ): Promise<void> => {
+    const requestLine = `${JSON.stringify({
+      version: 1,
+      type: AnalyzeWorkerMessageType.Request,
+      runId,
+      ...request,
+    })}\n`;
+    if (Buffer.byteLength(requestLine, "utf8") > MAX_REQUEST_BYTES) {
+      await stop("configuration", "analyze worker request exceeded its byte limit");
+    } else {
+      child.stdin?.end(requestLine);
+    }
+  };
+
+  const settle = async (
+    protocolState: AnalyzeProtocolState,
+    failure: AnalyzeSupervisorError | undefined,
+    trailingOutput: boolean,
+  ): Promise<AnalysisResult> => {
+    if (failure !== undefined) {
       await finish(
         AnalyzeDiagnosticEventType.RunTerminated,
-        AnalyzeOutcome.Interrupted,
-        AnalyzeTerminationReason.Cancelled,
+        failure.kind === "cancelled" ? AnalyzeOutcome.Interrupted : AnalyzeOutcome.Failure,
+        terminationReason(failure),
+      );
+      throw failure;
+    }
+    if (protocolState.phase !== AnalyzeProtocolPhase.Complete || trailingOutput) {
+      const error = new AnalyzeSupervisorError(
+        "process",
+        "analyze worker exited without a complete bounded result",
+      );
+      await finish(
+        AnalyzeDiagnosticEventType.RunTerminated,
+        AnalyzeOutcome.Failure,
+        AnalyzeTerminationReason.Unknown,
       );
       throw error;
     }
+
+    const result = protocolState.result;
+    await finish(
+      AnalyzeDiagnosticEventType.RunCompleted,
+      result.summary.failures === 0 ? AnalyzeOutcome.Success : AnalyzeOutcome.Failure,
+      AnalyzeTerminationReason.Completed,
+      {
+        finding_count: result.findings.length,
+        failure_count: result.summary.failures,
+      },
+    );
+    return result;
+  };
+
+  const lifecycle = async (): Promise<AnalysisResult> => {
+    await record(AnalyzeDiagnosticEventType.RunStarted, analysisRunAttributes(request));
+    await rejectIfCancelled();
 
     const node = env.PI_ENV_NODE_BIN ?? process.execPath;
     const processScope = await Effect.runPromise(Scope.make());
@@ -177,22 +238,24 @@ export async function superviseAnalyze(
     };
     let child: ChildProcess;
     try {
-      child = await Effect.runPromise(Scope.provide(
-        scopedChildProcess(
-          node,
-          [
-            `--max-old-space-size=${ANALYZE_LIMITS.maxMemoryMb}`,
-            options.workerPath ?? analyzeWorkerPath(env),
-          ],
-          {
-            cwd: request.cwd,
-            env: { ...process.env, ...env },
-            stdio: ["pipe", "pipe", "pipe"],
-            killGraceMs: ANALYZE_LIMITS.terminationGraceMs,
-          },
+      child = await Effect.runPromise(
+        Scope.provide(
+          scopedChildProcess(
+            node,
+            [
+              `--max-old-space-size=${ANALYZE_LIMITS.maxMemoryMb}`,
+              options.workerPath ?? analyzeWorkerPath(env),
+            ],
+            {
+              cwd: request.cwd,
+              env: { ...process.env, ...env },
+              stdio: ["pipe", "pipe", "pipe"],
+              killGraceMs: ANALYZE_LIMITS.terminationGraceMs,
+            },
+          ),
+          processScope,
         ),
-        processScope,
-      ));
+      );
     } catch {
       await closeProcessScope().catch(() => undefined);
       const error = new AnalyzeSupervisorError("process", "failed to spawn analyze worker");
@@ -209,9 +272,7 @@ export async function superviseAnalyze(
     let stderrBytes = 0;
     let failure: AnalyzeSupervisorError | undefined;
     let stopping: Promise<void> | undefined;
-    let protocolQueue: Promise<AnalyzeProtocolState> = Promise.resolve(
-      initialProtocolState(runId),
-    );
+    let protocolQueue: Promise<AnalyzeProtocolState> = Promise.resolve(initialProtocolState(runId));
 
     const stop = (kind: AnalyzeSupervisorError["kind"], message: string): Promise<void> => {
       if (stopping !== undefined) return stopping;
@@ -252,9 +313,7 @@ export async function superviseAnalyze(
         protocolQueue = protocolQueue.then(async (protocolState) => {
           let nextState = protocolState;
           try {
-            const transition = await Effect.runPromise(
-              acceptProtocolLine(protocolState, line),
-            );
+            const transition = await Effect.runPromise(acceptProtocolLine(protocolState, line));
             nextState = transition.state;
             if (transition.event.type === AnalyzeWorkerMessageType.Diagnostic) {
               await record(transition.event.event.type, transition.event.event.attributes);
@@ -274,17 +333,7 @@ export async function superviseAnalyze(
       }
     });
 
-    const requestLine = `${JSON.stringify({
-      version: 1,
-      type: AnalyzeWorkerMessageType.Request,
-      runId,
-      ...request,
-    })}\n`;
-    if (Buffer.byteLength(requestLine, "utf8") > MAX_REQUEST_BYTES) {
-      await stop("configuration", "analyze worker request exceeded its byte limit");
-    } else {
-      child.stdin?.end(requestLine);
-    }
+    await sendRequest(child, stop);
 
     await waitForClose(child);
     await closeProcessScope().catch(() => undefined);
@@ -292,42 +341,7 @@ export async function superviseAnalyze(
     options.signal?.removeEventListener("abort", abort);
     const protocolState = await protocolQueue;
     if (stopping !== undefined) await stopping;
-
-    if (failure !== undefined) {
-      await finish(
-        AnalyzeDiagnosticEventType.RunTerminated,
-        failure.kind === "cancelled" ? AnalyzeOutcome.Interrupted : AnalyzeOutcome.Failure,
-        terminationReason(failure),
-      );
-      throw failure;
-    }
-    if (
-      protocolState.phase !== AnalyzeProtocolPhase.Complete ||
-      pendingStdout.length > 0
-    ) {
-      const error = new AnalyzeSupervisorError(
-        "process",
-        "analyze worker exited without a complete bounded result",
-      );
-      await finish(
-        AnalyzeDiagnosticEventType.RunTerminated,
-        AnalyzeOutcome.Failure,
-        AnalyzeTerminationReason.Unknown,
-      );
-      throw error;
-    }
-
-    const result = protocolState.result;
-    await finish(
-      AnalyzeDiagnosticEventType.RunCompleted,
-      result.summary.failures === 0 ? AnalyzeOutcome.Success : AnalyzeOutcome.Failure,
-      AnalyzeTerminationReason.Completed,
-      {
-        finding_count: result.findings.length,
-        failure_count: result.summary.failures,
-      },
-    );
-    return result;
+    return settle(protocolState, failure, pendingStdout.length > 0);
   };
 
   try {

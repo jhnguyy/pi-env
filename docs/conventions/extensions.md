@@ -2,13 +2,15 @@
 
 ## Runtime shape
 
-Extensions compile to `dist/index.js` Node ESM bundles for fast load times. Pi never loads source files in `.pi/extensions/*/` directly at runtime.
+Extensions compile to `dist/index.js` Node ESM bundles for fast load times. Pi never loads source files in `extensions/*/` directly at runtime.
+
+Pi loads this repository's extensions, skills, and themes only through [`package.json#pi`](../../package.json) once setup registers the checkout. Keep shipped resources out of `.pi/` and `.agents/`: Pi auto-discovers those in any trusted project, so every worktree would load a second copy beside the registered package.
 
 Each active extension should have:
 
-1. `.pi/extensions/<name>/index.ts` with the default export
-2. `.pi/extensions/<name>/package.json` with name `@pi-env/<name>` and `"type": "module"`
-3. `.pi/extensions/<name>` in both `package.json#workspaces` and `package.json#pi.extensions`
+1. `extensions/<name>/index.ts` with the default export
+2. `extensions/<name>/package.json` with name `@pi-env/<name>` and `"type": "module"`
+3. `extensions/<name>` in both `package.json#workspaces` and `package.json#pi.extensions`
 
 Add permanent tests only when they protect a capability, regression, or safety invariant. Do not require a test file only to satisfy an extension layout rule.
 
@@ -30,7 +32,7 @@ Keep tool output context-economical:
 - Use opt-in detail views for larger data.
 - Never return raw generated artifacts, large logs, or full session JSONL unless that is explicitly the tool's purpose and truncation is enforced.
 
-Register each model-facing Pi tool through `.pi/extensions/_shared/tool-render.ts` or a shared registration helper that uses it. Each public tool must provide its complete model-facing `description`, a compact `renderCall`, and a `renderResult` for collapsed and expanded output. Run-scoped native `ToolDefinition` values do not own parent transcript rows and do not need these renderers.
+Register each model-facing Pi tool through `extensions/_shared/tool-render.ts` or a shared registration helper that uses it. Each public tool must provide its complete model-facing `description`, a compact `renderCall`, and a `renderResult` for collapsed and expanded output. Run-scoped native `ToolDefinition` values do not own parent transcript rows and do not need these renderers.
 
 Use the shared short-description helper for compact prose. Its default limit is 70 content characters plus `...`. Keep the source text unchanged for expanded output. Apply ANSI-safe viewport truncation at the component render boundary.
 
@@ -40,7 +42,7 @@ For inline custom dialogs that wait for an answer, follow upstream [custom scree
 
 ## Settings boundary
 
-Use `.pi/extensions/_shared/settings.ts` as the single settings boundary. It owns path resolution, file IO, JSON/root validation, missing-file semantics, shallow overlay precedence, and Effect Schema decode.
+Use `extensions/_shared/settings.ts` as the single settings boundary. It owns path resolution, file IO, JSON/root validation, missing-file semantics, shallow overlay precedence, and Effect Schema decode.
 
 Settings paths are:
 
@@ -57,7 +59,7 @@ Agent settings use Effect Schema for `modelAnnotations`, `workTracker` (`repos` 
 
 ## Native tool registration
 
-Use native Pi registration for public tools. When a domain contract needs the shared cwd, cancellation, and progress adapter, use [registerContractTool](../../.pi/extensions/_shared/register-contract-tool.ts):
+Use native Pi registration for public tools. When a domain contract needs the shared cwd, cancellation, and progress adapter, use [registerContractTool](../../extensions/_shared/register-contract-tool.ts):
 
 ```ts
 registerContractTool(pi, {
@@ -75,15 +77,15 @@ Import schema builders and types from `typebox` in library and bundled code. Pi'
 
 Pi validates tool arguments as JSON Schema, not through TypeBox-specific refinements, codecs, or format registries. Keep non-JSON-Schema constraints at execution boundaries. See upstream [tool parameter schemas and TypeBox](https://pi.dev/docs/extensions#tool-parameter-schemas-and-typebox) for coercion and validation semantics.
 
-Declare `parameters` as one top-level object. Some provider adapters, including Pi's Anthropic adapter, send only top-level `properties` and `required`, so a top-level union reaches the model as an empty object. Check per-action combinations at execution, as the [notes contract](../../.pi/extensions/notes/contract.ts) does.
+Declare `parameters` as one top-level object. Some provider adapters, including Pi's Anthropic adapter, send only top-level `properties` and `required`, so a top-level union reaches the model as an empty object. Check per-action combinations at execution, as the [notes contract](../../extensions/notes/contract.ts) does.
 
-The helper registers one native tool. It does not publish a second AgentTool or maintain a process-wide tool catalog. [toPiTool](../../.pi/extensions/_shared/tool-contract.ts) adapts contracts into native definitions. Native execution supplies each invocation's cwd, signal, and progress callback.
+The helper registers one native tool. It does not publish a second AgentTool or maintain a process-wide tool catalog. [toPiTool](../../extensions/_shared/tool-contract.ts) adapts contracts into native definitions. Native execution supplies each invocation's cwd, signal, and progress callback.
 
-Pass run-private definitions through `ResolvedSubagentRun.customTools` at the [native execution entrypoint](../../.pi/extensions/subagent/execute.ts). Select their names with `toolNames`; an explicit empty selection enables no tools. Do not publish run-bound callbacks globally. Native child sessions load ordinary extensions and receive only their run's supplied definitions.
+Pass run-private definitions through `ResolvedSubagentRun.customTools` at the [native execution entrypoint](../../extensions/subagent/execute.ts). Select their names with `toolNames`; an explicit empty selection enables no tools. Do not publish run-bound callbacks globally. Native child sessions load ordinary extensions and receive only their run's supplied definitions.
 
-Use the [tool adapter tests](../../.pi/extensions/__tests__/tool-contract.test.ts) for invocation context, cancellation, and progress, and representative native tool tests, such as [closeout](../../.pi/extensions/dev-tools/__tests__/closeout.integration.test.ts), for execution behavior. State side effects and operational limits in safety-sensitive descriptions.
+Use the [tool adapter tests](../../extensions/__tests__/tool-contract.test.ts) for invocation context, cancellation, and progress, and representative native tool tests, such as [closeout](../../extensions/dev-tools/__tests__/closeout.integration.test.ts), for execution behavior. State side effects and operational limits in safety-sensitive descriptions.
 
-[Child creation context](../../.pi/extensions/_shared/child-context.ts) identifies target cwd and agentDir across native loading and independently bundled extensions. Root orchestration factories return early in that scope. Do not change process cwd or environment variables to identify a child.
+[Child creation context](../../extensions/_shared/child-context.ts) identifies target cwd and agentDir across native loading and independently bundled extensions. Root orchestration factories return early in that scope. Do not change process cwd or environment variables to identify a child.
 
 ## Cross-extension singletons
 

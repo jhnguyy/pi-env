@@ -19,23 +19,23 @@
     "setup/configure.mjs",
     "setup/runtime.mjs",
     "vitest.config.ts",
-    ".pi/extensions/*/index.ts",
-    ".pi/extensions/dev-tools/daemon.ts"
+    "extensions/*/index.ts",
+    "extensions/dev-tools/daemon.ts"
   ],
   "project": [
     "scripts/**/*.mjs",
     "scripts/**/*.ts",
     "src/**/*.ts",
     "setup/**/*.mjs",
-    ".pi/extensions/**/*.ts",
-    ".agents/skills/**/*.ts",
+    "extensions/**/*.ts",
+    "skills/**/*.ts",
     "*.config.ts"
   ],
   "ignore": [
-    ".pi/extensions/**/dist/**",
-    ".pi/extensions/analyze/cli-main.ts",
-    ".pi/extensions/analyze/worker-main.ts",
-    ".pi/extensions/playwright-client/**"
+    "extensions/**/dist/**",
+    "extensions/analyze/cli-main.ts",
+    "extensions/analyze/worker-main.ts",
+    "extensions/playwright-client/**"
   ],
   "ignoreBinaries": ["scripts/node-run.sh", "scripts/tool-node-run.sh", "which"],
   "ignoreDependencies": [

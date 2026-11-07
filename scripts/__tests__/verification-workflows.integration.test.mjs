@@ -34,10 +34,10 @@ const it = test.extend({
     try {
       await symlink(join(repo, "scripts"), join(root, "scripts"), "dir");
       await symlink(join(repo, "node_modules"), join(root, "node_modules"), "dir");
-      await mkdir(join(root, ".pi/extensions/analyze"), { recursive: true });
+      await mkdir(join(root, "extensions/analyze"), { recursive: true });
       await symlink(
-        join(repo, ".pi/extensions/analyze/dist"),
-        join(root, ".pi/extensions/analyze/dist"),
+        join(repo, "extensions/analyze/dist"),
+        join(root, "extensions/analyze/dist"),
         "dir",
       );
       await copyFile(join(repo, ".oxlintrc-sensors.json"), join(root, ".oxlintrc-sensors.json"));
@@ -130,9 +130,9 @@ it("defaults to units with the shipped test configuration", async ({ workspace }
 });
 
 test("selects no work for an empty delta and only formatting for documentation", () => {
-  expect(changedVerificationPlan({ base: "main", files: [], existing: [] })).toEqual([]);
+  expect(changedVerificationPlan({ base: "main", files: [], edited: [] })).toEqual([]);
   expect(
-    changedVerificationPlan({ base: "main", files: ["README.md"], existing: ["README.md"] }),
+    changedVerificationPlan({ base: "main", files: ["README.md"], edited: ["README.md"] }),
   ).toEqual([
     {
       label: "format:files",
@@ -147,7 +147,7 @@ test("selects source checks and related units without whole-project type analysi
     changedVerificationPlan({
       base: "main",
       files: ["src/feature/value.ts"],
-      existing: ["src/feature/value.ts"],
+      edited: ["src/feature/value.ts"],
     }),
   ).toEqual([
     {

@@ -58,7 +58,6 @@ export function parseSetupContextEffect(env, setupNodeBin) {
       sourceRoot,
       home,
       agentDir,
-      agentsDir: env.AGENTS_DIR || join(home, ".agents"),
       xdgConfigHome,
       ghosttyConfigDir: env.GHOSTTY_CONFIG_DIR || defaultGhosttyConfigDir(home, xdgConfigHome),
       ...makeCommands(repo, env),
