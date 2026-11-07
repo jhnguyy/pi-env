@@ -5,8 +5,8 @@ const script = (name, ...args) => ({ label: name, command: "nub", args: ["run", 
 const codeFile = (file) => /\.[cm]?[jt]sx?$/.test(file);
 const formattable = (file) => /\.(?:[cm]?[jt]sx?|jsonc?|ya?ml|md|css|html)$/.test(file);
 function owner(file) {
-  if (file.startsWith(".pi/extensions/_shared/")) return undefined;
-  return /^(\.pi\/extensions\/[^/]+|src\/[^/]+|scripts|setup)\//.exec(file)?.[1];
+  if (file.startsWith("extensions/_shared/")) return undefined;
+  return /^(extensions\/[^/]+|src\/[^/]+|scripts|setup)\//.exec(file)?.[1];
 }
 
 function lintIgnorePatterns(cwd) {
@@ -24,7 +24,7 @@ export function unqualifiedGlobalInputs(files) {
     (file) =>
       (!file.includes("/") && !/\.(?:md|txt)$/.test(file)) ||
       /^(?:\.github|nix|patches|tools)\//.test(file) ||
-      (file.startsWith(".pi/extensions/_shared/") && !codeFile(file)),
+      (file.startsWith("extensions/_shared/") && !codeFile(file)),
   );
 }
 

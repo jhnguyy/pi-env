@@ -11,7 +11,7 @@ const REQUIRED_FILES = [
   "THIRD_PARTY_LICENSES/system/node-LICENSE.txt",
 ];
 
-const REQUIRED_DIRECTORIES = [".pi/extensions/dev-tools/dist"];
+const REQUIRED_DIRECTORIES = ["extensions/dev-tools/dist"];
 
 function requiredOutputIssues(root) {
   const missingFiles = REQUIRED_FILES.flatMap((path) => {

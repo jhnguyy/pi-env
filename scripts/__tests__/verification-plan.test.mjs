@@ -82,8 +82,8 @@ it("reports global runtime inputs without treating documentation or component so
       "Dockerfile",
       "nix/packages.nix",
       ".github/workflows/verify.yml",
-      ".pi/extensions/_shared/policy.json",
-      ".pi/extensions/_shared/value.ts",
+      "extensions/_shared/policy.json",
+      "extensions/_shared/value.ts",
       "src/feature/value.ts",
     ]),
   ).toEqual([
@@ -95,15 +95,15 @@ it("reports global runtime inputs without treating documentation or component so
     "Dockerfile",
     "nix/packages.nix",
     ".github/workflows/verify.yml",
-    ".pi/extensions/_shared/policy.json",
+    "extensions/_shared/policy.json",
   ]);
 });
 
 it("uses reverse imports for shared source rather than adding every extension suite", () => {
   expect(
     changedVerificationPlan(
-      { base: "main", files: [".pi/extensions/_shared/value.ts"], edited: [] },
-      { cwd: workspace([".pi/extensions/feature/__tests__/unrelated.test.ts"]) },
+      { base: "main", files: ["extensions/_shared/value.ts"], edited: [] },
+      { cwd: workspace(["extensions/feature/__tests__/unrelated.test.ts"]) },
     ),
   ).toEqual([
     {
@@ -117,7 +117,7 @@ it("uses reverse imports for shared source rather than adding every extension su
         "--no-file-parallelism",
         "--bail=1",
         "--passWithNoTests",
-        "./.pi/extensions/_shared/value.ts",
+        "./extensions/_shared/value.ts",
       ],
     },
   ]);

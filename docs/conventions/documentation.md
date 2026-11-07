@@ -6,9 +6,9 @@ This file owns repository documentation policy.
 
 - `README.md` states project purpose, setup choices, and the documentation directory.
 - A directory `README.md` states only the directory purpose or entry condition.
-- The [`code-contribution` skill](../../.agents/skills/code-contribution/SKILL.md) owns the portable contribution method.
+- The [`code-contribution` skill](../../skills/code-contribution/SKILL.md) owns the portable contribution method.
 - `CONTRIBUTING.md` owns pi-env-specific contribution requirements.
-- The [`testing-practices` skill](../../.agents/skills/testing-practices/SKILL.md) owns the portable testing method; [testing conventions](testing.md) own pi-env-specific organization, fixtures, and qualification.
+- The [`testing-practices` skill](../../skills/testing-practices/SKILL.md) owns the portable testing method; [testing conventions](testing.md) own pi-env-specific organization, fixtures, and qualification.
 - `AGENTS.md` owns coding-agent navigation.
 - Keep roadmaps, proposed architecture, migration sequencing, research, and open decisions in project notes, not usage or convention docs.
 - When documenting a behavioral requirement, distinguish it from implemented support.
@@ -23,6 +23,6 @@ Create a separate index only when the index adds retrieval information that file
 
 ## Content, prose, and comments
 
-- The [system prompt](../../.pi/agent/APPEND_SYSTEM.md) owns communication values and single ownership of facts, rules, and decisions.
+- The [system prompt](../../setup/templates/APPEND_SYSTEM.md) owns communication values and single ownership of facts, rules, and decisions.
 - The Documentation section of the [global agent guidelines](../../setup/templates/AGENTS.md#documentation) owns what to document and when to comment.
-- The [communication-guidelines skill](../../.agents/skills/communication-guidelines/SKILL.md) owns technical-writing mechanics and comment style.
+- The [communication-guidelines skill](../../skills/communication-guidelines/SKILL.md) owns technical-writing mechanics and comment style.

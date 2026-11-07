@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { DefaultPackageManager, SettingsManager } from "@earendil-works/pi-coding-agent";
@@ -39,6 +40,38 @@ function assertValidPackageSources(settings) {
   }
 }
 
+// Package filters name resource paths inside the package. pi-env moved its resources out of
+// .pi/ and .agents/, so saved selections must follow them to keep the same meaning.
+const RelocatedPrefixes = [
+  [".pi/extensions/", "extensions/"],
+  [".agents/skills/", "skills/"],
+];
+
+function relocateFilter(pattern) {
+  if (typeof pattern !== "string") return pattern;
+  // Pi accepts an optional ./ before package-relative paths; keep the original spelling.
+  const [, operator, dot, target] = /^([+\-!]?)(\.\/)?(.*)$/s.exec(pattern);
+  const match = RelocatedPrefixes.find(([from]) => target.startsWith(from));
+  return match ? `${operator}${dot ?? ""}${match[1]}${target.slice(match[0].length)}` : pattern;
+}
+
+// Pi expands a leading ~ in package sources; other relative sources resolve from settings.
+function resolveSource(source) {
+  if (source === "~") return os.homedir();
+  if (source.startsWith("~/")) return path.join(os.homedir(), source.slice(2));
+  return path.resolve(path.dirname(settingsFile), source);
+}
+
+function relocatePiEnvFilters(entry, piEnvSources) {
+  if (typeof entry !== "object") return entry;
+  if (!piEnvSources.has(resolveSource(entry.source))) return entry;
+  const relocated = { ...entry };
+  for (const key of ["extensions", "skills"]) {
+    if (Array.isArray(entry[key])) relocated[key] = entry[key].map(relocateFilter);
+  }
+  return relocated;
+}
+
 function gitOutput(args) {
   const result = spawnSync("git", ["-C", repoPath, ...args], {
     encoding: "utf8",
@@ -71,6 +104,8 @@ const settings = applyManagedSettings(baseSettings);
 if (settings.packages !== undefined) {
   if (!Array.isArray(settings.packages)) throw new Error("settings.packages must be an array");
   assertValidPackageSources(settings);
+  const piEnvSources = new Set([path.resolve(repoPath), path.resolve(packageRepoPath())]);
+  settings.packages = settings.packages.map((entry) => relocatePiEnvFilters(entry, piEnvSources));
 }
 
 fs.mkdirSync(path.dirname(settingsFile), { recursive: true });

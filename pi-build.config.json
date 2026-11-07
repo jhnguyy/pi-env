@@ -1,5 +1,5 @@
 {
-  "extensionsDir": ".pi/extensions",
+  "extensionsDir": "extensions",
   "externals": [
     "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-ai",

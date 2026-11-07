@@ -7,7 +7,7 @@ const ManagedFiles = Object.freeze([
   {
     path: "APPEND_SYSTEM.md",
     blocks: [
-      { name: "append-system", source: ".pi/agent/APPEND_SYSTEM.md" },
+      { name: "append-system", source: "setup/templates/APPEND_SYSTEM.md" },
       { name: "correspondence", source: "setup/templates/correspondence.md" },
     ],
   },

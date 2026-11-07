@@ -1,0 +1,20 @@
+{
+  "name": "@pi-env/dev-tools",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:e2e": "nub run --workspace-root test:e2e extensions/dev-tools/__tests__/e2e.test.ts"
+  },
+  "dependencies": {
+    "bash-language-server": "^5.6.0",
+    "typescript": "^5.7.3",
+    "typescript-language-server": "^4.3.4"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
+}

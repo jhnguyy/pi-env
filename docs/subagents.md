@@ -1,10 +1,10 @@
 # Subagents
 
-The subagent extension delegates work to native Pi SDK sessions in the parent process. Each child loads configuration and resources for its target working directory. Pi owns its model execution, tools, messages, persistence, retry, and compaction. See the [common entrypoint](../.pi/extensions/subagent/execute.ts) and [native owner](../.pi/extensions/subagent/native-child.ts).
+The subagent extension delegates work to native Pi SDK sessions in the parent process. Each child loads configuration and resources for its target working directory. Pi owns its model execution, tools, messages, persistence, retry, and compaction. See the [common entrypoint](../extensions/subagent/execute.ts) and [native owner](../extensions/subagent/native-child.ts).
 
 ## Delegation and results
 
-The `subagent` tool selects its operation with one `action` parameter; the [parameter schema](../.pi/extensions/subagent/index.ts) owns the actions and their required fields. Job IDs are volatile.
+The `subagent` tool selects its operation with one `action` parameter; the [parameter schema](../extensions/subagent/index.ts) owns the actions and their required fields. Job IDs are volatile.
 
 The parent can call `subagent` directly or through native codemode with `tools.subagent(...)`. Pi owns nested-call events, usage aggregation, and cancellation signals. Children can use their own native codemode when their settings or explicit tool selection enable it. Child scripts reach the child's native callable tools, not the parent's registry. The root `subagent` tool is not registered in children, so neither direct calls nor codemode scripts can delegate recursively. Pi also excludes codemode itself from script-callable tools.
 
@@ -50,11 +50,11 @@ Set `subagent.sessionStorage` to `"sibling"` only when native Pi discovery must 
 
 ## Native context and trust
 
-Pi loads target configuration, context, skills, and extensions through its native resource loader. Parent trust applies only to the same canonical cwd. A different target uses its saved decision in Pi's native `ProjectTrustStore`; unknown or denied targets do not receive project trust. Child startup does not prompt for new grants. See [target trust resolution](../.pi/extensions/subagent/resolver.ts) and [native child startup](../.pi/extensions/subagent/native-child.ts).
+Pi loads target configuration, context, skills, and extensions through its native resource loader. Parent trust applies only to the same canonical cwd. A different target uses its saved decision in Pi's native `ProjectTrustStore`; unknown or denied targets do not receive project trust. Child startup does not prompt for new grants. See [target trust resolution](../extensions/subagent/resolver.ts) and [native child startup](../extensions/subagent/native-child.ts).
 
 ## Limits and cancellation
 
-One parent supervisor controls blocking runs, background jobs, and idle continuations. Configure its limits in the `subagent` settings block; [the configuration](../.pi/extensions/subagent/config.ts) owns the keys and defaults.
+One parent supervisor controls blocking runs, background jobs, and idle continuations. Configure its limits in the `subagent` settings block; [the configuration](../extensions/subagent/config.ts) owns the keys and defaults.
 
 All native operations conservatively acquire a workspace write lease. Native callable surfaces can exceed initial active-tool visibility, so a read-only label is not sufficient evidence for concurrent writers. Operations in the same canonical Git workspace serialize. Retention bounds settled owners and job handles; result truncation does not truncate the native transcript. Public runs have no turn-count limit. Internal callers can impose an initial-operation turn limit.
 

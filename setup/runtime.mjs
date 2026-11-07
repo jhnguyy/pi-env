@@ -87,22 +87,8 @@ function readPiPackageEntry(piPackageDir) {
 
 function writePiWrapper(piPackageDir, piPackageEntry, piExecutable) {
   mkdirSync(piBinDir, { recursive: true });
-  const sessionManagerStart = join(
-    repo,
-    ".pi",
-    "extensions",
-    "session-manager",
-    "dist",
-    "start.js",
-  );
-  const sessionManagerExtension = join(
-    repo,
-    ".pi",
-    "extensions",
-    "session-manager",
-    "dist",
-    "index.js",
-  );
+  const sessionManagerStart = join(repo, "extensions", "session-manager", "dist", "start.js");
+  const sessionManagerExtension = join(repo, "extensions", "session-manager", "dist", "index.js");
   const installedWrapper = join(piBinDir, "pi");
   const wrapper = `#!/usr/bin/env sh
 set -eu
@@ -205,7 +191,7 @@ function ensureLocalNixPathInShellProfiles() {
   const adapterPath = piBinDir === `${home}/.local/bin` ? "$HOME/.local/bin" : piBinDir;
   const start = "# pi-env: local Nix PATH";
   const end = "# pi-env: end local Nix PATH";
-  const profiles = [".zshrc", ".bashrc", ".profile"].map(name => join(home, name));
+  const profiles = [".zshrc", ".bashrc", ".profile"].map((name) => join(home, name));
   const existing = profiles.filter(existsSync);
   for (const profile of existing.length ? existing : [join(home, ".profile")]) {
     const current = existsSync(profile) ? readFileSync(profile, "utf8") : "";
@@ -214,7 +200,8 @@ function ensureLocalNixPathInShellProfiles() {
       for (const [marker, path] of [
         ["# pi-env: add user-local bin to PATH", adapterPath],
         ["# pi-env: add local Nix toolchain to PATH", toolchainBin],
-      ]) migrated = migrated.replaceAll(`${marker}\nexport PATH="${path}:$PATH"\n`, "");
+      ])
+        migrated = migrated.replaceAll(`${marker}\nexport PATH="${path}:$PATH"\n`, "");
     }
     const block = `export PATH="${toolchainBin}:$PATH"\n# pi-env: add user-local bin to PATH\nexport PATH="${adapterPath}:$PATH"`;
     const next = reconcileManagedBlock(migrated, block, start, end);
@@ -234,7 +221,9 @@ function assertPiVersion(piPackageDir, version) {
   const source = process.env.PI_PACKAGE_DIR
     ? " PI_PACKAGE_DIR supplies it; update its provisioner (Home Manager: ./setup.sh --sync-home-manager)."
     : "";
-  fail(`Pi package version ${installedVersion} does not match the workbench (${version}).${source}`);
+  fail(
+    `Pi package version ${installedVersion} does not match the workbench (${version}).${source}`,
+  );
 }
 
 function installPiCli(policy) {
@@ -257,7 +246,8 @@ function installPiCli(policy) {
     return;
   }
   const piExecutable = process.env.PI_ENV_PI_EXECUTABLE
-    ? resolve(process.env.PI_ENV_PI_EXECUTABLE) : "";
+    ? resolve(process.env.PI_ENV_PI_EXECUTABLE)
+    : "";
   if (piExecutable && (!existsSync(piExecutable) || !statSync(piExecutable).isFile()))
     fail(`Pi executable is unavailable: ${piExecutable}`);
   writePiWrapper(piPackageDir, piPackageEntry, piExecutable);

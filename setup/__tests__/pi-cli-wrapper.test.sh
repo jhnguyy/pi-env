@@ -22,7 +22,7 @@ create_stub_repo() {
   REPO="$1/repo"
   PI_BIN_DIR="$1/bin"
   mkdir -p "$REPO/node_modules/@earendil-works/pi-coding-agent/$(dirname "$pi_entry")" \
-    "$REPO/.pi/extensions/session-manager/dist" "$PI_BIN_DIR"
+    "$REPO/extensions/session-manager/dist" "$PI_BIN_DIR"
   cat > "$REPO/package.json" <<'JSON'
 {
   "devDependencies": {
@@ -42,10 +42,10 @@ JSON
   cat > "$REPO/node_modules/@earendil-works/pi-coding-agent/$pi_entry" <<'JS'
 console.log('stub pi', JSON.stringify(process.argv.slice(2)))
 JS
-  cat > "$REPO/.pi/extensions/session-manager/dist/start.js" <<'JS'
+  cat > "$REPO/extensions/session-manager/dist/start.js" <<'JS'
 console.log('stub session manager start')
 JS
-  : > "$REPO/.pi/extensions/session-manager/dist/index.js"
+  : > "$REPO/extensions/session-manager/dist/index.js"
 }
 
 test_pi_cli_wrapper_uses_repo_locked_package() {

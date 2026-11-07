@@ -33,4 +33,4 @@ List and delete remain available if Pages becomes public, so you can remove expo
 
 After an interrupted or uncertain upload/delete, verify the named file with list or GitHub before retrying. A lost response does not mean the write failed.
 
-See the [GitHub adapter](../.pi/extensions/share/github.ts) for destination validation and listing limits, the [commands](../.pi/extensions/share/index.ts) for confirmation and export behavior, and the [settings boundary](../.pi/extensions/_shared/settings.ts) for configuration precedence.
+See the [GitHub adapter](../extensions/share/github.ts) for destination validation and listing limits, the [commands](../extensions/share/index.ts) for confirmation and export behavior, and the [settings boundary](../extensions/_shared/settings.ts) for configuration precedence.

@@ -432,7 +432,7 @@ function validateRepositoryLicense(repoRoot) {
   }
 
   const manifests = [join(repoRoot, "package.json")];
-  const extensionsPath = join(repoRoot, ".pi", "extensions");
+  const extensionsPath = join(repoRoot, "extensions");
   if (existsSync(extensionsPath)) {
     for (const entry of readdirSync(extensionsPath, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;

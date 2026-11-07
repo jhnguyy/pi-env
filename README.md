@@ -1,6 +1,6 @@
 # pi-env
 
-Personal [pi](https://github.com/badlogic/pi-mono) environment — extensions, skills, themes, and agent context as a dotfiles repo. Shared as a reference. Setups are inherently personalized.
+A [pi](https://github.com/badlogic/pi-mono) package of extensions, skills, and themes, with setup that installs it and its agent guidance for personal use. Shared as a reference. Setups are inherently personalized.
 
 ## Mission
 

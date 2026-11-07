@@ -80,7 +80,7 @@ export function loadExtensionManifest() {
   const configPath = join(root, "pi-build.config.json");
   const pkg = loadJson(packagePath);
   const config = loadJson(configPath);
-  const extensionsDir = normalizePackagePath(config.extensionsDir ?? ".pi/extensions");
+  const extensionsDir = normalizePackagePath(config.extensionsDir ?? "extensions");
   const packageExtensions = pkg.pi?.extensions ?? [];
   const workspacePaths = normalizedPathSet(pkg.workspaces ?? []);
   const extensions = packageExtensions

@@ -62,11 +62,9 @@ function fileExistsEffect(path: string): Effect.Effect<boolean> {
 }
 
 function extensionDirectoriesEffect(cwd: string): Effect.Effect<readonly string[]> {
-  return Effect.tryPromise(() =>
-    readdir(resolve(cwd, ".pi/extensions"), { withFileTypes: true }),
-  ).pipe(
+  return Effect.tryPromise(() => readdir(resolve(cwd, "extensions"), { withFileTypes: true })).pipe(
     Effect.map((entries) =>
-      entries.filter((entry) => entry.isDirectory()).map((entry) => `.pi/extensions/${entry.name}`),
+      entries.filter((entry) => entry.isDirectory()).map((entry) => `extensions/${entry.name}`),
     ),
     Effect.catch(() => Effect.succeed<readonly string[]>([])),
   );
@@ -110,7 +108,7 @@ export function discoverExtensionEntrypointsEffect(cwd: string): Effect.Effect<r
   return Effect.gen(function* () {
     const manifest = yield* readPackageManifestEffect(cwd);
     const registered = [...(manifest.pi?.extensions ?? []), ...(manifest.workspaces ?? [])].filter(
-      (extension) => /^\.pi\/extensions\/[^/]+$/.test(extension),
+      (extension) => /^extensions\/[^/]+$/.test(extension),
     );
     const discovered = yield* extensionDirectoriesEffect(cwd);
     const candidates = [
@@ -140,7 +138,7 @@ function scopedExtensionEntrypoints(
   const scoped = new Set<string>();
   for (const file of scope.files) {
     if (entrypointSet.has(file)) scoped.add(file);
-    const match = /^(\.pi\/extensions\/[^/]+)\//.exec(file);
+    const match = /^(extensions\/[^/]+)\//.exec(file);
     if (match !== null) {
       const entrypoint = `${match[1]}/index.ts`;
       if (entrypointSet.has(entrypoint)) scoped.add(entrypoint);

@@ -6,14 +6,14 @@ NODE_RUN="$ROOT_DIR/scripts/node-run.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-mkdir -p "$TMP_DIR/scripts" "$TMP_DIR/.pi/extensions/active/dist"
+mkdir -p "$TMP_DIR/scripts" "$TMP_DIR/extensions/active/dist"
 cp "$ROOT_DIR/scripts/extension-manifest.mjs" "$TMP_DIR/scripts/"
 cp "$ROOT_DIR/scripts/extension-contract.mjs" "$TMP_DIR/scripts/"
 cp "$ROOT_DIR/scripts/package-contract.mjs" "$TMP_DIR/scripts/"
 cp "$ROOT_DIR/scripts/install-contract.mjs" "$TMP_DIR/scripts/"
 cp "$ROOT_DIR/scripts/verify-install.mjs" "$TMP_DIR/scripts/"
 
-touch "$TMP_DIR/.pi/extensions/active/index.ts" "$TMP_DIR/.pi/extensions/active/dist/index.js"
+touch "$TMP_DIR/extensions/active/index.ts" "$TMP_DIR/extensions/active/dist/index.js"
 
 write_repo() {
   local active_manifest="$1"
@@ -21,17 +21,17 @@ write_repo() {
   if [ -z "$sidecars" ]; then sidecars="{}"; fi
   cat > "$TMP_DIR/package.json" <<JSON
 {
-  "workspaces": [".pi/extensions/active"],
-  "pi": { "extensions": [".pi/extensions/active"] }
+  "workspaces": ["extensions/active"],
+  "pi": { "extensions": ["extensions/active"] }
 }
 JSON
   cat > "$TMP_DIR/pi-build.config.json" <<JSON
 {
-  "extensionsDir": ".pi/extensions",
+  "extensionsDir": "extensions",
   "sidecars": $sidecars
 }
 JSON
-  cat > "$TMP_DIR/.pi/extensions/active/package.json" <<JSON
+  cat > "$TMP_DIR/extensions/active/package.json" <<JSON
 $active_manifest
 JSON
 }
@@ -85,11 +85,11 @@ write_repo '{ "name": "@test/active", "type": "module", "private": true, "pi": {
 const fs = require('node:fs');
 const path = process.argv[2];
 const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
-pkg.pi.extensions.push('./.pi/extensions/active');
+pkg.pi.extensions.push('./extensions/active');
 fs.writeFileSync(path, JSON.stringify(pkg));
 JS
 output="$(expect_verify_failure)"
-if grep -q 'duplicate active extension path: .pi/extensions/active' <<<"$output"; then
+if grep -q 'duplicate active extension path: extensions/active' <<<"$output"; then
   echo 'ok: duplicate extension registrations are rejected'
 else
   echo 'missing duplicate extension registration failure' >&2
@@ -106,22 +106,22 @@ else
 fi
 
 write_repo '{ "name": "@test/active", "type": "module", "private": true, "pi": { "extensions": ["./dist/index.js"] } }'
-mkdir -p "$TMP_DIR/.pi/extensions/playwright-client/dist" "$TMP_DIR/.pi/extensions/work-tracker/dist"
+mkdir -p "$TMP_DIR/extensions/playwright-client/dist" "$TMP_DIR/extensions/work-tracker/dist"
 touch \
-  "$TMP_DIR/.pi/extensions/playwright-client/index.ts" "$TMP_DIR/.pi/extensions/playwright-client/dist/index.js" \
-  "$TMP_DIR/.pi/extensions/work-tracker/index.ts" "$TMP_DIR/.pi/extensions/work-tracker/dist/index.js"
-cat > "$TMP_DIR/.pi/extensions/playwright-client/package.json" <<'JSON'
+  "$TMP_DIR/extensions/playwright-client/index.ts" "$TMP_DIR/extensions/playwright-client/dist/index.js" \
+  "$TMP_DIR/extensions/work-tracker/index.ts" "$TMP_DIR/extensions/work-tracker/dist/index.js"
+cat > "$TMP_DIR/extensions/playwright-client/package.json" <<'JSON'
 { "name": "@test/playwright-client", "type": "module", "private": true, "pi": { "extensions": ["./dist/index.js"] } }
 JSON
-cat > "$TMP_DIR/.pi/extensions/work-tracker/package.json" <<'JSON'
+cat > "$TMP_DIR/extensions/work-tracker/package.json" <<'JSON'
 { "name": "@test/work-tracker", "type": "module", "private": true, "pi": { "extensions": ["./dist/index.js"] } }
 JSON
 "$NODE_RUN" - "$TMP_DIR/package.json" <<'JS'
 const fs = require('node:fs');
 const path = process.argv[2];
 const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
-pkg.workspaces.push('.pi/extensions/playwright-client', '.pi/extensions/work-tracker');
-pkg.pi.extensions.push('.pi/extensions/playwright-client', '.pi/extensions/work-tracker');
+pkg.workspaces.push('extensions/playwright-client', 'extensions/work-tracker');
+pkg.pi.extensions.push('extensions/playwright-client', 'extensions/work-tracker');
 fs.writeFileSync(path, JSON.stringify(pkg));
 JS
 output="$(expect_verify_failure)"
@@ -135,22 +135,22 @@ fi
 
 cat > "$TMP_DIR/package.json" <<JSON
 {
-  "workspaces": [".pi/extensions/active", ".pi/extensions/workspace-only"],
-  "pi": { "extensions": [".pi/extensions/active"] }
+  "workspaces": ["extensions/active", "extensions/workspace-only"],
+  "pi": { "extensions": ["extensions/active"] }
 }
 JSON
-mkdir -p "$TMP_DIR/.pi/extensions/workspace-only"
+mkdir -p "$TMP_DIR/extensions/workspace-only"
 write_repo '{ "name": "@test/active", "type": "module", "private": true, "pi": { "extensions": ["./dist/index.js"] } }'
 # write_repo rewrites package.json; restore workspace-only mismatch.
 "$NODE_RUN" - "$TMP_DIR/package.json" <<'JS'
 const fs = require('node:fs');
 const path = process.argv[2];
 const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
-pkg.workspaces.push('.pi/extensions/workspace-only');
+pkg.workspaces.push('extensions/workspace-only');
 fs.writeFileSync(path, JSON.stringify(pkg));
 JS
 output="$(expect_verify_failure)"
-if grep -q 'workspace extension is not registered in package pi.extensions: .pi/extensions/workspace-only' <<<"$output"; then
+if grep -q 'workspace extension is not registered in package pi.extensions: extensions/workspace-only' <<<"$output"; then
   echo 'ok: workspace/root extension drift is rejected'
 else
   echo 'missing workspace drift failure' >&2

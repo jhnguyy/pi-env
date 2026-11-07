@@ -1,6 +1,6 @@
 # Testing
 
-Use the [testing-practices skill](../../.agents/skills/testing-practices/SKILL.md) for the portable method: prove the target unit's functional promises through useful input/output seams and rely on established collaborator contracts. The conventions here apply that method to pi-env's suites, fixtures, and runtime boundaries. [Contribution guidance](../../CONTRIBUTING.md#verification) owns commands, build sequencing, and execution precautions.
+Use the [testing-practices skill](../../skills/testing-practices/SKILL.md) for the portable method: prove the target unit's functional promises through useful input/output seams and rely on established collaborator contracts. The conventions here apply that method to pi-env's suites, fixtures, and runtime boundaries. [Contribution guidance](../../CONTRIBUTING.md#verification) owns commands, build sequencing, and execution precautions.
 
 ## Choose the suite and runtime
 

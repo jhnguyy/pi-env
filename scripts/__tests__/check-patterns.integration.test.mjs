@@ -34,7 +34,7 @@ describe("check-patterns", () => {
     ]);
     expect(
       analyzeText(
-        ".pi/extensions/_shared/errors.ts",
+        "extensions/_shared/errors.ts",
         "function formatError(error) { return String(error); }",
       ),
     ).toEqual([]);
@@ -59,7 +59,7 @@ describe("check-patterns", () => {
   it("requires active public tools to use the rendering registration boundary", () => {
     expect(
       analyzeText(
-        ".pi/extensions/review/index.ts",
+        "extensions/review/index.ts",
         "export default function extension(pi) { pi.registerTool({ name: 'review' }); }",
       ),
     ).toEqual([
@@ -69,7 +69,7 @@ describe("check-patterns", () => {
     ]);
     expect(
       analyzeText(
-        ".pi/extensions/review/index.ts",
+        "extensions/review/index.ts",
         "export default function extension(pi) { registerPublicTool(pi, reviewTool); }",
       ),
     ).toEqual([]);

@@ -22,14 +22,6 @@
       }
     ]
   },
-  "include": [
-    ".pi/extensions/**/*.ts",
-    ".agents/**/*.ts",
-    "src/**/*.ts",
-    "scripts/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    ".pi/extensions/*/dist"
-  ]
+  "include": ["extensions/**/*.ts", "skills/**/*.ts", "src/**/*.ts", "scripts/**/*.ts"],
+  "exclude": ["node_modules", "extensions/*/dist"]
 }

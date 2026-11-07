@@ -82,7 +82,7 @@ write_generation() {
 # Runs the real runtime stage sequence in a fresh errexit shell, as setup/main.sh does.
 run_setup_runtime() {
   env PATH="$STUB_DIR:$PATH" ROOT="$ROOT" REPO="${1:-$REPO_DIR}" TMP="$TMP" \
-    AGENTS_DIR="$TMP/home/.agents" XDG_CONFIG_HOME="$TMP/home/.config" \
+    XDG_CONFIG_HOME="$TMP/home/.config" \
     GHOSTTY_CONFIG_DIR="$TMP/home/.config/ghostty" \
     bash -euo pipefail -c '
       source "$ROOT/setup/lib.sh"
