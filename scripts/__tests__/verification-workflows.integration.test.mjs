@@ -130,9 +130,9 @@ it("defaults to units with the shipped test configuration", async ({ workspace }
 });
 
 test("selects no work for an empty delta and only formatting for documentation", () => {
-  expect(changedVerificationPlan({ base: "main", files: [], existing: [] })).toEqual([]);
+  expect(changedVerificationPlan({ base: "main", files: [], edited: [] })).toEqual([]);
   expect(
-    changedVerificationPlan({ base: "main", files: ["README.md"], existing: ["README.md"] }),
+    changedVerificationPlan({ base: "main", files: ["README.md"], edited: ["README.md"] }),
   ).toEqual([
     {
       label: "format:files",
@@ -147,7 +147,7 @@ test("selects source checks and related units without whole-project type analysi
     changedVerificationPlan({
       base: "main",
       files: ["src/feature/value.ts"],
-      existing: ["src/feature/value.ts"],
+      edited: ["src/feature/value.ts"],
     }),
   ).toEqual([
     {

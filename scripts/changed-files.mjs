@@ -17,7 +17,18 @@ export function changedFiles({ cwd = process.cwd(), base, env = process.env } = 
   const tracked = git("diff", "--name-only", "--no-renames", "-z", mergeBase, "--");
   const untracked = git("ls-files", "--others", "--exclude-standard", "-z");
   const files = [...new Set(`${tracked}\0${untracked}`.split("\0").filter(Boolean))].sort();
-  const existing = files.filter((file) => {
+  // Content-only checks judge content the change introduced; an identical rename introduces
+  // none. Path-dependent checks still need the destination, so report renames separately.
+  const fields = git("diff", "--name-status", "--diff-filter=R", "-M100%", "-z", mergeBase, "--")
+    .split("\0")
+    .filter(Boolean);
+  const renames = [];
+  for (let index = 0; index + 2 < fields.length; index += 3) {
+    renames.push({ from: fields[index + 1], to: fields[index + 2] });
+  }
+  const renamed = new Set(renames.map(({ to }) => to));
+  const edited = files.filter((file) => {
+    if (renamed.has(file)) return false;
     try {
       return statSync(`${cwd}/${file}`).isFile();
     } catch (error) {
@@ -25,5 +36,5 @@ export function changedFiles({ cwd = process.cwd(), base, env = process.env } = 
       throw error;
     }
   });
-  return { base: mergeBase, files, existing };
+  return { base: mergeBase, files, edited, renames };
 }

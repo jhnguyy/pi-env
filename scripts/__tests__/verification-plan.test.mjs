@@ -23,7 +23,7 @@ it("selects unit evidence for the owner and leaves qualification explicitly sele
   ];
   const cwd = workspace(files);
   const plan = changedVerificationPlan(
-    { base: "main", files: ["src/feature/input.json"], existing: [] },
+    { base: "main", files: ["src/feature/input.json"], edited: [] },
     { cwd },
   );
   expect(plan).toEqual([
@@ -48,7 +48,7 @@ it("selects unit evidence for the owner and leaves qualification explicitly sele
 
 it("retains deleted inputs for reverse import selection without checking absent source", () => {
   const plan = changedVerificationPlan(
-    { base: "main", files: ["src/feature/removed.ts"], existing: [] },
+    { base: "main", files: ["src/feature/removed.ts"], edited: [] },
     { cwd: workspace(["src/feature/__tests__/unrelated.test.ts"]) },
   );
   expect(plan).toEqual([
@@ -102,7 +102,7 @@ it("reports global runtime inputs without treating documentation or component so
 it("uses reverse imports for shared source rather than adding every extension suite", () => {
   expect(
     changedVerificationPlan(
-      { base: "main", files: [".pi/extensions/_shared/value.ts"], existing: [] },
+      { base: "main", files: [".pi/extensions/_shared/value.ts"], edited: [] },
       { cwd: workspace([".pi/extensions/feature/__tests__/unrelated.test.ts"]) },
     ),
   ).toEqual([
@@ -128,7 +128,7 @@ it.each([false, true])(
   (checksOnly) => {
     expect(
       changedVerificationPlan(
-        { base: "main", files: ["setup/input.json"], existing: [] },
+        { base: "main", files: ["setup/input.json"], edited: [] },
         { cwd: workspace([]), checksOnly },
       ),
     ).toEqual([]);
