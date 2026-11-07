@@ -55,7 +55,7 @@ import {
   type Scope,
 } from "../scope.js";
 import { resolveNodeCommand } from "../../process/platform.js";
-import { testTempDirSync } from "../../testing/temp-dir";
+import * as TempDir from "../../testing/temp-dir";
 
 const allScope: Scope = { mode: ScopeMode.All, files: [], hunks: new Map() };
 const pathScope = (
@@ -64,7 +64,7 @@ const pathScope = (
 ): Scope => ({ mode: ScopeMode.Paths, files, hunks });
 const node = resolveNodeCommand();
 function fixtureRoot(): string {
-  return testTempDirSync("pi-analyze-");
+  return TempDir.forTestSync("pi-analyze-");
 }
 const zeroRuntime = {
   now: () => 0,

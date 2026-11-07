@@ -3,12 +3,12 @@ import * as Path from "node:path";
 import { getAgentDir, ProjectTrustStore } from "@earendil-works/pi-coding-agent";
 import { expect, it, vi } from "vitest";
 import * as Resolver from "../resolver";
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 
 // Canonical path and session-only decisions are not independently configurable
 // through the SDK's persisted trust UI in print-mode integration tests.
 it("limits session trust to the canonical parent cwd and honors saved target decisions", () => {
-  const root = testTempDirSync("native-target-trust-");
+  const root = TempDir.forTestSync("native-target-trust-");
   vi.stubEnv("PI_CODING_AGENT_DIR", Path.join(root, "agent"));
   try {
     const parent = Path.join(root, "parent");

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, onTestFinished } from "vitest";
 
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import { resolveNodeCommand } from "../../../../src/process/platform";
 import { LspBackend } from "../backend";
 
@@ -27,7 +27,7 @@ function testBackend(countFile: string): LspBackend {
 
 describe("LspBackend lifecycle", () => {
   it("coalesces a real LSP lifetime, recovers semantic health, releases and restarts cleanly", async () => {
-    const root = testTempDirSync("pi-dev-tools-backend-");
+    const root = TempDir.forTestSync("pi-dev-tools-backend-");
     const countFile = join(root, "starts");
     const backend = testBackend(countFile);
     onTestFinished(() => backend.shutdown());

@@ -3,7 +3,7 @@ import { rmSync } from "node:fs";
 import { execSync } from "node:child_process";
 
 import { getActiveWorktrees, invalidateGitCache, buildStatusLine } from "../context";
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -12,7 +12,7 @@ function git(repo: string, cmd: string): void {
 }
 
 function makeRepo(): string {
-  const dir = testTempDirSync("wt-ctx-test-");
+  const dir = TempDir.forTestSync("wt-ctx-test-");
   git(dir, "init -b main");
   git(dir, 'config user.email "test@test.com"');
   git(dir, 'config user.name "Test"');
@@ -37,7 +37,7 @@ describe("getActiveWorktrees", () => {
   });
 
   it("returns branch name of a single extra worktree", () => {
-    const wtDir = testTempDirSync("wt-extra-");
+    const wtDir = TempDir.forTestSync("wt-extra-");
     rmSync(wtDir, { recursive: true, force: true }); // git worktree add creates it
     git(repo, `worktree add -b feat/foo ${wtDir}`);
     invalidateGitCache();
@@ -46,8 +46,8 @@ describe("getActiveWorktrees", () => {
   });
 
   it("returns all extra worktree branches", () => {
-    const wt1 = testTempDirSync("wt-a-");
-    const wt2 = testTempDirSync("wt-b-");
+    const wt1 = TempDir.forTestSync("wt-a-");
+    const wt2 = TempDir.forTestSync("wt-b-");
     rmSync(wt1, { recursive: true, force: true });
     rmSync(wt2, { recursive: true, force: true });
     git(repo, `worktree add -b feat/foo ${wt1}`);
@@ -60,7 +60,7 @@ describe("getActiveWorktrees", () => {
   });
 
   it("caches — returns same result on repeated calls without invalidation", () => {
-    const wt = testTempDirSync("wt-extra-");
+    const wt = TempDir.forTestSync("wt-extra-");
     rmSync(wt, { recursive: true, force: true });
     git(repo, `worktree add -b feat/foo ${wt}`);
     invalidateGitCache();
@@ -75,7 +75,7 @@ describe("getActiveWorktrees", () => {
   });
 
   it("re-fetches after invalidateGitCache", () => {
-    const wt = testTempDirSync("wt-extra-");
+    const wt = TempDir.forTestSync("wt-extra-");
     rmSync(wt, { recursive: true, force: true });
     git(repo, `worktree add -b feat/foo ${wt}`);
     invalidateGitCache();
@@ -108,7 +108,7 @@ describe("buildStatusLine", () => {
   });
 
   it("shows worktrees when present, omits branch name", () => {
-    const wt = testTempDirSync("wt-bl-");
+    const wt = TempDir.forTestSync("wt-bl-");
     rmSync(wt, { recursive: true, force: true });
     git(repo, `worktree add -b feat/foo ${wt}`);
     invalidateGitCache();
@@ -130,7 +130,7 @@ describe("buildStatusLine", () => {
   });
 
   it("shows both worktrees and dirty warning when both apply", () => {
-    const wt = testTempDirSync("wt-both-");
+    const wt = TempDir.forTestSync("wt-both-");
     rmSync(wt, { recursive: true, force: true });
     git(repo, `worktree add -b feat/foo ${wt}`);
     execSync(`touch ${repo}/newfile.txt`);

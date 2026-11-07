@@ -11,7 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, expect } from "vitest";
 import share, { type ShareFiles } from "../index";
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 
 const run = promisify(execFile);
 const piCli = join(
@@ -56,7 +56,7 @@ export const exampleShare = {
 export function fixture(...repositories: unknown[]) {
   if (repositories.length === 0) repositories.push(privateRepository);
   let checks = 0;
-  const root = testTempDirSync("pi-share-test-");
+  const root = TempDir.forTestSync("pi-share-test-");
   const settings = join(root, "settings.json");
   const projectSettings = join(root, "project-settings.json");
   writeFileSync(settings, JSON.stringify({ theme: "dark" }));

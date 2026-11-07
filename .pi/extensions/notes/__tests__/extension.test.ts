@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { testTempDir } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -184,7 +184,7 @@ describe("notes extension", () => {
     expect(() => resolveNotesProvider("notes-assistant")).toThrow("not registered");
   });
   it("registers the configured Obsidian provider as a native Pi tool", async () => {
-    const root = await testTempDir("pi-notes-extension-");
+    const root = await TempDir.forTest("pi-notes-extension-");
     const vault = path.join(root, "vault");
     await mkdir(vault);
     const testHarness = harness();

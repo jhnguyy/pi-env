@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import { LspBackend, LspBackendError, lspRequestTimeoutMs } from "../backend";
 import type { LspBackendConfig } from "../backend-configs";
 import { LSP_REQUEST_TIMEOUT_MS, LSP_SEMANTIC_REQUEST_TIMEOUT_MS } from "../timeouts";
@@ -50,7 +50,7 @@ describe("LSP backend request/root behavior", () => {
   });
 
   it("prefers an ancestor tsconfig/json config root over a nearer package marker", () => {
-    const root = testTempDirSync("pi-lsp-root-");
+    const root = TempDir.forTestSync("pi-lsp-root-");
     const pkg = join(root, "packages", "leaf");
     mkdirSync(join(pkg, "src"), { recursive: true });
     writeFileSync(join(root, "tsconfig.json"), "{}", "utf8");

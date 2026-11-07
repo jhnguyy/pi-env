@@ -6,13 +6,13 @@ import { onTestFinished } from "vitest";
 
 // Call from a test or beforeEach. Vitest runs onTestFinished callbacks in reverse order, so
 // create the directory before registering cleanup for processes or sessions that use it.
-export async function testTempDir(prefix = "pi-env-test-"): Promise<string> {
+export async function forTest(prefix = "pi-env-test-"): Promise<string> {
   const dir = await mkdtempDisposable(join(tmpdir(), prefix));
   onTestFinished(() => dir[Symbol.asyncDispose]());
   return dir.path;
 }
 
-export function testTempDirSync(prefix = "pi-env-test-"): string {
+export function forTestSync(prefix = "pi-env-test-"): string {
   const dir = mkdtempDisposableSync(join(tmpdir(), prefix));
   onTestFinished(() => dir[Symbol.dispose]());
   return dir.path;

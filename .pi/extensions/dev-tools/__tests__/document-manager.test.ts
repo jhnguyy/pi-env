@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DocumentManager } from "../document-manager";
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -13,7 +13,7 @@ describe("DocumentManager", () => {
   let dm: DocumentManager;
 
   beforeEach(() => {
-    tmpDir = testTempDirSync("lsp-dm-");
+    tmpDir = TempDir.forTestSync("lsp-dm-");
     dm = new DocumentManager(testResolveLanguageId, () => tmpDir);
   });
 

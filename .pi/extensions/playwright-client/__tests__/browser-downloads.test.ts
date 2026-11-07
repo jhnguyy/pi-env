@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserClient, type BrowserLike, type PlaywrightLoader } from "../browser";
 import type { BrowserClientConfig } from "../config";
 import type { LocatorLike, PageLike } from "../locators";
-import { testTempDir } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 
 describe("BrowserClient downloads with a fake browser", () => {
   let artifactDir: string;
@@ -14,7 +14,7 @@ describe("BrowserClient downloads with a fake browser", () => {
   let loadPlaywright: PlaywrightLoader;
 
   beforeEach(async () => {
-    artifactDir = await testTempDir("pi-browser-test-");
+    artifactDir = await TempDir.forTest("pi-browser-test-");
     page = fakePage();
     connectOverCDP = vi.fn(async () => fakeBrowser(page));
     loadPlaywright = async () => ({ chromium: { connectOverCDP } });

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { BrowserClient } from "../browser";
 import { loadBrowserClientConfig } from "../config";
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 
 const BROWSER_ENV_KEYS = [
   "PI_BROWSER_PROFILE",
@@ -136,7 +136,7 @@ function clearBrowserEnv(): void {
 }
 
 function tempProject(settings?: Record<string, unknown>): string {
-  const dir = testTempDirSync("pi-env-browser-config-");
+  const dir = TempDir.forTestSync("pi-env-browser-config-");
   if (settings) {
     mkdirSync(join(dir, ".pi"), { recursive: true });
     writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify(settings));

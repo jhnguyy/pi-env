@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { testTempDir } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -28,7 +28,7 @@ type NativeContext = Pick<ExtensionContext, "mode" | "cwd" | "shutdown"> & {
 };
 
 export async function createExtensionFixture() {
-  const root = await testTempDir("session-extension-");
+  const root = await TempDir.forTest("session-extension-");
   let close = async () => {};
   onTestFinished(async () => {
     const failures: unknown[] = [];

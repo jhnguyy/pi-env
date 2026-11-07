@@ -9,10 +9,10 @@ import {
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
-import { testTempDir } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 
 it("loads the built get-only extension and natively discovers and expands the review skill", async () => {
-  const root = await testTempDir("native-review-context-");
+  const root = await TempDir.forTest("native-review-context-");
   const agentDir = join(root, "agent");
   let session: AgentSession | undefined;
   const failures: unknown[] = [];

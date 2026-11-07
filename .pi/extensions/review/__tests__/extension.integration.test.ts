@@ -8,7 +8,7 @@ import type {
 import { Check } from "typebox/value";
 import { expect, it, vi } from "vitest";
 import reviewExtension from "../index";
-import { testTempDir } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 
 const url = "https://github.com/o/r/pull/1";
 function fixture() {
@@ -175,7 +175,7 @@ it("supports only get [url] in the slash command and reports needs_url separatel
 });
 
 it("leaves isolated historical artifacts and session entries inert", async () => {
-  const root = await testTempDir("review-retirement-");
+  const root = await TempDir.forTest("review-retirement-");
   vi.stubEnv("PI_CODING_AGENT_DIR", root);
   try {
     const artifact = join(root, "pr-review", "artifacts", "historical", "state.json");

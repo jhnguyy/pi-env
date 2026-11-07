@@ -3,7 +3,7 @@ import { existsSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import { closeoutPullRequest, parseCloseoutArgs, type CloseoutRequest } from "../closeout";
 
 const ok = (stdout = ""): ExecResult => ({
@@ -19,7 +19,7 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 function createCloseoutFixture() {
-  const root = testTempDirSync("pi-closeout-test-");
+  const root = TempDir.forTestSync("pi-closeout-test-");
   const repo = join(root, "repo");
   const origin = join(root, "origin.git");
   execFileSync("git", ["init", "--initial-branch=main", repo], { encoding: "utf8" });

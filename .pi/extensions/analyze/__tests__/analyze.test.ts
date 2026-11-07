@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ScopeMode, type AnalysisResult } from "../../../../src/analyze/model";
 import { createAnalyzeTool } from "../index";
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 
 const result: AnalysisResult = {
   version: 1,
@@ -40,7 +40,7 @@ const execute = async (
 
 describe("analyze tool", () => {
   it("points the engine at the requested worktree and keeps output compact", async () => {
-    const worktree = testTempDirSync("analyze-tool-");
+    const worktree = TempDir.forTestSync("analyze-tool-");
     const { output, runner } = await execute({
       worktree,
       scope: ScopeMode.Diff,
@@ -73,7 +73,7 @@ describe("analyze tool", () => {
   });
 
   it("fails closed when public checks are omitted", async () => {
-    const worktree = testTempDirSync("analyze-tool-");
+    const worktree = TempDir.forTestSync("analyze-tool-");
     const tool = createAnalyzeTool();
     const output = await tool.execute(
       "call",
@@ -102,7 +102,7 @@ describe("analyze tool", () => {
   });
 
   it("reports paths scope without paths through the public policy", async () => {
-    const worktree = testTempDirSync("analyze-tool-");
+    const worktree = TempDir.forTestSync("analyze-tool-");
     const tool = createAnalyzeTool();
     const output = await tool.execute(
       "call",

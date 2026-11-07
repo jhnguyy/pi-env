@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { testTempDir } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import { expect, it, onTestFinished } from "vitest";
 import { startBindingLockOwner } from "./binding-lock-fixture.js";
 
@@ -8,7 +8,7 @@ import { startBindingLockOwner } from "./binding-lock-fixture.js";
 it("releases the kernel lock when its owning process is killed", async ({ task }) => {
   // Share the configured integration budget across acquisitions and reserve time for cleanup.
   const readinessDeadline = performance.now() + Math.max(0, task.timeout - 5_000);
-  const root = await testTempDir("pi-binding-lock-");
+  const root = await TempDir.forTest("pi-binding-lock-");
   const owners: ReturnType<typeof startBindingLockOwner>[] = [];
   onTestFinished(async () => {
     const results = await Promise.allSettled(owners.map((owner) => owner.stop()));

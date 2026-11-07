@@ -5,7 +5,7 @@ import { Effect, Fiber, Result } from "effect";
 import { describe, expect, it, live } from "@effect/vitest";
 import { onTestFinished } from "vitest";
 import { ProcessFailureKind, resolveNodeCommand, runProcess, streamProcess } from "../platform";
-import { testTempDirSync } from "../../testing/temp-dir";
+import * as TempDir from "../../testing/temp-dir";
 
 const node = resolveNodeCommand();
 
@@ -155,7 +155,7 @@ describe("process platform streamProcess", () => {
   it.runIf(process.platform !== "win32")(
     "awaits process-tree cleanup before rejecting combined overflow",
     async () => {
-      const root = testTempDirSync("pi-process-overflow-");
+      const root = TempDir.forTestSync("pi-process-overflow-");
       const pidPaths = [join(root, "parent.pid"), join(root, "child.pid")];
       const controller = new AbortController();
       const running = Effect.runPromise(
@@ -231,7 +231,7 @@ describe("process platform streamProcess", () => {
   ])(
     "$name",
     async ({ ignoreTerm }) => {
-      const directory = testTempDirSync("pi-process-interrupt-");
+      const directory = TempDir.forTestSync("pi-process-interrupt-");
       let fiber: Fiber.Fiber<unknown, unknown> | undefined;
       onTestFinished(async () => {
         if (fiber) await Effect.runPromise(Fiber.interrupt(fiber));
@@ -255,7 +255,7 @@ describe("process platform streamProcess", () => {
     "terminates a ready TERM-ignoring POSIX descendant after its parent closes",
     () =>
       Effect.gen(function* () {
-        const directory = testTempDirSync("pi-process-tree-");
+        const directory = TempDir.forTestSync("pi-process-tree-");
         const marker = join(directory, "marker");
         const childPidFile = join(directory, "child-pid");
         const script = join(directory, "parent.mjs");

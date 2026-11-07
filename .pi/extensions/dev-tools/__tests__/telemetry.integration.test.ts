@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import { resolveNodeCommand } from "../../../../src/process/platform";
 import { createToolingTelemetryRuntime } from "../../../../src/telemetry/tooling";
 import { LspBackend } from "../backend";
@@ -126,7 +126,7 @@ function assertSafeSpans(finished: ReadableSpan[], sentinels: string[]): void {
 
 describe("dev-tools tooling telemetry", () => {
   it("emits backend lifecycle fields and excludes supplied path and parameter sentinels", async () => {
-    const root = testTempDirSync("dev-tools-secret-path-");
+    const root = TempDir.forTestSync("dev-tools-secret-path-");
     const pathSentinel = join(root, "private-file.ts");
     const paramsSentinel = "private-request-params";
     const finished: ReadableSpan[] = [];
@@ -180,7 +180,7 @@ describe("dev-tools tooling telemetry", () => {
   });
 
   it("emits daemon outcome and parent fields and excludes supplied sentinels", async () => {
-    const root = testTempDirSync("dev-tools-daemon-otel-");
+    const root = TempDir.forTestSync("dev-tools-daemon-otel-");
     const socketPath = join(root, "daemon.sock");
     const pidPath = join(root, "daemon.pid");
     const privateFile = join(root, "private-file.ts");
