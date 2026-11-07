@@ -30,9 +30,9 @@ import {
   parseAnalyzeWorkerEvent,
   parseAnalyzeWorkerRequest,
 } from "../protocol.js";
-import { testTempDirSync } from "../../testing/temp-dir";
+import * as TempDir from "../../testing/temp-dir";
 
-const fixtureRoot = (): string => testTempDirSync("pi-analyze-diagnostics-");
+const fixtureRoot = (): string => TempDir.forTestSync("pi-analyze-diagnostics-");
 
 function event(
   runId: string,

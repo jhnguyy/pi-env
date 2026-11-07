@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { testTempDir } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { OpenSessionRecord } from "../contracts.js";
@@ -9,7 +9,7 @@ import { SessionHostFailure, type CurrentWindow, type SessionHostShape } from ".
 import { createFileSessionCatalog } from "../storage.js";
 
 async function fixture() {
-  const root = await testTempDir("session-coordinator-");
+  const root = await TempDir.forTest("session-coordinator-");
   const cwd = join(root, "workspace");
   await mkdir(cwd);
   return { root, cwd, catalog: createFileSessionCatalog(join(root, "agent")) };

@@ -1,7 +1,7 @@
 import { lstat, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { testTempDir } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import { handleRename, type RenameBackend, type RenameHandlerDeps } from "../handlers";
 import { pathToUri } from "../utils";
 import { applyWorkspaceEdit } from "../workspace-edit";
@@ -21,7 +21,7 @@ describe("rename action", () => {
   let usageContent: string;
 
   beforeEach(async () => {
-    root = await testTempDir("dev-tools-rename-");
+    root = await TempDir.forTest("dev-tools-rename-");
     declarationPath = join(root, "declaration.ts");
     usagePath = join(root, "usage.ts");
     declarationContent = 'export const userName = "Ada";\n';
@@ -373,7 +373,7 @@ describe("rename action", () => {
   });
 
   it("rejects a mixed in-scope and out-of-scope edit without partial writes", async () => {
-    const outsideRoot = await testTempDir("dev-tools-rename-outside-");
+    const outsideRoot = await TempDir.forTest("dev-tools-rename-outside-");
     const outsidePath = join(outsideRoot, "outside.ts");
     const outsideContent = "console.log(userName);\n";
     await writeFile(outsidePath, outsideContent, "utf8");
@@ -403,7 +403,7 @@ describe("rename action", () => {
   });
 
   it("rejects a symlink escape without writes", async () => {
-    const outsideRoot = await testTempDir("dev-tools-rename-symlink-");
+    const outsideRoot = await TempDir.forTest("dev-tools-rename-symlink-");
     const outsideTarget = join(outsideRoot, "target.ts");
     const linkPath = join(root, "escape.ts");
     await writeFile(outsideTarget, declarationContent, "utf8");
@@ -433,7 +433,7 @@ describe("rename action", () => {
   });
 
   it("rejects an allowed symlink whose real target has an unsupported backend before writes", async () => {
-    const secondRoot = await testTempDir("dev-tools-rename-symlink-backend-");
+    const secondRoot = await TempDir.forTest("dev-tools-rename-symlink-backend-");
     const realTarget = join(secondRoot, "target.ts");
     const linkPath = join(root, "cross-backend-link.ts");
     await writeFile(realTarget, declarationContent, "utf8");

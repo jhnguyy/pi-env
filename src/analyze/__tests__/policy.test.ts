@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { AnalyzerName, ScopeMode } from "../model.js";
 import { ANALYZE_LIMITS, classifyAnalyzeRequest, type PublicAnalyzeRequest } from "../policy.js";
-import { testTempDirSync } from "../../testing/temp-dir";
+import * as TempDir from "../../testing/temp-dir";
 
-const fixtureRoot = (): string => testTempDirSync("pi-analyze-policy-");
+const fixtureRoot = (): string => TempDir.forTestSync("pi-analyze-policy-");
 
 describe("safe analyze policy", () => {
   it("parses safe checks with diff or bounded relative paths", () => {

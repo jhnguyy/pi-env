@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { expect, it } from "vitest";
-import { testTempDir } from "../../testing/temp-dir";
+import * as TempDir from "../../testing/temp-dir";
 
 it("reports duplicate functions through a deep expression with a constrained stack", async () => {
-  const directory = await testTempDir("analyze-stack-depth-");
+  const directory = await TempDir.forTest("analyze-stack-depth-");
   // Keep installed packages external without loading the Pi SDK or LSP.
   await symlink(
     fileURLToPath(new URL("../../../node_modules", import.meta.url)),

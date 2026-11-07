@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import { noopToolingTelemetryRuntime } from "../../../../src/telemetry/tooling";
 import { LspDaemon } from "../daemon";
 import { parseResponse, serializeRequest, type DaemonResponse } from "../protocol";
@@ -62,7 +62,7 @@ describe("daemon socket lifecycle", () => {
   const sockets: Socket[] = [];
 
   beforeEach(() => {
-    root = testTempDirSync("daemon-socket-");
+    root = TempDir.forTestSync("daemon-socket-");
     socketPath = join(root, "daemon.sock");
     pidPath = join(root, "daemon.pid");
     backend = new ControlledBackend(root);

@@ -7,9 +7,9 @@ import { ANALYZE_LIMITS, type SafeAnalyzeRequest } from "../policy.js";
 import { runPublicAnalyze } from "../public.js";
 import { superviseAnalyze } from "../supervisor.js";
 import { AnalyzeDiagnosticEventType, AnalyzeSpanName } from "../diagnostics.js";
-import { testTempDirSync } from "../../testing/temp-dir";
+import * as TempDir from "../../testing/temp-dir";
 
-const fixtureRoot = (): string => testTempDirSync("pi-analyze-supervisor-");
+const fixtureRoot = (): string => TempDir.forTestSync("pi-analyze-supervisor-");
 const disabledEnv = { PI_ENV_ANALYZE_JOURNAL_ENABLED: "false" } as const;
 
 type PathsSafeRequest = Extract<SafeAnalyzeRequest, { readonly scope: typeof ScopeMode.Paths }>;

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import { createDaemonRequestExecutor } from "../daemon-request";
 import { FileCache } from "../file-cache";
 import type { DaemonRequest, DaemonResponse, LspResult } from "../protocol";
@@ -39,7 +39,7 @@ describe("parsed daemon requests", () => {
   };
 
   beforeEach(() => {
-    root = testTempDirSync("daemon-request-");
+    root = TempDir.forTestSync("daemon-request-");
     backend = new ControlledBackend(root);
     execute = createDaemonRequestExecutor({
       backends: [backend],

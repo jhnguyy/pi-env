@@ -1,9 +1,9 @@
 import { join } from "node:path";
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import type { Exec } from "../host.js";
 
 export function testSocket(): string {
-  const root = testTempDirSync("pi-session-host-");
+  const root = TempDir.forTestSync("pi-session-host-");
   return join(root, "tmux.sock");
 }
 

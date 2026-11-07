@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import {
   applyCleanupPlan,
   buildCleanupPlan,
@@ -18,7 +18,7 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 function createCleanupFixture() {
-  const root = testTempDirSync("pi-cleanup-test-");
+  const root = TempDir.forTestSync("pi-cleanup-test-");
   const repo = join(root, "repo");
   execFileSync("git", ["init", "--initial-branch=main", repo], { encoding: "utf8" });
   git(repo, "config", "user.email", "test@example.com");

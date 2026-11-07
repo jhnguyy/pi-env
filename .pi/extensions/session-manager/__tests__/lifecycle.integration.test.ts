@@ -1,6 +1,6 @@
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { testTempDir } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import type { SessionManifest } from "../contracts.js";
@@ -30,7 +30,7 @@ const host: SessionHostShape = {
 };
 
 async function fixture() {
-  const root = await testTempDir("session-lifecycle-");
+  const root = await TempDir.forTest("session-lifecycle-");
   const cwd = join(root, "workspace");
   await mkdir(cwd);
   const catalog = createFileSessionCatalog(join(root, "agent"));

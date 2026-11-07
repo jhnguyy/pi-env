@@ -3,7 +3,7 @@ import { componentText, expansionHints } from "../../__tests__/rendering";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Effect, Fiber } from "effect";
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import webContextExtension, {
   WebFetchFailureKind,
@@ -29,7 +29,7 @@ import {
 } from "../openai-tools";
 
 function settingsProject(): string {
-  const root = testTempDirSync("web-context-test-");
+  const root = TempDir.forTestSync("web-context-test-");
   vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
   return root;
 }

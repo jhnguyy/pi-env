@@ -4,11 +4,11 @@ import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { expect, it } from "vitest";
 import * as ChildContext from "../_shared/child-context";
-import { testTempDir } from "../../../src/testing/temp-dir";
+import * as TempDir from "../../../src/testing/temp-dir";
 
 // SDK factory tests cover normal loading; separately bundled module identity is the gap here.
 it("shares creation context across bundles and restores nested, failed, and concurrent scopes", async () => {
-  const root = await testTempDir("child-context-bundles-");
+  const root = await TempDir.forTest("child-context-bundles-");
   const bundle = await build({
     entryPoints: [resolve(".pi/extensions/_shared/child-context.ts")],
     bundle: true,

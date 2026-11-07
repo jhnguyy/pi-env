@@ -2,11 +2,11 @@ import { realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as Resolver from "../resolver";
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 // Invalid paths must fail before native child initialization.
 describe("subagent cwd validation", () => {
   it("canonicalizes explicit and implicit cwd, validating only explicit paths", () => {
-    const dir = testTempDirSync("pi-subagent-cwd-");
+    const dir = TempDir.forTestSync("pi-subagent-cwd-");
     const alias = join(dir, "alias");
     symlinkSync(dir, alias, "dir");
     const ok = Resolver.resolveEffectiveCwd({ task: "x", cwd: alias }, "/missing/default");

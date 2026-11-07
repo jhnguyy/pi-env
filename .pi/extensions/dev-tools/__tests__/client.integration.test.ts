@@ -7,7 +7,7 @@ import { it as effectIt } from "@effect/vitest";
 import { Deferred, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 import {
   ClientClosedError,
   ClientTransportError,
@@ -122,7 +122,7 @@ describe("LspClient", () => {
   let clients: LspClient[];
 
   beforeEach(() => {
-    tmpDir = testTempDirSync("lsp-c-");
+    tmpDir = TempDir.forTestSync("lsp-c-");
     socketPath = join(tmpDir, "t.sock");
     server = null;
     serverConnections = 0;

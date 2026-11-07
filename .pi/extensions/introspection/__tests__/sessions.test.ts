@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { testTempDirSync } from "../../../../src/testing/temp-dir";
+import * as TempDir from "../../../../src/testing/temp-dir";
 
 import { assertUnderSessionDir, formatDigestList, listSessionDigests } from "../sessions";
 
@@ -10,7 +10,7 @@ function lines(...entries: object[]): string[] {
 }
 
 function temporarySessionDir(): string {
-  return testTempDirSync("introspection-sessions-");
+  return TempDir.forTestSync("introspection-sessions-");
 }
 
 function digestLines(entries: string[], filename: string) {
