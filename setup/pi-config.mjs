@@ -1,10 +1,6 @@
 import { join } from "node:path";
 import { Effect } from "effect";
-import {
-  managedFileEffect,
-  removeEmptyDirectoryEffect,
-  removeOwnedLinkEffect,
-} from "./file-ops.mjs";
+import { managedFileEffect } from "./file-ops.mjs";
 import { changed, displayPath, ok, section } from "./report.mjs";
 
 const ManagedFiles = Object.freeze([
@@ -21,21 +17,6 @@ const ManagedFiles = Object.freeze([
   },
 ]);
 
-// Earlier setup versions created these paths. Entries without a source are directories.
-function obsoletePaths(ctx) {
-  const testLinks = join(ctx.agentDir, "extensions/__tests__");
-  return [
-    { target: join(ctx.agentsDir, "roles"), source: ".agents/roles" },
-    { target: join(testLinks, "loader.test.ts"), source: ".pi/extensions/__tests__/loader.test.ts" },
-    { target: join(testLinks, "test-utils.ts"), source: ".pi/extensions/__tests__/test-utils.ts" },
-    { target: testLinks },
-  ];
-}
-
-function checkoutPaths(ctx, relativePath) {
-  return [join(ctx.repo, relativePath), join(ctx.sourceRoot, relativePath)];
-}
-
 export function configurePiEffect(ctx) {
   return Effect.gen(function* () {
     section("Pi");
@@ -47,12 +28,6 @@ export function configurePiEffect(ctx) {
         blocks.map(({ name, source }) => ({ name, source: join(ctx.sourceRoot, source) })),
         displayPath(target, ctx.home),
       );
-    }
-    for (const { target, source } of obsoletePaths(ctx)) {
-      const label = displayPath(target, ctx.home);
-      yield* source
-        ? removeOwnedLinkEffect(checkoutPaths(ctx, source), target, label)
-        : removeEmptyDirectoryEffect(target, label);
     }
   });
 }

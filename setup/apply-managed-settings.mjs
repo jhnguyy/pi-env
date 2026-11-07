@@ -4,12 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { DefaultPackageManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import {
-  applyManagedSettings,
-  initialSettings,
-  parseJsonRelaxedText,
-  renderSettings,
-} from "./managed-settings-core.mjs";
+import { applyManagedSettings, initialSettings, renderSettings } from "./managed-settings-core.mjs";
 
 const [settingsFile, repoPath, mode] = process.argv.slice(2);
 const reset = mode === "--reset";
@@ -24,9 +19,11 @@ if (path.basename(settingsFile) !== "settings.json") {
   throw new Error(`settings file must be named settings.json: ${settingsFile}`);
 }
 
-function parseJsonRelaxed(file) {
+// Match Pi's settings reader: empty means no settings, and a leading BOM is ignored.
+function readJson(file) {
   if (!fs.existsSync(file)) return {};
-  return parseJsonRelaxedText(fs.readFileSync(file, "utf8"));
+  const text = fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+  return text.trim() === "" ? {} : JSON.parse(text);
 }
 
 function assertValidPackageSources(settings) {
@@ -65,8 +62,8 @@ const settingsExisted = fs.existsSync(settingsFile);
 const before = settingsExisted ? fs.readFileSync(settingsFile, "utf8") : "";
 const baseSettings =
   reset || !settingsExisted
-    ? initialSettings(parseJsonRelaxed(path.join(path.dirname(settingsFile), "auth.json")))
-    : parseJsonRelaxed(settingsFile);
+    ? initialSettings(readJson(path.join(path.dirname(settingsFile), "auth.json")))
+    : readJson(settingsFile);
 if (baseSettings === null || typeof baseSettings !== "object" || Array.isArray(baseSettings)) {
   throw new Error("settings must be a JSON object");
 }
@@ -86,21 +83,7 @@ if (reset && settingsExisted) {
 const agentDir = path.dirname(settingsFile);
 let settingsManager;
 try {
-  let needsNormalization = false;
-  if (settingsExisted && !reset) {
-    try {
-      JSON.parse(before);
-    } catch {
-      needsNormalization = true;
-    }
-  }
-  // Pi reads strict JSON. Preserve accepted legacy preferences before registration.
-  if (
-    reset ||
-    !settingsExisted ||
-    needsNormalization ||
-    !isDeepStrictEqual(settings, baseSettings)
-  )
+  if (reset || !settingsExisted || !isDeepStrictEqual(settings, baseSettings))
     fs.writeFileSync(settingsFile, renderSettings(settings));
   settingsManager = SettingsManager.create(repoPath, agentDir, { projectTrusted: false });
   const packageManager = new DefaultPackageManager({ cwd: repoPath, agentDir, settingsManager });

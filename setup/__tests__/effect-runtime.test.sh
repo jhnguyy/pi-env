@@ -1,63 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+# shellcheck source=setup/__tests__/helpers.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 cd "$ROOT"
-NODE_BIN=${PI_ENV_TEST_NODE_BIN:-node}
+NODE_BIN=$(node_bin)
+tmp=$(with_temp_dir)
 
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+# Each setup error renders exactly once on stderr and keeps its exit status.
+expect_error() {
+  local expected_status="$1" pattern="$2" stderr status=0
+  shift 2
+  stderr=$("$@" 2>&1 >/dev/null) || status=$?
+  assert_eq "$status" "$expected_status" "exit status for: $pattern"
+  assert_eq "$(grep -cE "$pattern" <<<"$stderr")" 1 "single rendering of: $pattern (got: $stderr)"
+}
 
-set +e
-REPO= "$NODE_BIN" setup/configure.mjs pi >"$tmp/missing.out" 2>"$tmp/missing.err"
-status=$?
-set -e
-if [ "$status" -ne 1 ] || [ "$(grep -c '^REPO is required$' "$tmp/missing.err")" -ne 1 ]; then
-  echo "FAIL: setup env error should render exactly once" >&2
-  cat "$tmp/missing.err" >&2
-  exit 1
-fi
+expect_error 1 '^REPO is required$' env REPO= "$NODE_BIN" setup/configure.mjs pi
 
-export REPO="$ROOT"
-export HOME="$tmp/home"
+export REPO="$ROOT" HOME="$tmp/home"
 mkdir -p "$HOME"
 export PI_AGENT_DIR="$tmp/pi-agent" PI_CODING_AGENT_DIR="$tmp/pi-agent"
 export AGENTS_DIR="$HOME/.agents" XDG_CONFIG_HOME="$tmp/xdg" GHOSTTY_CONFIG_DIR="$tmp/xdg/ghostty"
 
-set +e
-"$NODE_BIN" setup/configure.mjs not-a-command >"$tmp/unknown.out" 2>"$tmp/unknown.err"
-status=$?
-set -e
-if [ "$status" -ne 2 ] || [ "$(grep -c '^unknown configure command: not-a-command$' "$tmp/unknown.err")" -ne 1 ]; then
-  echo "FAIL: usage error should preserve exit code and render exactly once" >&2
-  cat "$tmp/unknown.err" >&2
-  exit 1
-fi
-
-set +e
-"$NODE_BIN" setup/configure.mjs pi "$tmp/no-such-node" >"$tmp/start.out" 2>"$tmp/start.err"
-status=$?
-set -e
-if [ "$status" -ne 1 ] || [ "$(grep -c 'no-such-node setup/apply-managed-settings.mjs .* failed to start:' "$tmp/start.err")" -ne 1 ]; then
-  echo "FAIL: command start errors should render exactly once" >&2
-  cat "$tmp/start.err" >&2
-  exit 1
-fi
-
-cat >"$tmp/node-fails" <<'SH'
-#!/usr/bin/env bash
+expect_error 2 '^unknown configure command: not-a-command$' "$NODE_BIN" setup/configure.mjs not-a-command
+expect_error 1 'no-such-node setup/apply-managed-settings.mjs .* failed to start:' \
+  "$NODE_BIN" setup/configure.mjs pi "$tmp/no-such-node"
+make_executable "$tmp/node-fails" '#!/bin/sh
 echo injected failure >&2
-exit 7
-SH
-chmod +x "$tmp/node-fails"
-set +e
-"$NODE_BIN" setup/configure.mjs pi "$tmp/node-fails" >"$tmp/cmd.out" 2>"$tmp/cmd.err"
-status=$?
-set -e
-if [ "$status" -ne 7 ] || [ "$(grep -c 'node-fails setup/apply-managed-settings.mjs .* exited with 7: injected failure' "$tmp/cmd.err")" -ne 1 ]; then
-  echo "FAIL: command exit errors should render exactly once" >&2
-  cat "$tmp/cmd.err" >&2
-  exit 1
-fi
+exit 7'
+expect_error 7 'node-fails setup/apply-managed-settings.mjs .* exited with 7: injected failure' \
+  "$NODE_BIN" setup/configure.mjs pi "$tmp/node-fails"
 
 echo "effect runtime tests passed"

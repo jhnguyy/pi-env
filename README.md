@@ -25,9 +25,7 @@ Nix supplies tools and can package Pi through its upstream flake. Nub installs r
 
 `--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`. It uses existing host tools. For externally managed tools with Nub-installed Pi, follow the [external runtime setup contract](docs/setup.md#externally-managed-tools-with-checkout-owned-pi).
 
-Ordinary setup preserves personal settings and registers pi-env through Pi's package manager. Fresh setup uses the [initial baseline](setup/managed-settings-core.mjs). Every run reapplies managed stall timeouts and retry settings so hung provider requests fail fast into Pi's retry. Pi owns transport, image handling, and theme selection.
-
-Run `./setup.sh --reset` to back up user settings and restore this baseline with only pi-env registered. Auth, sessions, model endpoints, MCP configuration, keybindings, and project settings remain untouched. Reinstall local adapter packages afterward. See [setup and reset](docs/setup.md).
+Setup registers pi-env through Pi's package manager and preserves personal settings; `./setup.sh --reset` restores a baseline. See [setup and reset](docs/setup.md).
 
 Use `pi config` to select package resources. Use `/skill:dependency-update` to assess a proposed dependency update.
 

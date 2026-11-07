@@ -3,19 +3,6 @@ set -euo pipefail
 
 # shellcheck source=setup/__tests__/helpers.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
-PROBE_NODE=$(node_bin)
-record_adapter_probe() {
-  DIR="$1" PROBE="$2" STATUS="$3" "$PROBE_NODE" --input-type=module <<'JS'
-import fs from 'node:fs';
-fs.writeFileSync(`${process.env.DIR}/result.json`, JSON.stringify({
-  inputs: process.env.PROBE,
-  expected: 'a fresh shell selects the installed adapter after setup and rerun',
-  actual: {exitStatus: Number(process.env.STATUS)}, verdict: process.env.STATUS === '0' ? 'pass' : 'fail',
-  reproduce: 'bash setup/__tests__/pi-cli-wrapper.test.sh', inspect: 'bin/pi, home/.profile, and *.log',
-}, null, 2) + '\n');
-JS
-}
-
 run_pi_cli_setup() {
   local selected_node_bin
   selected_node_bin=$(PI_ENV_NODE_BIN= node_bin)
@@ -77,7 +64,6 @@ test_pi_cli_wrapper_uses_repo_locked_package() {
 
   PATH="$old_path"
   unset PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_NODE_BIN
-  rm -rf "$tmp"
 }
 
 test_pi_cli_wrapper_uses_declared_package_entry() {
@@ -94,7 +80,6 @@ test_pi_cli_wrapper_uses_declared_package_entry() {
   PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" | grep -qF 'stub pi' || fail "pi wrapper should execute the package-declared entrypoint"
 
   unset PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_NODE_BIN
-  rm -rf "$tmp"
 }
 
 test_pi_cli_wrapper_pins_configured_node() {
@@ -128,7 +113,6 @@ SH
 
   HOME="$old_home"
   unset PI_ENV_NODE_BIN
-  rm -rf "$tmp"
 }
 
 test_pi_cli_wrapper_intercepts_only_exact_start() {
@@ -151,7 +135,6 @@ test_pi_cli_wrapper_intercepts_only_exact_start() {
   printf '%s' "$output" | grep -qF 'stub pi ["--","--start"]' || fail "post-separator --start should pass through unchanged"
 
   unset PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_NODE_BIN
-  rm -rf "$tmp"
 }
 
 test_pi_cli_wrapper_skips_write_when_managed_by_nix() {
@@ -167,16 +150,11 @@ test_pi_cli_wrapper_skips_write_when_managed_by_nix() {
   [ ! -e "$PI_BIN_DIR/pi" ] || fail "setup should not write pi wrapper when Nix manages it"
 
   unset PI_ENV_CLI_MANAGED_BY_NIX PI_ENV_NODE_BIN
-  rm -rf "$tmp"
 }
 
 test_pi_cli_wrapper_adds_path_profile_when_portable() (
   local tmp old_home old_path mode="${1:-portable}"
   tmp="$(with_temp_dir)"
-  if [ "$mode" = local-nix ]; then
-    printf 'Local Nix adapter evidence: %s\n' "$tmp"
-    trap 'record_adapter_probe "$tmp" "local-nix PATH configuration" "$?"' EXIT
-  fi
   old_home="$HOME"
   old_path="$PATH"
 
@@ -201,7 +179,6 @@ exit 0'
   HOME="$old_home"
   PATH="$old_path"
   unset PI_ENV_NODE_BIN PI_ENV_TEST_NODE_BIN
-  if [ "$mode" != local-nix ]; then rm -rf "$tmp"; fi
 )
 
 test_pi_cli_wrapper_uses_repo_locked_package

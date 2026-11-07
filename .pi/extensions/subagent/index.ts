@@ -289,12 +289,6 @@ export default function (
       description,
       parameters: SUBAGENT_PARAMETERS,
       execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-        // Direct extension callers must not silently discard obsolete instructions.
-        if (Object.hasOwn(params, "agent") || Object.hasOwn(params, "agent_scope")) {
-          throw new Error(
-            "Named agent definitions are no longer supported. Use explicit model, tools, and system_prompt overrides.",
-          );
-        }
         if (params.action === SubagentAction.Run) {
           const result = await runtime.execute(
             toolCallId,

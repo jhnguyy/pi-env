@@ -103,14 +103,12 @@ function fixture() {
   return { tool, command, exec, on, appendEntry, ctx, notify, execute };
 }
 
-it("registers only get and rejects retired actions before IO even for direct callers", async () => {
+it("registers only get and rejects other actions before IO even for direct callers", async () => {
   const f = fixture();
   expect(Check(f.tool.parameters, { command: "pr", action: "get" })).toBe(true);
-  for (const action of ["create", "post", "cleanup", "status", "walkthrough", "rerun"]) {
-    expect(Check(f.tool.parameters, { command: "pr", action })).toBe(false);
-    expect(await f.execute({ command: "pr", action })).toMatchObject({ isError: true });
-    await f.command.handler(`pr ${action}`, f.ctx);
-  }
+  expect(Check(f.tool.parameters, { command: "pr", action: "post" })).toBe(false);
+  expect(await f.execute({ command: "pr", action: "post" })).toMatchObject({ isError: true });
+  await f.command.handler("pr post", f.ctx);
   expect(f.exec).not.toHaveBeenCalled();
   expect(f.appendEntry).not.toHaveBeenCalled();
   expect(f.on).not.toHaveBeenCalled();

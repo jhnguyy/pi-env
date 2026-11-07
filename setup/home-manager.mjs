@@ -74,7 +74,10 @@ export function configureHomeManagerEffect(ctx, policy) {
     }
 
     note(`Updating ${input} input ${locked.rev.slice(0, 7)} → ${head.slice(0, 7)}`);
-    yield* ctx.command("nix", ["flake", "update", input, "--flake", flakeDir], { stdio: "inherit" });
+    yield* ctx.command("nix", ["flake", "update", input, "--flake", flakeDir], {
+      stdio: "inherit",
+    });
+    // The input may track another branch or fork; activate only the reviewed main.
     const updated = yield* lockedRevEffect(lockFile, input);
     if (updated.rev !== head) {
       return yield* Effect.fail(

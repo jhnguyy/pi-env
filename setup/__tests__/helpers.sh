@@ -46,11 +46,21 @@ assert_file_count() {
   assert_eq "$actual" "$expected" "$file copy count for $pattern"
 }
 
-# Resolve symlinks: macOS mktemp returns /var/..., but Git reports /private/var/....
+# One root per test process, removed on exit. The physical path matters because macOS mktemp
+# returns /var/..., but Git reports /private/var/....
+TEST_TMP_ROOT=$(cd "$(mktemp -d)" && pwd -P)
+trap 'rm -rf "$TEST_TMP_ROOT"' EXIT
+
 with_temp_dir() {
-  local dir
-  dir=$(mktemp -d)
-  (cd "$dir" && pwd -P)
+  mktemp -d "$TEST_TMP_ROOT/XXXXXX"
+}
+
+# Run a command silently, replaying its output only if it fails.
+quiet() {
+  local output status=0
+  output=$("$@" 2>&1) || status=$?
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&2
+  return "$status"
 }
 
 make_executable() {

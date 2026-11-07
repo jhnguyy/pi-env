@@ -4,19 +4,11 @@ The subagent extension delegates work to native Pi SDK sessions in the parent pr
 
 ## Delegation and results
 
-The `subagent` tool uses one `action` parameter:
-
-- `run` waits for the child's initial result.
-- `start` starts a background job and returns a volatile job ID.
-- `list` and `status` return retained job metadata.
-- `wait` waits for a terminal job state. Completed jobs return their bounded initial answer; other terminal states return metadata.
-- `result` returns the bounded initial answer of a completed job.
-- `cancel` requests cancellation of the job's current initial operation.
-- `usage` reports aggregate child usage, including subsequent human prompts.
+The `subagent` tool selects its operation with one `action` parameter; the [parameter schema](../.pi/extensions/subagent/index.ts) owns the actions and their required fields. Job IDs are volatile.
 
 The parent can call `subagent` directly or through native codemode with `tools.subagent(...)`. Pi owns nested-call events, usage aggregation, and cancellation signals. Children can use their own native codemode when their settings or explicit tool selection enable it. Child scripts reach the child's native callable tools, not the parent's registry. The root `subagent` tool is not registered in children, so neither direct calls nor codemode scripts can delegate recursively. Pi also excludes codemode itself from script-callable tools.
 
-Supply `name` and `task` for `run` or `start`. Omit `model` and `tools` to use child-native defaults. Explicit model and tool names must be available in the child's configuration. An explicit empty tool list selects no tools. Old AgentTool aliases, such as `dev-tools-edit`, are not native tool names.
+Omit `model` and `tools` to use child-native defaults. Explicit model and tool names must be available in the child's configuration.
 
 Glob tool selectors fail before child resources load. Exact tool availability is checked at native model preflight, after Pi's bounded direct-MCP readiness wait. Unavailable names stop inference, but native startup and input hooks may already have caused effects. If an input hook handles the task without model preflight, only the already-registered catalog can be checked. A configured MCP tool that is not yet discovered can fail on that handled-input path.
 
@@ -44,7 +36,7 @@ The native editor uses the user's Pi editor bindings, including external-editor 
 
 Human text goes directly to the existing child owner. The coordinator does not rewrite or approve it. Native input hooks, commands, and expansions can still handle or transform it. Provenance records the original coordinator task and human inputs separately from the resulting native conversation. Queued steering or follow-up is not a claim that the model has already consumed it. Input mode is revalidated when submitted.
 
-Configuration inspection separates active tools from callable tools. Instructions and provenance preserve multiline text and remove terminal controls for display. Conversation display shows finalized native context messages, with a 32,768-character display limit and an omission notice. Native compaction can summarize earlier messages. The browser does not display partial streaming responses, thinking, or images. Inspect the native session file for retained history.
+Configuration inspection separates active tools from callable tools. Instructions and provenance preserve multiline text and remove terminal controls for display. Conversation display shows finalized native context messages, bounded with an omission notice. Native compaction can summarize earlier messages. The browser does not display partial streaming responses, thinking, or images. Inspect the native session file for retained history.
 
 Closing the browser does not cancel or close children. Parent shutdown closes the browser and its retained owners. This browser does not reopen historical sessions or provide nested delegation.
 
@@ -54,34 +46,19 @@ For a persistent parent, children normally live under `_children/<parent-session
 
 Use `pi --session <exact-path>` only **after the previous owner closes**, such as after parent shutdown or retention eviction. Completion, idleness, or a cancellation request alone does not release a retained owner. Do not attach another transcript writer to a live child. Eviction does not delete its native session file.
 
-Set `subagent.sessionStorage` to `"sibling"` only when native Pi discovery must find children beside their parent. The default is `"nested"`.
+Set `subagent.sessionStorage` to `"sibling"` only when native Pi discovery must find children beside their parent.
 
 ## Native context and trust
 
-Custom named-agent definitions are no longer supported. The extension does not scan user, project, or package `.pi/agents` directories. The public `agent` and `agent_scope` parameters are rejected, not ignored. Supply explicit `model`, `tools`, and `system_prompt` overrides instead, or omit them for native target defaults.
-
-Native `AGENTS.md` context loading is unchanged. Pi loads target configuration, context, skills, and extensions through its native resource loader. Parent trust applies only to the same canonical cwd. A different target uses its saved decision in Pi's native `ProjectTrustStore`; unknown or denied targets do not receive project trust. Child startup does not prompt for new grants. See [target trust resolution](../.pi/extensions/subagent/resolver.ts) and [native child startup](../.pi/extensions/subagent/native-child.ts).
+Pi loads target configuration, context, skills, and extensions through its native resource loader. Parent trust applies only to the same canonical cwd. A different target uses its saved decision in Pi's native `ProjectTrustStore`; unknown or denied targets do not receive project trust. Child startup does not prompt for new grants. See [target trust resolution](../.pi/extensions/subagent/resolver.ts) and [native child startup](../.pi/extensions/subagent/native-child.ts).
 
 ## Limits and cancellation
 
-One parent supervisor controls blocking runs, background jobs, and idle continuations. Configure its limits in the `subagent` settings block:
-
-```json
-{
-  "subagent": {
-    "maxConcurrentRuns": 4,
-    "maxPendingRuns": 16,
-    "maxRetainedJobs": 32,
-    "maxResultBytes": 51200,
-    "maxRunMs": 1800000,
-    "sessionStorage": "nested"
-  }
-}
-```
+One parent supervisor controls blocking runs, background jobs, and idle continuations. Configure its limits in the `subagent` settings block; [the configuration](../.pi/extensions/subagent/config.ts) owns the keys and defaults.
 
 All native operations conservatively acquire a workspace write lease. Native callable surfaces can exceed initial active-tool visibility, so a read-only label is not sufficient evidence for concurrent writers. Operations in the same canonical Git workspace serialize. Retention bounds settled owners and job handles; result truncation does not truncate the native transcript. Public runs have no turn-count limit. Internal callers can impose an initial-operation turn limit.
 
-Pi defaults to two live codemode workers across all sessions in one process. Set `PI_CODEMODE_MAX_WORKERS` to a positive integer to change this limit. Parent and child scripts share those slots. A parent script waiting for children occupies one slot, leaving one for child scripts at the default limit. At capacity, new scripts wait in arrival order for up to 60 seconds. The wait counts toward the script's `timeout_ms`. Cancelled workers occupy their slots until they exit. `maxConcurrentRuns` does not raise this upstream limit.
+Parent and child codemode scripts share Pi's process-wide worker limit (`PI_CODEMODE_MAX_WORKERS`). A parent script waiting for children occupies a slot, and `maxConcurrentRuns` does not raise the upstream limit.
 
 Cancellation aborts native execution and waits for known tools and input hooks to settle. A running job remains `cancelling` until settlement. There is no grace-period force release or hard-kill guarantee. A run-time deadline requests abort; it does not prove that a remote effect stopped. Parent shutdown rejects new work and waits for owned work before releasing coordination.
 

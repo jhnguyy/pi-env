@@ -1,12 +1,12 @@
 # Setup reference
 
-For installation modes and commands, start with [README](../README.md#setup-choices). Normal setup registers pi-env and preserves personal settings except managed network and retry keys, which are reapplied on every run. Use project settings to override those keys.
+For installation modes and commands, start with [README](../README.md#setup-choices). Normal setup registers pi-env and preserves personal settings except the managed stall-timeout and retry keys, which every run reapplies so hung provider requests fail fast into Pi's retry. Use project settings to override those keys.
 
 [Managed settings](../setup/managed-settings-core.mjs) owns the initial baseline and managed keys; use `pi config` to select package resources.
 
 ## Explicit reset
 
-Run `./setup.sh --reset` to back up existing settings and restore the baseline with only pi-env registered. Auth, sessions, and project settings are not reset. Reinstall local adapters afterward; adapter setup must not reset the base implicitly.
+Run `./setup.sh --reset` to back up existing settings and restore the baseline with only pi-env registered. Reset replaces only `settings.json`; other agent-directory files and project settings remain. Reinstall local adapters afterward; adapter setup must not reset the base implicitly.
 
 See [settings registration and rollback](../setup/apply-managed-settings.mjs) for backup and failure handling.
 
@@ -25,6 +25,8 @@ The [runtime adapter](../setup/runtime.mjs) owns CLI installation and session la
 ### Declarative host integration
 
 The exported [Home Manager module](../nix/home-manager.nix) can provision Pi and terminal integration from a locked flake input. When it does, editing a working checkout does not replace those activated artifacts. Update the consuming input and activate its generation when those are the intended changes. Builder access, binary-cache trust, and host activation belong to that consuming infrastructure, not portable setup; use isolated state rather than a live profile to validate setup changes.
+
+With `pi-env.homeManager.sync.enable`, setup reports when the consuming flake's pi-env input differs from `main`. Setup also runs from the post-merge hook, so it updates the input and switches generations only when you pass `--sync-home-manager`. See [Home Manager sync](../setup/home-manager.mjs) for the conditions it checks.
 
 ### Externally managed tools with checkout-owned Pi
 
@@ -45,21 +47,6 @@ Leave `PI_PACKAGE_DIR` and `PI_ENV_PI_EXECUTABLE` unset during setup and subsequ
 
 After updating the application checkout, rerun the same setup command. Reuse the tools package while it satisfies the checkout's [runtime requirements](../package.json). The consumer owns source revision selection, persistent state, setup sequencing, and session restarts. Existing sessions do not reload the updated runtime automatically.
 
-## Analysis diagnostics
-
-Analyze keeps a bounded local NDJSON journal under `$XDG_STATE_HOME/pi-env/analyze`, or `~/.local/state/pi-env/analyze` when that variable is absent. It provides diagnostic context for worker failures. Set `PI_ENV_ANALYZE_JOURNAL_DIR` to choose another location or `PI_ENV_ANALYZE_JOURNAL_ENABLED=false` to disable it. Preserve relevant failure evidence before later runs rotate it, and review journals before sharing them.
-
-Trace export is off by default. It requires both `PI_ENV_ANALYZE_OTEL_ENABLED=true` and `PI_ENV_ANALYZE_OTEL_ENDPOINT` pointing to the intended OTLP collector. The endpoint is not emitted as telemetry.
-
 ## Gruvbox themes
 
 See [themes](themes.md) for Pi selection, terminal installation, and Slack reference strings.
-
-## Workflow evidence
-
-Run the focused workflow for the behavior under investigation:
-
-- Settings and reset: `bash setup/__tests__/settings-reset.test.sh`
-- Guidance updates: `bash setup/__tests__/append-system.test.sh`
-
-Each prints a retained evidence directory. See [setup testing](../setup/__tests__/README.md) and [verification guidance](../CONTRIBUTING.md#verification) for broader checks.

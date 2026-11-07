@@ -31,12 +31,10 @@ setup_load_home_manager_session() {
 
 # A skipped sync keeps the caller's environment. A current input also reloads, so a
 # rerun from the shell of an earlier, partly failed sync picks up the activated profile.
+# The outcome arrives on fd 3 so the configure report keeps stdout.
 setup_sync_home_manager() {
-  local home_manager_outcome_file outcome
-  home_manager_outcome_file=$(mktemp "${TMPDIR:-/tmp}/pi-env-home-manager-outcome.XXXXXX")
-  setup_run_configure home-manager
-  outcome=$(cat "$home_manager_outcome_file")
-  rm -f "$home_manager_outcome_file"
+  local outcome
+  { outcome=$(home_manager_outcome_file=/dev/fd/3 setup_run_configure home-manager 3>&1 >&4); } 4>&1
   if [ "${PI_ENV_HOME_MANAGER_SYNC:-0}" = "1" ]; then
     case "$outcome" in
       switched | current) setup_load_home_manager_session ;;

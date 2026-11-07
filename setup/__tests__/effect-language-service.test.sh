@@ -5,13 +5,11 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 
 test_patch_helper_patches_and_reruns() {
-  local cli first_log node patch_marker second_log target tmp version
+  local cli node patch_marker target tmp version
   tmp="$(with_temp_dir)"
   cli="$ROOT/node_modules/@effect/language-service/cli.js"
   node="$(node_bin)"
   target="$tmp/repo/node_modules/typescript"
-  first_log="$tmp/first-patch.log"
-  second_log="$tmp/second-patch.log"
   mkdir -p "$tmp/repo/node_modules/@effect"
   cp "$ROOT/package.json" "$tmp/repo/package.json"
   cp -RL "$ROOT/node_modules/typescript" "$target"
@@ -25,19 +23,15 @@ test_patch_helper_patches_and_reruns() {
   if grep -qF "$patch_marker" "$target/lib/_tsc.js"; then
     fail 'fixture compiler must be unpatched before running the patch helper'
   fi
-  if ! (cd "$tmp/repo" && PI_ENV_NODE_BIN="$tmp/not-node" NODE_EXECUTABLE="$tmp/not-node" \
-    "$node" "$ROOT/scripts/patch-effect-language-service.mjs" "$node") >"$first_log" 2>&1; then
-    fail "Effect TypeScript patch failed: $(cat "$first_log")"
-  fi
+  (cd "$tmp/repo" && PI_ENV_NODE_BIN="$tmp/not-node" NODE_EXECUTABLE="$tmp/not-node" \
+    quiet "$node" "$ROOT/scripts/patch-effect-language-service.mjs" "$node") || fail "Effect TypeScript patch failed"
   assert_file_contains "$target/lib/typescript.js" "$patch_marker"
   assert_file_contains "$target/lib/_tsc.js" "$patch_marker"
 
-  if ! (cd "$tmp/repo" && "$node" "$ROOT/scripts/patch-effect-language-service.mjs" "$node") >"$second_log" 2>&1; then
-    fail "Effect TypeScript patch rerun failed: $(cat "$second_log")"
-  fi
+  (cd "$tmp/repo" && quiet "$node" "$ROOT/scripts/patch-effect-language-service.mjs" "$node") ||
+    fail "Effect TypeScript patch rerun failed"
   assert_file_contains "$target/lib/typescript.js" "$patch_marker"
   assert_file_contains "$target/lib/_tsc.js" "$patch_marker"
-  rm -rf "$tmp"
 }
 
 test_patch_helper_patches_and_reruns
