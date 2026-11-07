@@ -7,9 +7,9 @@ source "$ROOT/setup/context.sh"
 NODE=$(node_bin)
 TMP=$(with_temp_dir)
 
-# Exact bytes, including the trailing newline that $(...) would strip.
+# Exact bytes, including the trailing newline: the sentinel keeps $(...) from stripping it.
 same_bytes() {
-  cmp -s "$1" <(printf '%s\n' "$2")
+  [ "$(cat "$1"; printf x)" = "$2"$'\n'x ]
 }
 
 export HOME="$TMP/home"
@@ -77,6 +77,15 @@ for args in "" --reset; do
     fail "registration failure should fail (${args:-normal})"
   fi
   same_bytes "$SETTINGS_FILE" "$PERSONAL" || fail "registration failure did not restore exact settings (${args:-normal})"
+done
+
+# The baseline provider follows stored auth types: openai first, then openai-codex, else openai.
+for case in 'openai:{"openai":{"type":"oauth"},"openai-codex":{"type":"oauth"}}' \
+  'openai-codex:{"openai-codex":{"type":"api_key"}}' 'openai:{"openai-codex":{"type":"unknown"}}'; do
+  printf '%s\n' "${case#*:}" > "$PI_AGENT_DIR/auth.json"
+  configure --reset
+  assert_eq "$("$NODE" -p 'require(process.argv[1]).defaultProvider' "$SETTINGS_FILE")" "${case%%:*}" \
+    "baseline provider for auth ${case#*:}"
 done
 
 if PI_AGENT_DIR="$HOME/.pi/agent" PI_CODING_AGENT_DIR="$TMP/selected-agent" "$ROOT/setup.sh" --reset --help >/dev/null 2>&1; then
