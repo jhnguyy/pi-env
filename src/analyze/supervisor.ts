@@ -158,17 +158,76 @@ export async function superviseAnalyze(
     });
   };
 
-  const lifecycle = async (): Promise<AnalysisResult> => {
-    await record(AnalyzeDiagnosticEventType.RunStarted, analysisRunAttributes(request));
-    if (options.signal?.aborted) {
-      const error = new AnalyzeSupervisorError("cancelled", "analyze request was cancelled");
+  const rejectIfCancelled = async (): Promise<void> => {
+    if (!options.signal?.aborted) return;
+    const error = new AnalyzeSupervisorError("cancelled", "analyze request was cancelled");
+    await finish(
+      AnalyzeDiagnosticEventType.RunTerminated,
+      AnalyzeOutcome.Interrupted,
+      AnalyzeTerminationReason.Cancelled,
+    );
+    throw error;
+  };
+
+  const sendRequest = async (
+    child: ChildProcess,
+    stop: (kind: AnalyzeSupervisorError["kind"], message: string) => Promise<void>,
+  ): Promise<void> => {
+    const requestLine = `${JSON.stringify({
+      version: 1,
+      type: AnalyzeWorkerMessageType.Request,
+      runId,
+      ...request,
+    })}\n`;
+    if (Buffer.byteLength(requestLine, "utf8") > MAX_REQUEST_BYTES) {
+      await stop("configuration", "analyze worker request exceeded its byte limit");
+    } else {
+      child.stdin?.end(requestLine);
+    }
+  };
+
+  const settle = async (
+    protocolState: AnalyzeProtocolState,
+    failure: AnalyzeSupervisorError | undefined,
+    trailingOutput: boolean,
+  ): Promise<AnalysisResult> => {
+    if (failure !== undefined) {
       await finish(
         AnalyzeDiagnosticEventType.RunTerminated,
-        AnalyzeOutcome.Interrupted,
-        AnalyzeTerminationReason.Cancelled,
+        failure.kind === "cancelled" ? AnalyzeOutcome.Interrupted : AnalyzeOutcome.Failure,
+        terminationReason(failure),
+      );
+      throw failure;
+    }
+    if (protocolState.phase !== AnalyzeProtocolPhase.Complete || trailingOutput) {
+      const error = new AnalyzeSupervisorError(
+        "process",
+        "analyze worker exited without a complete bounded result",
+      );
+      await finish(
+        AnalyzeDiagnosticEventType.RunTerminated,
+        AnalyzeOutcome.Failure,
+        AnalyzeTerminationReason.Unknown,
       );
       throw error;
     }
+
+    const result = protocolState.result;
+    await finish(
+      AnalyzeDiagnosticEventType.RunCompleted,
+      result.summary.failures === 0 ? AnalyzeOutcome.Success : AnalyzeOutcome.Failure,
+      AnalyzeTerminationReason.Completed,
+      {
+        finding_count: result.findings.length,
+        failure_count: result.summary.failures,
+      },
+    );
+    return result;
+  };
+
+  const lifecycle = async (): Promise<AnalysisResult> => {
+    await record(AnalyzeDiagnosticEventType.RunStarted, analysisRunAttributes(request));
+    await rejectIfCancelled();
 
     const node = env.PI_ENV_NODE_BIN ?? process.execPath;
     const processScope = await Effect.runPromise(Scope.make());
@@ -274,17 +333,7 @@ export async function superviseAnalyze(
       }
     });
 
-    const requestLine = `${JSON.stringify({
-      version: 1,
-      type: AnalyzeWorkerMessageType.Request,
-      runId,
-      ...request,
-    })}\n`;
-    if (Buffer.byteLength(requestLine, "utf8") > MAX_REQUEST_BYTES) {
-      await stop("configuration", "analyze worker request exceeded its byte limit");
-    } else {
-      child.stdin?.end(requestLine);
-    }
+    await sendRequest(child, stop);
 
     await waitForClose(child);
     await closeProcessScope().catch(() => undefined);
@@ -292,39 +341,7 @@ export async function superviseAnalyze(
     options.signal?.removeEventListener("abort", abort);
     const protocolState = await protocolQueue;
     if (stopping !== undefined) await stopping;
-
-    if (failure !== undefined) {
-      await finish(
-        AnalyzeDiagnosticEventType.RunTerminated,
-        failure.kind === "cancelled" ? AnalyzeOutcome.Interrupted : AnalyzeOutcome.Failure,
-        terminationReason(failure),
-      );
-      throw failure;
-    }
-    if (protocolState.phase !== AnalyzeProtocolPhase.Complete || pendingStdout.length > 0) {
-      const error = new AnalyzeSupervisorError(
-        "process",
-        "analyze worker exited without a complete bounded result",
-      );
-      await finish(
-        AnalyzeDiagnosticEventType.RunTerminated,
-        AnalyzeOutcome.Failure,
-        AnalyzeTerminationReason.Unknown,
-      );
-      throw error;
-    }
-
-    const result = protocolState.result;
-    await finish(
-      AnalyzeDiagnosticEventType.RunCompleted,
-      result.summary.failures === 0 ? AnalyzeOutcome.Success : AnalyzeOutcome.Failure,
-      AnalyzeTerminationReason.Completed,
-      {
-        finding_count: result.findings.length,
-        failure_count: result.summary.failures,
-      },
-    );
-    return result;
+    return settle(protocolState, failure, pendingStdout.length > 0);
   };
 
   try {
