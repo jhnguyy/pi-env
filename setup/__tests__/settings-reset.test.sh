@@ -30,7 +30,7 @@ configure() {
 configure
 INITIAL=$(cat "$SETTINGS_FILE")
 PERSONAL='{"defaultModel": "personal", "theme": "personal-theme", "packages": ["npm:personal-package"],
-  "httpIdleTimeoutMs": 0, "retry": {"enabled": false, "maxAgentDelayMs": 5000}}'
+  "httpIdleTimeoutMs": 0, "retry": {"enabled": false, "maxAgentDelayMs": 5000, "provider": {"maxRetries": 4, "keep": true}}}'
 printf '%s\n' "$PERSONAL" > "$SETTINGS_FILE"
 configure
 NORMAL=$(cat "$SETTINGS_FILE")
@@ -45,18 +45,24 @@ INITIAL="$INITIAL" PERSONAL="$PERSONAL" NORMAL="$NORMAL" RESET="$RESET" RERUN="$
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-const { applyManagedSettings, initialSettings } = await import(process.argv[2]);
+const { initialSettings, managedSettings } = await import(process.argv[2]);
 const env = process.env;
 const [personal, normal, reset] = [env.PERSONAL, env.NORMAL, env.RESET].map((text) => JSON.parse(text));
 const sources = (settings) => settings.packages.map((source) =>
   source.startsWith('npm:') ? source : path.resolve(path.dirname(env.SETTINGS_FILE), source)).sort();
 const withoutPackages = ({ packages, ...rest }) => rest;
 
-// Normal setup keeps personal choices except managed keys, and adds pi-env beside personal packages.
-assert.deepEqual(withoutPackages(normal), withoutPackages(applyManagedSettings(personal)));
+// Normal setup keeps personal choices, including unmanaged keys inside managed objects, and
+// replaces only managed keys. The expectation is written out rather than derived from setup.
+assert.deepEqual(withoutPackages(normal), {
+  defaultModel: 'personal', theme: 'personal-theme',
+  httpIdleTimeoutMs: managedSettings.httpIdleTimeoutMs,
+  retry: { ...managedSettings.retry, maxAgentDelayMs: 5000,
+    provider: { ...managedSettings.retry.provider, keep: true } },
+});
 assert.deepEqual(sources(normal), [...personal.packages, env.PRIMARY_REPO].sort());
 // Reset and fresh setup produce the baseline with only pi-env; reruns keep it.
-assert.deepEqual(withoutPackages(reset), applyManagedSettings(initialSettings()));
+assert.deepEqual(withoutPackages(reset), { ...initialSettings(), ...managedSettings });
 assert.deepEqual(sources(reset), [env.PRIMARY_REPO]);
 assert.deepEqual(JSON.parse(env.INITIAL), reset);
 assert.deepEqual(JSON.parse(env.RERUN), reset);

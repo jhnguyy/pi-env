@@ -30,8 +30,7 @@ setup_fixture() {
   git -C "$REPO_DIR" remote add origin https://example.invalid/pi-env.git
   git -C "$REPO_DIR" update-ref refs/remotes/origin/main HEAD
   git -C "$REPO_DIR" branch -q --set-upstream-to=origin/main main
-  printf '{"nodes":{"root":{"inputs":{"pi-env":"pi-env"}},"pi-env":{"locked":{"rev":"%040d"}}},"root":"root","version":7}\n' 0 \
-    > "$FLAKE_DIR/flake.lock"
+  write_lock "$FLAKE_DIR/flake.lock" "$(printf '%040d' 0)"
 
   cp "$ROOT/scripts/check-node-version.mjs" "$ROOT/scripts/node-policy.mjs" "$REPO_DIR/scripts/"
   printf '{"engines":{"node":">=%s"},"devDependencies":{"@earendil-works/pi-coding-agent":"1.2.3"}}\n' \
@@ -44,8 +43,10 @@ setup_fixture() {
   echo "$TMP/generations/old" > "$TMP/generations/current"
 
   make_executable "$STUB_DIR/nub" '#!/bin/sh'
+  # flake update locks PI_ENV_TEST_INPUT_REV: the revision the input's URL currently tracks.
   make_executable "$STUB_DIR/nix" '#!/bin/sh
-echo "call: nix $*" >&2'
+echo "call: nix $*" >&2
+printf "{\"nodes\":{\"root\":{\"inputs\":{\"pi-env\":\"pi-env\"}},\"pi-env\":{\"locked\":{\"rev\":\"%s\"}}},\"root\":\"root\",\"version\":7}\n" "$PI_ENV_TEST_INPUT_REV" > "$5/flake.lock"'
   make_executable "$STUB_DIR/home-manager" '#!/bin/sh
 case "$1" in
   switch)
@@ -54,10 +55,16 @@ case "$1" in
   generations)
     printf "2026-01-01 00:00 : id 2 -> %s (current)\n" "$(cat "$PI_ENV_TEST_GENERATIONS/current")" ;;
 esac'
+  export PI_ENV_TEST_INPUT_REV
+  PI_ENV_TEST_INPUT_REV=$(git -C "$REPO_DIR" rev-parse HEAD)
   export PI_ENV_TEST_GENERATIONS="$TMP/generations" PI_ENV_HOME_MANAGER_FLAKE="$FLAKE_DIR"
   export PI_ENV_NODE_BIN="$node" PI_ENV_CONFIG_MANAGED_BY_NIX=1
   export PI_PACKAGE_DIR="$TMP/pi-1.0.0" __HM_SESS_VARS_SOURCED=1
   unset PI_ENV_HOME_MANAGER_SYNC || true
+}
+
+write_lock() {
+  printf '{"nodes":{"root":{"inputs":{"pi-env":"pi-env"}},"pi-env":{"locked":{"rev":"%s"}}},"root":"root","version":7}\n' "$2" > "$1"
 }
 
 write_pi_package() {
@@ -131,7 +138,20 @@ test_sync_installs_pi_from_activated_generation() {
   assert_eq "$(adapter_package)" "$TMP/pi-1.2.3" "Pi wrapper should use the activated generation's package"
 }
 
+# An input that tracks another branch or fork must not activate code other than main.
+test_sync_refuses_a_revision_other_than_main() {
+  local output status=0
+  setup_fixture
+  export PI_ENV_HOME_MANAGER_SYNC=1 PI_ENV_TEST_INPUT_REV=1111111111111111111111111111111111111111
+
+  output="$(run_setup_runtime)" || status=$?
+
+  [ "$status" -ne 0 ] || fail "sync should fail when the input locks a revision other than main"
+  ! grep -q '^call: home-manager switch' <<<"$output" || fail "sync must not switch to an unreviewed revision"
+}
+
 test_drift_without_request_does_not_activate
+test_sync_refuses_a_revision_other_than_main
 test_sync_never_pins_unpublished_work
 test_sync_installs_pi_from_activated_generation
 
