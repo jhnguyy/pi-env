@@ -178,16 +178,12 @@ export default function (
                 let text: string | undefined;
                 // Native editor dialogs occupy the parent editor container. Hide this overlay
                 // while the dialog owns focus; the parent's editor object and draft stay intact.
-                component.setVisible(false);
                 handle?.setHidden(true);
                 try {
                   text = await ctx.ui.editor(`Human → ${name} · ${mode}`, drafts.get(key));
                 } finally {
                   composing = false;
-                  if (browser.current === component) {
-                    handle?.setHidden(false);
-                    component.setVisible(true);
-                  }
+                  if (browser.current === component) handle?.setHidden(false);
                 }
                 if (text === undefined || browser.current !== component) return;
                 drafts.set(key, text);

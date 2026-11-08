@@ -4,7 +4,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import * as Browser from "../browser";
 import * as ChildTypes from "../child-types";
 
-it("refreshes changed configuration without idle transcript work and releases background work", () => {
+it("does no idle transcript work, refreshes configuration on entry, and releases its subscription", () => {
   mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
   const listeners = new Set<() => void>();
   const child = {
@@ -24,16 +24,11 @@ it("refreshes changed configuration without idle transcript work and releases ba
     availableInputs: [ChildTypes.NativeInputMode.Prompt],
   };
   const inspectChild = vi.fn(() => child);
-  const inspectChildTools = vi.fn(() => ({
-    activeTools: child.activeTools,
-    callableTools: child.callableTools,
-  }));
   const requestRender = vi.fn();
   const browser = new Browser.SubagentBrowser(
     {
       listChildren: () => [child],
       inspectChild,
-      inspectChildTools,
       cancelChild: async () => {},
       subscribeChildren: (listener: () => void) => {
         listeners.add(listener);
@@ -48,49 +43,25 @@ it("refreshes changed configuration without idle transcript work and releases ba
     async () => {},
   );
   try {
-    browser.render(160);
-    browser.handleInput("\r");
-    browser.handleInput("\t");
-    requestRender.mockClear();
-    inspectChild.mockClear();
-    mock.timers.tick(1000);
-    expect(requestRender).not.toHaveBeenCalled();
-    expect(inspectChild).not.toHaveBeenCalled();
-    browser.handleInput("\t");
-    browser.render(160);
-    requestRender.mockClear();
-    inspectChild.mockClear();
-    mock.timers.tick(1000);
-    expect(inspectChildTools).toHaveBeenCalled();
-    expect(inspectChild).not.toHaveBeenCalled();
-    expect(requestRender).not.toHaveBeenCalled();
+    // Roster, conversation, instructions, configuration, and provenance all stay idle.
+    for (const key of ["", "\r", "\t", "\t", "\t"]) {
+      if (key) browser.handleInput(key);
+      browser.render(160);
+      requestRender.mockClear();
+      inspectChild.mockClear();
+      mock.timers.tick(1000);
+      expect(requestRender).not.toHaveBeenCalled();
+      expect(inspectChild).not.toHaveBeenCalled();
+    }
     child.activeTools = ["read", "late"];
     child.callableTools = ["read", "late"];
-    mock.timers.tick(1000);
-    expect(requestRender).toHaveBeenCalled();
-    requestRender.mockClear();
-    mock.timers.tick(1000);
-    expect(requestRender).not.toHaveBeenCalled();
+    for (let tab = 0; tab < 3; tab++) browser.handleInput("\t");
     expect(browser.render(160).join("\n")).toContain("late");
-    browser.setVisible(false);
-    const hiddenReads = inspectChildTools.mock.calls.length;
-    mock.timers.tick(1000);
-    expect(inspectChildTools).toHaveBeenCalledTimes(hiddenReads);
-    requestRender.mockClear();
-    browser.setVisible(true);
-    expect(requestRender).toHaveBeenCalled();
-    browser.handleInput("\t");
-    const reads = inspectChildTools.mock.calls.length;
-    mock.timers.tick(1000);
-    expect(inspectChildTools).toHaveBeenCalledTimes(reads);
-    browser.handleInput("\t");
-    browser.handleInput("\t");
-    browser.handleInput("\t");
-    const finalReads = inspectChildTools.mock.calls.length;
     browser.dispose();
     requestRender.mockClear();
+    inspectChild.mockClear();
     mock.timers.tick(1000);
-    expect(inspectChildTools).toHaveBeenCalledTimes(finalReads);
+    expect(inspectChild).not.toHaveBeenCalled();
     expect(requestRender).not.toHaveBeenCalled();
     expect(listeners.size).toBe(0);
   } finally {
@@ -132,10 +103,6 @@ it("renders supplied snapshot fields and handles supported editor shortcut keys"
   const source = {
     listChildren: () => [child],
     inspectChild: () => child,
-    inspectChildTools: () => ({
-      activeTools: child.activeTools,
-      callableTools: child.callableTools,
-    }),
     cancelChild: async () => {},
     subscribeChildren: () => () => {},
   };
@@ -210,7 +177,6 @@ it("bounds rendered dimensions on resize and ignores keys after view disposal", 
   const source = {
     listChildren: () => [],
     inspectChild: () => undefined,
-    inspectChildTools: () => undefined,
     cancelChild: async () => {},
     subscribeChildren: () => () => {},
   };

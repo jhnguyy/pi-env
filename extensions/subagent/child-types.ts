@@ -62,7 +62,6 @@ export interface NativeChildSession {
   readonly id: string;
   readonly runId: string;
   inspect(): NativeChildSnapshot;
-  inspectTools(): Pick<NativeChildSnapshot, "activeTools" | "callableTools">;
   input(text: string, mode: NativeInputMode): Promise<NativeInputResult>;
   cancel(): Promise<void>;
   close(): Promise<void>;

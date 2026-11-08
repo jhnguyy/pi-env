@@ -163,10 +163,6 @@ export class SubagentSessionRuntime {
     return this.supervisor?.children.get(id)?.inspect();
   }
 
-  inspectChildTools(id: string) {
-    return this.supervisor?.children.get(id)?.inspectTools();
-  }
-
   inputChild(id: string, text: string, mode: ChildTypes.NativeInputMode) {
     if (this.sessionState !== SubagentSessionState.Active)
       throw new Error("Parent subagent session is not active.");

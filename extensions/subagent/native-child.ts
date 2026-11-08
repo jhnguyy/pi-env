@@ -92,13 +92,6 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
     }
   }
 
-  inspectTools(): Pick<ChildTypes.NativeChildSnapshot, "activeTools" | "callableTools"> {
-    return {
-      activeTools: this.session?.getActiveToolNames() ?? [],
-      callableTools: this.session?.getCallableToolNames() ?? [],
-    };
-  }
-
   inspect(): ChildTypes.NativeChildSnapshot {
     const session = this.session;
     return {
@@ -110,7 +103,8 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
       sessionFile: this.manager.getSessionFile(),
       model: session?.model ? `${session.model.provider}/${session.model.id}` : undefined,
       systemPrompt: session?.systemPrompt ?? "",
-      ...this.inspectTools(),
+      activeTools: session?.getActiveToolNames() ?? [],
+      callableTools: session?.getCallableToolNames() ?? [],
       messages: structuredClone(session?.messages ?? []),
       inputs: structuredClone(this.inputs),
       state: this.state,
