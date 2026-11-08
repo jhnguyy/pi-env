@@ -2,25 +2,14 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 
-export type ToolProgress = (message: string) => void;
-
-export interface DomainToolContext {
-  cwd: string;
-  signal?: AbortSignal;
-  progress?: ToolProgress;
-}
-
-export type DomainToolExecutor<Params, Details = unknown> = (
-  params: Params,
-  context: DomainToolContext,
-) => Promise<AgentToolResult<Details>>;
-
-export type ToolContract<Params, Details = unknown, Schema extends TSchema = TSchema> = Pick<
-  ToolDefinition<Schema, Details>,
-  "name" | "label" | "description" | "parameters"
-> & {
-  execute: DomainToolExecutor<Params, Details>;
-};
+import type * as ToolTypes from "./tool-types";
+export type {
+  DomainToolContext,
+  DomainToolExecutor,
+  DomainToolResult,
+  ToolContract,
+  ToolProgress,
+} from "./tool-types";
 
 export type PiToolUi<Schema extends TSchema, Details = unknown> = Pick<
   ToolDefinition<Schema, Details, any>,
@@ -35,7 +24,7 @@ function progressResult(message: string): AgentToolResult<{ phase: string }> {
 }
 
 export function toPiTool<Params, Details = unknown, Schema extends TSchema = TSchema>(
-  contract: ToolContract<Params, Details, Schema>,
+  contract: ToolTypes.ToolContract<Params, Details, Schema>,
   ui: PiToolUi<Schema, Details> = {},
 ): ToolDefinition<Schema, Details, any> {
   return {

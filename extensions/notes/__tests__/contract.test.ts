@@ -18,6 +18,7 @@ import {
   type NotesProvider,
 } from "../domain";
 import { vaultFixture } from "./vault-fixture";
+import * as CodingAgent from "../coding-agent";
 
 // External-provider boundary cases include responses the Obsidian provider cannot produce.
 function provider(): NotesProvider {
@@ -774,6 +775,28 @@ describe("notes tool contract", () => {
     expect(deleted.content).toEqual([{ type: "text", text: "Deleted other/note.md" }]);
     await expect(stat(target)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(store.read("other/note.md")).rejects.toMatchObject({ code: "not-found" });
+  });
+
+  it("bounds CLI output without truncating the shared domain result", async () => {
+    const fake = provider();
+    const content = `${"line\n".repeat(2_001)}last line`;
+    vi.mocked(fake.read).mockResolvedValue({ path: "wiki/topic.md", content, revision: "rev-1" });
+    const input = { action: "read", path: "wiki/topic.md" } as const;
+    const domain = await createNotesContract(fake).execute(input, { cwd: "/repo" });
+    const cli = await CodingAgent.createCodingAgentNotesContract(fake).execute(input, {
+      cwd: "/repo",
+    });
+    expect(domain.content).toContainEqual({
+      type: "text",
+      text: expect.stringContaining("last line"),
+    });
+    expect(domain.details.truncated).not.toBe(true);
+    expect(cli.details.truncated).toBe(true);
+    expect(cli.content).toContainEqual({
+      type: "text",
+      text: expect.stringContaining("Output truncated"),
+    });
+    expect(cli.content[0]?.text).not.toContain("last line");
   });
 
   it("rejects oversized provider orientation before exposing it", async () => {

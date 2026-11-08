@@ -6,7 +6,8 @@ import { Effect } from "effect";
 
 import { loadNotesSettingsEffect } from "./config";
 import * as Settings from "../_shared/settings";
-import { createNotesContract, type NotesToolDetails } from "./contract";
+import * as Contract from "./contract";
+import * as CodingAgent from "./coding-agent";
 import * as Provider from "./provider";
 import { registerNotesProviderEventBridge } from "./provider-events";
 import { resolveNotesProvider } from "./provider-registry";
@@ -43,27 +44,27 @@ export async function activateNotesExtension(
   settingsEnv?: Settings.SettingsEnv,
 ): Promise<void> {
   const child = ChildContext.getChildContext();
-  settingsEnv ??= child ? {
-    ...Settings.defaultSettingsEnv,
-    globalSettingsPath: () => join(child.agentDir, "settings.json"),
-  } : undefined;
+  settingsEnv ??= child
+    ? {
+        ...Settings.defaultSettingsEnv,
+        globalSettingsPath: () => join(child.agentDir, "settings.json"),
+      }
+    : undefined;
   const settings = await Effect.runPromise(loadNotesSettingsEffect(cwd, settingsEnv));
   if (settings === null) return;
 
   const builtin = await Provider.createConfiguredBuiltinProvider(settings);
   const unregisterExternal = registerNotesProviderEventBridge(pi);
   pi.on(AgentTools.PiEvent.SessionShutdown, unregisterExternal);
-  const contract = createNotesContract(() => builtin ?? resolveNotesProvider(settings.provider));
+  const contract = CodingAgent.createCodingAgentNotesContract(
+    () => builtin ?? resolveNotesProvider(settings.provider),
+  );
 
   RegisterContractTool.registerContractTool(pi, {
     contract,
     piOptions: {
       promptSnippet: "Maintain Inbox, Projects, Wiki, Worklog, and other Markdown notes",
-      promptGuidelines: [
-        "Use Store index before the first general Store interaction in a task.",
-        "Use collection actions for Inbox, Projects, Wiki, and Worklog content. Use Store mutation only for bounded maintenance and migration work.",
-        "Never store secrets, credentials, private keys, tokens, or raw sensitive dumps in notes.",
-      ],
+      promptGuidelines: Contract.NOTES_PROMPT_GUIDELINES,
       renderCall(args, theme) {
         let text = theme.fg("toolTitle", theme.bold("notes"));
         if (args.collection) text += ` ${theme.fg("accent", String(args.collection))}`;
@@ -85,7 +86,7 @@ export async function activateNotesExtension(
           .join("\n");
         if (expanded) return new Text(rawText, 0, 0);
 
-        const details = result.details as NotesToolDetails | undefined;
+        const details = result.details as Contract.NotesToolDetails | undefined;
         const count = details?.items?.length ?? details?.notes?.length ?? details?.results?.length;
         const suffix = count === undefined ? "" : ` (${count})`;
         const collection = context.args.collection ? ` ${String(context.args.collection)}` : "";
