@@ -133,6 +133,29 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
     },
   );
 
+  it("forwards child changes across session replacement and detaches old supervisors", async () => {
+    const runtime = makeRuntime();
+    const changed = vi.fn();
+    const unsubscribe = runtime.subscribeChildren(changed);
+    testCleanup()(unsubscribe);
+    const first = sessionContext();
+    await runtime.startSession(first);
+    const previous = getSubagentRunSupervisor(first.sessionManager.getSessionId())!;
+    changed.mockClear();
+    previous.notifyChildrenChanged();
+    expect(changed).toHaveBeenCalledOnce();
+    const second = sessionContext();
+    await runtime.startSession(second);
+    changed.mockClear();
+    previous.notifyChildrenChanged();
+    expect(changed).not.toHaveBeenCalled();
+    getSubagentRunSupervisor(second.sessionManager.getSessionId())!.notifyChildrenChanged();
+    expect(changed).toHaveBeenCalledOnce();
+    unsubscribe();
+    getSubagentRunSupervisor(second.sessionManager.getSessionId())!.notifyChildrenChanged();
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
   it("disposes replaced telemetry exactly once and ignores repeated shutdown", async () => {
     const runtime = makeRuntime();
     const ctx = sessionContext();

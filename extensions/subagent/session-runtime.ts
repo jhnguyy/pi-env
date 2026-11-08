@@ -83,6 +83,8 @@ export class SubagentSessionRuntime {
   private telemetryRuntime: ToolingTelemetryRuntime | undefined;
   private supervisor: SubagentRunSupervisor | undefined;
   private supervisorSessionId: string | undefined;
+  private readonly childListeners = new Set<() => void>();
+  private unsubscribeChildren: (() => void) | undefined;
   private sessionStorage: SubagentRuntimeConfig["sessionStorage"] =
     DEFAULT_SUBAGENT_CONFIG.sessionStorage;
   private jobs: SubagentJobManager | undefined;
@@ -141,6 +143,21 @@ export class SubagentSessionRuntime {
       ),
     );
   };
+
+  subscribeChildren(listener: () => void): () => void {
+    this.childListeners.add(listener);
+    return () => {
+      this.childListeners.delete(listener);
+    };
+  }
+
+  private notifyChildrenChanged(): void {
+    for (const listener of this.childListeners) {
+      try {
+        listener();
+      } catch {}
+    }
+  }
 
   listChildren() {
     return [...(this.supervisor?.children.values() ?? [])].map((child) => child.summary());
@@ -203,6 +220,8 @@ export class SubagentSessionRuntime {
       this.ledger.clear();
       this.telemetryRuntime = nextRuntime;
       this.supervisor = supervisor;
+      this.unsubscribeChildren = supervisor.subscribeChildren(() => this.notifyChildrenChanged());
+      this.notifyChildrenChanged();
       this.supervisorSessionId = sessionId;
       this.sessionStorage = config.sessionStorage;
       this.jobs = jobs;
@@ -338,8 +357,11 @@ export class SubagentSessionRuntime {
     await settle(
       supervisorSessionId ? disposeSubagentRunSupervisor(supervisorSessionId) : undefined,
     );
+    this.unsubscribeChildren?.();
+    this.unsubscribeChildren = undefined;
     this.jobs = undefined;
     this.supervisor = undefined;
+    this.notifyChildrenChanged();
     this.supervisorSessionId = undefined;
     this.sessionStorage = DEFAULT_SUBAGENT_CONFIG.sessionStorage;
     this.telemetryRuntime = undefined;
