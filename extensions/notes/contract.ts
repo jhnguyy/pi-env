@@ -1,6 +1,6 @@
 import { Type, type TSchema } from "typebox";
 import { Errors } from "typebox/value";
-import type { DomainToolContext, ToolContract } from "../_shared/domain-tool";
+import type * as ToolTypes from "../_shared/tool-types";
 import {
   DEFAULT_COLLECTION_LIMIT,
   MAX_COLLECTION_LIMIT,
@@ -558,7 +558,7 @@ export const NOTES_DESCRIPTION = [
 export function createNotesContract(
   source: NotesProvider | (() => NotesProvider),
   options: NotesContractOptions = {},
-): ToolContract<NotesParams, NotesToolDetails, typeof NOTES_PARAMETERS> {
+): ToolTypes.ToolContract<NotesParams, NotesToolDetails, typeof NOTES_PARAMETERS> {
   const now = options.now ?? (() => new Date());
   return {
     name: "notes",
@@ -573,7 +573,7 @@ export function createNotesContract(
 async function executeNotesAction(
   provider: NotesProvider,
   input: NotesParams,
-  context: DomainToolContext,
+  context: ToolTypes.DomainToolContext,
   now: () => Date,
 ) {
   const params = parseNotesParams(input);

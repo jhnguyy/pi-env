@@ -18,7 +18,7 @@ import {
   type NotesProvider,
 } from "../domain";
 import { vaultFixture } from "./vault-fixture";
-import { createCodingAgentNotesContract } from "../coding-agent";
+import * as CodingAgent from "../coding-agent";
 
 // External-provider boundary cases include responses the Obsidian provider cannot produce.
 function provider(): NotesProvider {
@@ -783,7 +783,9 @@ describe("notes tool contract", () => {
     vi.mocked(fake.read).mockResolvedValue({ path: "wiki/topic.md", content, revision: "rev-1" });
     const input = { action: "read", path: "wiki/topic.md" } as const;
     const domain = await createNotesContract(fake).execute(input, { cwd: "/repo" });
-    const cli = await createCodingAgentNotesContract(fake).execute(input, { cwd: "/repo" });
+    const cli = await CodingAgent.createCodingAgentNotesContract(fake).execute(input, {
+      cwd: "/repo",
+    });
     expect(domain.content).toContainEqual({
       type: "text",
       text: expect.stringContaining("last line"),

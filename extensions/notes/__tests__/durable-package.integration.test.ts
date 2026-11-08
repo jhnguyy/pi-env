@@ -15,18 +15,20 @@ it("builds and executes the public durable export in a host without CLI or TUI p
   const checkout = join(directory, "build");
   const host = join(directory, "host");
   const sourceOnly = (path: string) => !["dist", "__tests__"].includes(basename(path));
-  await mkdir(join(checkout, "scripts"), { recursive: true });
-  await cp(join(repo, "package.json"), join(checkout, "package.json"));
-  await cp(join(repo, "pi-build.config.json"), join(checkout, "pi-build.config.json"));
-  for (const script of ["build-extensions.mjs", "extension-manifest.mjs", "node-policy.mjs"]) {
-    await cp(join(repo, "scripts", script), join(checkout, "scripts", script));
-  }
-  for (const path of ["extensions/notes", "extensions/_shared", "src"]) {
+  for (const path of [
+    "package.json",
+    "pi-build.config.json",
+    "scripts",
+    "extensions/notes",
+    "extensions/_shared",
+    "src",
+  ]) {
     await cp(join(repo, path), join(checkout, path), { recursive: true, filter: sourceOnly });
   }
   await symlink(join(repo, "node_modules"), join(checkout, "node_modules"), "dir");
   // A fresh build directory prevents an old sidecar from hiding missing build configuration.
-  await run(process.execPath, ["scripts/build-extensions.mjs", "notes"], {
+  const builder = join(checkout, "scripts/build-extensions.mjs");
+  await run(process.execPath, [builder, "notes"], {
     cwd: checkout,
     timeout: 15_000,
   });
@@ -46,15 +48,17 @@ it("builds and executes the public durable export in a host without CLI or TUI p
     await mkdir(dirname(target), { recursive: true });
     await symlink(await realpath(join(repo, "node_modules", name)), target, "dir");
   }
+  const hostFixture = fileURLToPath(new URL("./fixtures/durable-host.ts", import.meta.url));
+  const hostProgram = join(host, "probe.mjs");
   await build({
-    entryPoints: [fileURLToPath(new URL("./fixtures/durable-host.ts", import.meta.url))],
-    outfile: join(host, "probe.mjs"),
+    entryPoints: [hostFixture],
+    outfile: hostProgram,
     bundle: true,
     platform: "node",
     format: "esm",
     packages: "external",
   });
-  const { stdout } = await run(process.execPath, ["probe.mjs"], {
+  const { stdout } = await run(process.execPath, [hostProgram], {
     cwd: host,
     timeout: 15_000,
     env: {

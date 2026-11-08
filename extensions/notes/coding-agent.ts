@@ -4,14 +4,14 @@ import {
   formatSize,
   truncateHead,
 } from "@earendil-works/pi-coding-agent";
-import { createNotesContract, type NotesContractOptions } from "./contract";
-import type { NotesProvider } from "./domain";
+import * as Contract from "./contract";
+import type * as Domain from "./domain";
 
 export function createCodingAgentNotesContract(
-  source: NotesProvider | (() => NotesProvider),
-  options: NotesContractOptions = {},
+  source: Domain.NotesProvider | (() => Domain.NotesProvider),
+  options: Contract.NotesContractOptions = {},
 ) {
-  const contract = createNotesContract(source, options);
+  const contract = Contract.createNotesContract(source, options);
   return {
     ...contract,
     execute: async (...args: Parameters<typeof contract.execute>) => {

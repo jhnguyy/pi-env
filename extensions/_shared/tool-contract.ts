@@ -2,14 +2,14 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 
-import type { ToolContract } from "./domain-tool";
+import type * as ToolTypes from "./tool-types";
 export type {
   DomainToolContext,
   DomainToolExecutor,
   DomainToolResult,
   ToolContract,
   ToolProgress,
-} from "./domain-tool";
+} from "./tool-types";
 
 export type PiToolUi<Schema extends TSchema, Details = unknown> = Pick<
   ToolDefinition<Schema, Details, any>,
@@ -24,7 +24,7 @@ function progressResult(message: string): AgentToolResult<{ phase: string }> {
 }
 
 export function toPiTool<Params, Details = unknown, Schema extends TSchema = TSchema>(
-  contract: ToolContract<Params, Details, Schema>,
+  contract: ToolTypes.ToolContract<Params, Details, Schema>,
   ui: PiToolUi<Schema, Details> = {},
 ): ToolDefinition<Schema, Details, any> {
   return {
