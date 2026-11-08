@@ -2,6 +2,7 @@
   "extensionsDir": "extensions",
   "externals": [
     "@earendil-works/pi-coding-agent",
+    "@earendil-works/pi-durable",
     "@earendil-works/pi-ai",
     "@earendil-works/pi-tui",
     "@earendil-works/pi-agent-core",
@@ -24,6 +25,12 @@
       {
         "entry": "cli-main.ts",
         "outfile": "dist/cli.js"
+      }
+    ],
+    "notes": [
+      {
+        "entry": "durable.ts",
+        "outfile": "dist/durable.js"
       }
     ],
     "dev-tools": [

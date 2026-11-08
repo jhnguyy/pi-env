@@ -79,7 +79,7 @@ Pi validates tool arguments as JSON Schema, not through TypeBox-specific refinem
 
 Declare `parameters` as one top-level object. Some provider adapters, including Pi's Anthropic adapter, send only top-level `properties` and `required`, so a top-level union reaches the model as an empty object. Check per-action combinations at execution, as the [notes contract](../../extensions/notes/contract.ts) does.
 
-The helper registers one native tool. It does not publish a second AgentTool or maintain a process-wide tool catalog. [toPiTool](../../extensions/_shared/tool-contract.ts) adapts contracts into native definitions. Native execution supplies each invocation's cwd, signal, and progress callback.
+The helper registers one native tool. It does not publish a second AgentTool or maintain a process-wide tool catalog. Host-independent contract types live in [domain-tool.ts](../../extensions/_shared/domain-tool.ts); [toPiTool](../../extensions/_shared/tool-contract.ts) adapts them into native definitions. Native execution supplies each invocation's cwd, signal, and progress callback. Keep host-specific configuration, rendering, and output limits outside shared domain execution; [notes](../notes.md) also exposes a durable entry point.
 
 Pass run-private definitions through `ResolvedSubagentRun.customTools` at the [native execution entrypoint](../../extensions/subagent/execute.ts). Select their names with `toolNames`; an explicit empty selection enables no tools. Do not publish run-bound callbacks globally. Native child sessions load ordinary extensions and receive only their run's supplied definitions.
 

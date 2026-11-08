@@ -2,25 +2,14 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 
-export type ToolProgress = (message: string) => void;
-
-export interface DomainToolContext {
-  cwd: string;
-  signal?: AbortSignal;
-  progress?: ToolProgress;
-}
-
-export type DomainToolExecutor<Params, Details = unknown> = (
-  params: Params,
-  context: DomainToolContext,
-) => Promise<AgentToolResult<Details>>;
-
-export type ToolContract<Params, Details = unknown, Schema extends TSchema = TSchema> = Pick<
-  ToolDefinition<Schema, Details>,
-  "name" | "label" | "description" | "parameters"
-> & {
-  execute: DomainToolExecutor<Params, Details>;
-};
+import type { ToolContract } from "./domain-tool";
+export type {
+  DomainToolContext,
+  DomainToolExecutor,
+  DomainToolResult,
+  ToolContract,
+  ToolProgress,
+} from "./domain-tool";
 
 export type PiToolUi<Schema extends TSchema, Details = unknown> = Pick<
   ToolDefinition<Schema, Details, any>,

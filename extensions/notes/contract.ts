@@ -1,12 +1,6 @@
-import {
-  DEFAULT_MAX_BYTES,
-  DEFAULT_MAX_LINES,
-  formatSize,
-  truncateHead,
-} from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
 import { Errors } from "typebox/value";
-import type { DomainToolContext, ToolContract } from "../_shared/tool-contract";
+import type { DomainToolContext, ToolContract } from "../_shared/domain-tool";
 import {
   DEFAULT_COLLECTION_LIMIT,
   MAX_COLLECTION_LIMIT,
@@ -545,6 +539,12 @@ type DocumentCollection = "projects" | "wiki";
 export interface NotesContractOptions {
   readonly now?: () => Date;
 }
+
+export const NOTES_PROMPT_GUIDELINES = [
+  "Use Store index before the first general Store interaction in a task.",
+  "Use collection actions for Inbox, Projects, Wiki, and Worklog content. Use Store mutation only for bounded maintenance and migration work.",
+  "Never store secrets, credentials, private keys, tokens, or raw sensitive dumps in notes.",
+];
 
 export const NOTES_DESCRIPTION = [
   "Read and maintain four note collections through the configured provider.",
@@ -1647,17 +1647,9 @@ function conflict(notePath: string): NotesProviderError {
 }
 
 function result(text: string, details: NotesToolDetails) {
-  const truncated = truncateHead(text, {
-    maxBytes: DEFAULT_MAX_BYTES,
-    maxLines: DEFAULT_MAX_LINES,
-  });
-  const boundedText = truncated.truncated
-    ? `${truncated.content}\n\n[Output truncated: ${formatSize(truncated.outputBytes)} of ${formatSize(truncated.totalBytes)}.]`
-    : truncated.content;
-  const boundedDetails = boundDetails(details);
   return {
-    content: [{ type: "text" as const, text: boundedText }],
-    details: truncated.truncated ? { ...boundedDetails, truncated: true } : boundedDetails,
+    content: [{ type: "text" as const, text }],
+    details: boundDetails(details),
   };
 }
 
