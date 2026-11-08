@@ -1,5 +1,9 @@
 import type { AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  createEventBus,
+  type ExtensionAPI,
+  type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { Effect, Result } from "effect";
 
 import {
@@ -83,7 +87,7 @@ export class SubagentSessionRuntime {
   private telemetryRuntime: ToolingTelemetryRuntime | undefined;
   private supervisor: SubagentRunSupervisor | undefined;
   private supervisorSessionId: string | undefined;
-  private readonly childListeners = new Set<() => void>();
+  private readonly childChanges = createEventBus();
   private unsubscribeChildren: (() => void) | undefined;
   private sessionStorage: SubagentRuntimeConfig["sessionStorage"] =
     DEFAULT_SUBAGENT_CONFIG.sessionStorage;
@@ -124,7 +128,6 @@ export class SubagentSessionRuntime {
           ledger: this.ledger,
           runId: toolCallId,
           supervisor,
-          onChild: (child) => supervisor.retainChild(child),
           sessionStorage:
             this.sessionState === SubagentSessionState.Active ? this.sessionStorage : undefined,
           telemetryRuntime:
@@ -145,18 +148,11 @@ export class SubagentSessionRuntime {
   };
 
   subscribeChildren(listener: () => void): () => void {
-    this.childListeners.add(listener);
-    return () => {
-      this.childListeners.delete(listener);
-    };
+    return this.childChanges.on("change", listener);
   }
 
   private notifyChildrenChanged(): void {
-    for (const listener of this.childListeners) {
-      try {
-        listener();
-      } catch {}
-    }
+    this.childChanges.emit("change", undefined);
   }
 
   listChildren() {
@@ -165,6 +161,10 @@ export class SubagentSessionRuntime {
 
   inspectChild(id: string) {
     return this.supervisor?.children.get(id)?.inspect();
+  }
+
+  inspectChildTools(id: string) {
+    return this.supervisor?.children.get(id)?.inspectTools();
   }
 
   inputChild(id: string, text: string, mode: ChildTypes.NativeInputMode) {

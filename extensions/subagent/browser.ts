@@ -18,7 +18,7 @@ import * as Transcript from "./transcript";
 
 type BrowserSource = Pick<
   SessionRuntime.SubagentSessionRuntime,
-  "listChildren" | "inspectChild" | "cancelChild" | "subscribeChildren"
+  "listChildren" | "inspectChild" | "inspectChildTools" | "cancelChild" | "subscribeChildren"
 >;
 type Child = NonNullable<ReturnType<BrowserSource["inspectChild"]>>;
 type ChildSummary = ReturnType<BrowserSource["listChildren"]>[number];
@@ -54,8 +54,10 @@ export class SubagentBrowser implements Component, Focusable {
   private bodyText = "";
   private status = "";
   private disposed = false;
+  private visible = true;
   private hasFocus = false;
   private readonly unsubscribe: () => void;
+  private toolWatch: ReturnType<typeof setInterval> | undefined;
   private height = 10;
 
   constructor(
@@ -67,7 +69,7 @@ export class SubagentBrowser implements Component, Focusable {
   ) {
     this.list = this.createList();
     this.unsubscribe = source.subscribeChildren(() => {
-      if (!this.disposed) this.tui.requestRender();
+      if (!this.disposed && this.visible) this.tui.requestRender();
     });
   }
 
@@ -167,10 +169,51 @@ export class SubagentBrowser implements Component, Focusable {
         this.rosterKey = "";
         this.updateRoster();
       }
+      this.updateToolWatch();
     } catch (error) {
       this.showStatus(error instanceof Error ? error.message : String(error));
     }
     this.tui.requestRender();
+  }
+
+  setVisible(visible: boolean): void {
+    this.visible = visible;
+    this.updateToolWatch();
+    if (visible && !this.disposed) this.tui.requestRender();
+  }
+
+  private stopToolWatch(): void {
+    clearInterval(this.toolWatch);
+    this.toolWatch = undefined;
+  }
+
+  private updateToolWatch(): void {
+    if (this.disposed || !this.visible || this.view !== "configuration" || !this.selectedId) {
+      this.stopToolWatch();
+      return;
+    }
+    if (this.toolWatch) return;
+    const id = this.selectedId;
+    let previous = JSON.stringify(this.source.inspectChildTools(id));
+    // Pi 1.5 has no public tool-registry change event. Check names only while
+    // Configuration is visible; idle checks must not clone native transcripts.
+    this.toolWatch = setInterval(() => {
+      if (this.disposed || !this.visible || this.view !== "configuration" || this.selectedId !== id)
+        return;
+      try {
+        const tools = this.source.inspectChildTools(id);
+        const next = JSON.stringify(tools);
+        if (next !== previous) {
+          previous = next;
+          this.tui.requestRender();
+        }
+        if (!tools) this.stopToolWatch();
+      } catch (error) {
+        this.stopToolWatch();
+        this.showStatus(error instanceof Error ? error.message : String(error));
+      }
+    }, 500);
+    this.toolWatch.unref();
   }
 
   private handleChildInput(data: string): void {
@@ -293,6 +336,7 @@ export class SubagentBrowser implements Component, Focusable {
   dispose(): void {
     if (!this.disposed) {
       this.disposed = true;
+      this.stopToolWatch();
       this.unsubscribe();
     }
   }

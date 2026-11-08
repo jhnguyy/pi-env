@@ -10,6 +10,7 @@ it("requests renders on child changes, not idle time, and unsubscribes on dispos
   const source = {
     listChildren: () => [],
     inspectChild: () => undefined,
+    inspectChildTools: () => undefined,
     cancelChild: async () => {},
     subscribeChildren: (listener: () => void) => {
       listeners.add(listener);
@@ -39,6 +40,94 @@ it("requests renders on child changes, not idle time, and unsubscribes on dispos
   } finally {
     browser.dispose();
     poll.mockRestore();
+  }
+});
+
+it("checks only tool names while Configuration is open and renders only changes", () => {
+  const poll = vi.spyOn(globalThis, "setInterval");
+  const stop = vi.spyOn(globalThis, "clearInterval");
+  const child = {
+    id: "idle-child",
+    runId: "run",
+    name: "idle",
+    task: "task",
+    cwd: "/target",
+    sessionFile: undefined,
+    model: undefined,
+    systemPrompt: "",
+    activeTools: ["read"],
+    callableTools: ["read"],
+    messages: [],
+    inputs: [],
+    state: ChildTypes.NativeChildState.Idle,
+  };
+  const inspectChild = vi.fn(() => child);
+  const inspectChildTools = vi.fn(() => ({
+    activeTools: child.activeTools,
+    callableTools: child.callableTools,
+  }));
+  const requestRender = vi.fn();
+  const browser = new Browser.SubagentBrowser(
+    {
+      listChildren: () => [child],
+      inspectChild,
+      inspectChildTools,
+      cancelChild: async () => {},
+      subscribeChildren: () => () => {},
+    },
+    { terminal: { rows: 60 }, requestRender } as any,
+    { fg: (_color: string, text: string) => text } as any,
+    () => {},
+    async () => {},
+  );
+  try {
+    browser.render(160);
+    browser.handleInput("\r");
+    browser.handleInput("\t");
+    expect(poll).not.toHaveBeenCalled();
+    browser.handleInput("\t");
+    browser.render(160);
+    expect(poll).toHaveBeenCalledOnce();
+    const tick = poll.mock.calls[0][0];
+    requestRender.mockClear();
+    inspectChild.mockClear();
+    tick();
+    expect(inspectChildTools).toHaveBeenCalled();
+    expect(inspectChild).not.toHaveBeenCalled();
+    expect(requestRender).not.toHaveBeenCalled();
+    child.activeTools = ["read", "late"];
+    child.callableTools = ["read", "late"];
+    tick();
+    expect(requestRender).toHaveBeenCalledOnce();
+    tick();
+    expect(requestRender).toHaveBeenCalledOnce();
+    expect(browser.render(160).join("\n")).toContain("late");
+    browser.setVisible(false);
+    expect(stop).toHaveBeenCalledWith(poll.mock.results[0].value);
+    const hiddenReads = inspectChildTools.mock.calls.length;
+    tick();
+    expect(inspectChildTools).toHaveBeenCalledTimes(hiddenReads);
+    requestRender.mockClear();
+    browser.setVisible(true);
+    expect(requestRender).toHaveBeenCalledOnce();
+    browser.handleInput("\t");
+    expect(stop).toHaveBeenCalledWith(poll.mock.results.at(-1)!.value);
+    const reads = inspectChildTools.mock.calls.length;
+    tick();
+    expect(inspectChildTools).toHaveBeenCalledTimes(reads);
+    browser.handleInput("\t");
+    browser.handleInput("\t");
+    browser.handleInput("\t");
+    const finalTick = poll.mock.calls.at(-1)![0];
+    const finalReads = inspectChildTools.mock.calls.length;
+    browser.dispose();
+    expect(stop).toHaveBeenCalledWith(poll.mock.results.at(-1)!.value);
+    finalTick();
+    expect(inspectChildTools).toHaveBeenCalledTimes(finalReads);
+  } finally {
+    browser.dispose();
+    poll.mockRestore();
+    stop.mockRestore();
   }
 });
 
@@ -74,6 +163,10 @@ it("renders supplied snapshot fields and handles supported editor shortcut keys"
   const source = {
     listChildren: () => [child],
     inspectChild: () => child,
+    inspectChildTools: () => ({
+      activeTools: child.activeTools,
+      callableTools: child.callableTools,
+    }),
     cancelChild: async () => {},
     subscribeChildren: () => () => {},
   };
@@ -148,6 +241,7 @@ it("bounds rendered dimensions on resize and ignores keys after view disposal", 
   const source = {
     listChildren: () => [],
     inspectChild: () => undefined,
+    inspectChildTools: () => undefined,
     cancelChild: async () => {},
     subscribeChildren: () => () => {},
   };

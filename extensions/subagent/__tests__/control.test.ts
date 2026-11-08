@@ -84,6 +84,9 @@ describe("shared subagent run supervisor", () => {
         inspect: () => {
           throw new Error("unused inspection");
         },
+        inspectTools: () => {
+          throw new Error("unused tool inspection");
+        },
         input: async () => {
           throw new Error("unused input");
         },

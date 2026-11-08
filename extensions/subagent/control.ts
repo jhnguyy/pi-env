@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Data, Effect } from "effect";
+import { createEventBus } from "@earendil-works/pi-coding-agent";
 
 import type { SubagentRuntimeConfig } from "./config";
 import type { UsageStats } from "./types";
@@ -97,7 +98,7 @@ export class SubagentRunSupervisor {
   private readonly totalUsage = zeroUsage();
   private readonly usageByRun = new Map<string, UsageStats>();
   readonly children = new Map<string, ChildTypes.NativeChildSession>();
-  private readonly childListeners = new Set<() => void>();
+  private readonly childChanges = createEventBus();
   private readonly evicting = new Set<string>();
   private readonly evictionFailures: Error[] = [];
   private omittedEvictionFailures = 0;
@@ -165,19 +166,11 @@ export class SubagentRunSupervisor {
   }
 
   subscribeChildren(listener: () => void): () => void {
-    this.childListeners.add(listener);
-    return () => {
-      this.childListeners.delete(listener);
-    };
+    return this.childChanges.on("change", listener);
   }
 
   notifyChildrenChanged(): void {
-    for (const listener of this.childListeners) {
-      // Observers must not interrupt admission, execution, or cleanup.
-      try {
-        listener();
-      } catch {}
-    }
+    this.childChanges.emit("change", undefined);
   }
 
   retainChild(child: ChildTypes.NativeChildSession): void {
@@ -245,6 +238,7 @@ export class SubagentRunSupervisor {
     const outcomes = await closingChildren;
     this.children.clear();
     this.notifyChildrenChanged();
+    this.childChanges.clear();
     const failures = [
       ...this.evictionFailures,
       ...outcomes
