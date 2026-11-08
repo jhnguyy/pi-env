@@ -21,6 +21,7 @@ it("refreshes changed configuration without idle transcript work and releases ba
     messages: [],
     inputs: [],
     state: ChildTypes.NativeChildState.Idle,
+    availableInputs: [ChildTypes.NativeInputMode.Prompt],
   };
   const inspectChild = vi.fn(() => child);
   const inspectChildTools = vi.fn(() => ({
@@ -115,13 +116,14 @@ it("renders supplied snapshot fields and handles supported editor shortcut keys"
     messages: [],
     inputs: [
       {
-        source: ChildTypes.NativeInputSource.Human,
+        source: ChildTypes.InputProvenance.Human,
         mode: ChildTypes.NativeInputMode.Prompt,
         text: "Human original\nsecond line",
         at: "now",
       },
     ],
-    state: ChildTypes.NativeChildState.Idle,
+    state: ChildTypes.NativeChildState.Running,
+    availableInputs: [],
   };
   let viewOpen = true;
   let editorTitle = "";
@@ -177,13 +179,13 @@ it("renders supplied snapshot fields and handles supported editor shortcut keys"
     ).toContain("Human original\nsecond line");
     browser.handleInput("s");
     expect(editorTitle).toBe("");
-    expect(browser.render(160).join("\n")).toContain("require a running child");
     for (const [state, key, mode] of [
       [ChildTypes.NativeChildState.Idle, "p", ChildTypes.NativeInputMode.Prompt],
       [ChildTypes.NativeChildState.Running, "s", ChildTypes.NativeInputMode.Steer],
       [ChildTypes.NativeChildState.Running, "f", ChildTypes.NativeInputMode.FollowUp],
     ] as const) {
       child.state = state;
+      child.availableInputs = [mode];
       browser.showStatus("Ready");
       browser.handleInput(key);
       await Promise.resolve();

@@ -79,6 +79,19 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
     };
   }
 
+  private availableInputs(): readonly ChildTypes.NativeInputMode[] {
+    switch (this.state) {
+      case ChildTypes.NativeChildState.Idle:
+        return this.session ? [ChildTypes.NativeInputMode.Prompt] : [];
+      case ChildTypes.NativeChildState.Running:
+        return this.session?.isStreaming
+          ? [ChildTypes.NativeInputMode.Steer, ChildTypes.NativeInputMode.FollowUp]
+          : [];
+      default:
+        return [];
+    }
+  }
+
   inspectTools(): Pick<ChildTypes.NativeChildSnapshot, "activeTools" | "callableTools"> {
     return {
       activeTools: this.session?.getActiveToolNames() ?? [],
@@ -101,6 +114,7 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
       messages: structuredClone(session?.messages ?? []),
       inputs: structuredClone(this.inputs),
       state: this.state,
+      availableInputs: this.availableInputs(),
       initialResult: this.initialResult && structuredClone(this.initialResult),
     };
   }
@@ -184,12 +198,13 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
     this.startupServices = undefined;
     this.unsubscribeChanges = this.session.subscribe((event) => {
       // The browser shows finalized context, not in-flight token deltas.
-      if (
-        event.type === "message_end" ||
-        event.type === "compaction_end" ||
-        event.type === "agent_settled"
-      )
-        this.supervisor.notifyChildrenChanged();
+      switch (event.type) {
+        case "message_end":
+        case "compaction_end":
+        case "agent_settled":
+          this.supervisor.notifyChildrenChanged();
+          break;
+      }
     });
     await this.session.bindExtensions({ mode: "print" });
   }
@@ -342,7 +357,7 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
           this.record(
             this.run.task,
             ChildTypes.NativeInputMode.Prompt,
-            ChildTypes.NativeInputSource.Coordinator,
+            ChildTypes.InputProvenance.Coordinator,
           );
           await session.prompt(this.run.task, { source: "extension" });
           await session.waitForIdle();
@@ -378,22 +393,24 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
     text: string,
     mode: ChildTypes.NativeInputMode,
   ): Promise<ChildTypes.NativeInputResult> {
-    if (
-      this.state === ChildTypes.NativeChildState.Closing ||
-      this.state === ChildTypes.NativeChildState.Closed
-    )
-      throw new Error(`Child is ${this.state}`);
-    if (
-      mode !== ChildTypes.NativeInputMode.Prompt &&
-      mode !== ChildTypes.NativeInputMode.Steer &&
-      mode !== ChildTypes.NativeInputMode.FollowUp
-    )
-      throw new Error("Invalid input mode");
+    switch (mode) {
+      case ChildTypes.NativeInputMode.Prompt:
+      case ChildTypes.NativeInputMode.Steer:
+      case ChildTypes.NativeInputMode.FollowUp:
+        break;
+      default:
+        throw new Error("Invalid input mode");
+    }
+    const available = this.availableInputs();
+    if (!available.includes(mode))
+      throw new Error(
+        mode === ChildTypes.NativeInputMode.Prompt
+          ? `prompt unavailable: child is ${this.state}`
+          : `${mode} requires a streaming child; child is ${this.state}`,
+      );
     if (mode !== ChildTypes.NativeInputMode.Prompt) {
-      if (this.state !== ChildTypes.NativeChildState.Running || !this.session?.isStreaming)
-        throw new Error(`${mode} requires a streaming child`);
       const pending = this.context(async () => {
-        this.record(text, mode, ChildTypes.NativeInputSource.Human);
+        this.record(text, mode, ChildTypes.InputProvenance.Human);
         return { outcome: await this.session![mode](text, undefined, { source: "interactive" }) };
       });
       this.pendingInputs.add(pending);
@@ -404,7 +421,7 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
       }
     }
     return this.schedule(false, async () => {
-      this.record(text, mode, ChildTypes.NativeInputSource.Human);
+      this.record(text, mode, ChildTypes.InputProvenance.Human);
       const usage = new Usage.SubagentRunAccumulator(
         {
           name: this.run.name,

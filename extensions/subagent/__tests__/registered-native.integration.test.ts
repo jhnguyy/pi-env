@@ -213,6 +213,7 @@ export default function(pi) {
       (child) => child.summary().name === "sync",
     )!;
     expect(syncChild.inspect().initialResult?.finalOutput).toBe("sync initial complete");
+    expect(syncChild.inspect().availableInputs).toEqual([ChildTypes.NativeInputMode.Prompt]);
     expect(syncChild.inspect().messages).toContainEqual(
       expect.objectContaining({
         role: "toolResult",

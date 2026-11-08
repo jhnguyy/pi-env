@@ -234,17 +234,10 @@ export class SubagentBrowser implements Component, Focusable {
     if (mode) {
       const child = this.source.inspectChild(id);
       if (!child) throw new Error("Child session is no longer retained.");
-      if (
-        mode === ChildTypes.NativeInputMode.Prompt
-          ? child.state !== ChildTypes.NativeChildState.Idle
-          : child.state !== ChildTypes.NativeChildState.Running
-      ) {
+      if (!child.availableInputs.includes(mode))
         throw new Error(
-          mode === ChildTypes.NativeInputMode.Prompt
-            ? "Use prompt only when idle; use steer or follow-up while running."
-            : "Steer and follow-up require a running child; use prompt when idle.",
+          `${mode} unavailable. Available inputs: ${child.availableInputs.join(", ") || "none"}.`,
         );
-      }
       void this.compose(id, mode).catch((error) =>
         this.showStatus(error instanceof Error ? error.message : String(error)),
       );
