@@ -133,38 +133,32 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
     },
   );
 
-  it("forwards child changes across session replacement and detaches old supervisors", async () => {
-    const runtime = makeRuntime();
-    const changed = vi.fn();
-    const unsubscribe = runtime.subscribeChildren(changed);
-    testCleanup()(unsubscribe);
-    const first = sessionContext();
-    await runtime.startSession(first);
-    const previous = getSubagentRunSupervisor(first.sessionManager.getSessionId())!;
-    changed.mockClear();
-    previous.notifyChildrenChanged();
-    expect(changed).toHaveBeenCalledOnce();
-    const second = sessionContext();
-    await runtime.startSession(second);
-    changed.mockClear();
-    previous.notifyChildrenChanged();
-    expect(changed).not.toHaveBeenCalled();
-    getSubagentRunSupervisor(second.sessionManager.getSessionId())!.notifyChildrenChanged();
-    expect(changed).toHaveBeenCalledOnce();
-    unsubscribe();
-    getSubagentRunSupervisor(second.sessionManager.getSessionId())!.notifyChildrenChanged();
-    expect(changed).toHaveBeenCalledOnce();
-  });
-
-  it("disposes replaced telemetry exactly once and ignores repeated shutdown", async () => {
+  it("replaces owned resources once and keeps child views current", async () => {
     const runtime = makeRuntime();
     const ctx = sessionContext();
+    let visibleIds: string[] = [];
+    testCleanup()(
+      runtime.subscribeChildren(() => {
+        visibleIds = runtime.listChildren().map((child) => child.id);
+      }),
+    );
+    const retained = (id: string) =>
+      ({
+        id,
+        summary: () => ({ id }),
+        close: async () => {},
+      }) as any;
 
     await runtime.startSession(ctx);
+    getSubagentRunSupervisor(ctx.sessionManager.getSessionId())!.retainChild(retained("first"));
+    expect(visibleIds).toEqual(["first"]);
     await runtime.startSession(ctx);
+    getSubagentRunSupervisor(ctx.sessionManager.getSessionId())!.retainChild(retained("second"));
+    expect(visibleIds).toEqual(["second"]);
     await runtime.shutdownSession();
     await runtime.shutdownSession();
 
+    expect(visibleIds).toEqual([]);
     expect(runtimeState.created).toBe(2);
     expect([...runtimeState.disposed.values()]).toEqual([1, 1]);
     expect(runtime.state).toBe("inactive");

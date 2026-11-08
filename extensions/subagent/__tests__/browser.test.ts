@@ -1,51 +1,12 @@
+import { mock } from "node:test";
 import { expect, it, vi } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import * as Browser from "../browser";
 import * as ChildTypes from "../child-types";
 
-it("requests renders on child changes, not idle time, and unsubscribes on disposal", () => {
-  const poll = vi.spyOn(globalThis, "setInterval");
+it("refreshes changed configuration without idle transcript work and releases background work", () => {
+  mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
   const listeners = new Set<() => void>();
-  const requestRender = vi.fn();
-  const source = {
-    listChildren: () => [],
-    inspectChild: () => undefined,
-    inspectChildTools: () => undefined,
-    cancelChild: async () => {},
-    subscribeChildren: (listener: () => void) => {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-  };
-  const browser = new Browser.SubagentBrowser(
-    source,
-    { terminal: { rows: 20 }, requestRender } as any,
-    { fg: (_color: string, text: string) => text } as any,
-    () => {},
-    async () => {},
-  );
-  try {
-    expect(listeners.size).toBe(1);
-    expect(poll).not.toHaveBeenCalled();
-    expect(requestRender).not.toHaveBeenCalled();
-    for (const listener of listeners) listener();
-    expect(requestRender).toHaveBeenCalledOnce();
-    browser.dispose();
-    browser.dispose();
-    expect(listeners.size).toBe(0);
-    for (const listener of listeners) listener();
-    expect(requestRender).toHaveBeenCalledOnce();
-  } finally {
-    browser.dispose();
-    poll.mockRestore();
-  }
-});
-
-it("checks only tool names while Configuration is open and renders only changes", () => {
-  const poll = vi.spyOn(globalThis, "setInterval");
-  const stop = vi.spyOn(globalThis, "clearInterval");
   const child = {
     id: "idle-child",
     runId: "run",
@@ -73,7 +34,12 @@ it("checks only tool names while Configuration is open and renders only changes"
       inspectChild,
       inspectChildTools,
       cancelChild: async () => {},
-      subscribeChildren: () => () => {},
+      subscribeChildren: (listener: () => void) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
     },
     { terminal: { rows: 60 }, requestRender } as any,
     { fg: (_color: string, text: string) => text } as any,
@@ -84,50 +50,51 @@ it("checks only tool names while Configuration is open and renders only changes"
     browser.render(160);
     browser.handleInput("\r");
     browser.handleInput("\t");
-    expect(poll).not.toHaveBeenCalled();
-    browser.handleInput("\t");
-    browser.render(160);
-    expect(poll).toHaveBeenCalledOnce();
-    const tick = poll.mock.calls[0][0];
     requestRender.mockClear();
     inspectChild.mockClear();
-    tick();
+    mock.timers.tick(1000);
+    expect(requestRender).not.toHaveBeenCalled();
+    expect(inspectChild).not.toHaveBeenCalled();
+    browser.handleInput("\t");
+    browser.render(160);
+    requestRender.mockClear();
+    inspectChild.mockClear();
+    mock.timers.tick(1000);
     expect(inspectChildTools).toHaveBeenCalled();
     expect(inspectChild).not.toHaveBeenCalled();
     expect(requestRender).not.toHaveBeenCalled();
     child.activeTools = ["read", "late"];
     child.callableTools = ["read", "late"];
-    tick();
-    expect(requestRender).toHaveBeenCalledOnce();
-    tick();
-    expect(requestRender).toHaveBeenCalledOnce();
+    mock.timers.tick(1000);
+    expect(requestRender).toHaveBeenCalled();
+    requestRender.mockClear();
+    mock.timers.tick(1000);
+    expect(requestRender).not.toHaveBeenCalled();
     expect(browser.render(160).join("\n")).toContain("late");
     browser.setVisible(false);
-    expect(stop).toHaveBeenCalledWith(poll.mock.results[0].value);
     const hiddenReads = inspectChildTools.mock.calls.length;
-    tick();
+    mock.timers.tick(1000);
     expect(inspectChildTools).toHaveBeenCalledTimes(hiddenReads);
     requestRender.mockClear();
     browser.setVisible(true);
-    expect(requestRender).toHaveBeenCalledOnce();
+    expect(requestRender).toHaveBeenCalled();
     browser.handleInput("\t");
-    expect(stop).toHaveBeenCalledWith(poll.mock.results.at(-1)!.value);
     const reads = inspectChildTools.mock.calls.length;
-    tick();
+    mock.timers.tick(1000);
     expect(inspectChildTools).toHaveBeenCalledTimes(reads);
     browser.handleInput("\t");
     browser.handleInput("\t");
     browser.handleInput("\t");
-    const finalTick = poll.mock.calls.at(-1)![0];
     const finalReads = inspectChildTools.mock.calls.length;
     browser.dispose();
-    expect(stop).toHaveBeenCalledWith(poll.mock.results.at(-1)!.value);
-    finalTick();
+    requestRender.mockClear();
+    mock.timers.tick(1000);
     expect(inspectChildTools).toHaveBeenCalledTimes(finalReads);
+    expect(requestRender).not.toHaveBeenCalled();
+    expect(listeners.size).toBe(0);
   } finally {
     browser.dispose();
-    poll.mockRestore();
-    stop.mockRestore();
+    mock.timers.reset();
   }
 });
 

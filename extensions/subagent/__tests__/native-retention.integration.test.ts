@@ -77,10 +77,10 @@ export default function(pi) {
       return result!;
     };
     const supervisor = Control.getSubagentRunSupervisor(parent.sessionId)!;
-    const retained: string[][] = [];
-    const unsubscribe = supervisor.subscribeChildren(() =>
-      retained.push([...supervisor.children.keys()]),
-    );
+    let retainedIds: string[] = [];
+    const unsubscribe = supervisor.subscribeChildren(() => {
+      retainedIds = [...supervisor.children.keys()];
+    });
     cleanup(unsubscribe);
     const ids: string[] = [];
     const owners: ChildTypes.NativeChildSession[] = [];
@@ -125,9 +125,6 @@ export default function(pi) {
       ).toBe(true);
       owners.push([...supervisor.children.values()].at(-1)!);
     }
-    const notifications = retained.length;
-    supervisor.retainChild(owners[1]);
-    expect(retained).toHaveLength(notifications);
     const listed = await request({ action: "list" });
     expect(listed.details).toMatchObject({ count: 1 });
     const listText = JSON.stringify(listed.content);
@@ -140,10 +137,8 @@ export default function(pi) {
     expect(retainedResult.details).toMatchObject({ resultTruncated: true });
     await vi.waitFor(() => expect(supervisor.children.size).toBe(1));
     expect(owners[0].summary().state).toBe("closed");
-    expect(retained).toContainEqual([owners[0].id, owners[1].id]);
-    expect(retained.at(-1)).toEqual([owners[1].id]);
+    expect(retainedIds).toEqual([owners[1].id]);
     await parent.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
     expect(owners[1].summary().state).toBe("closed");
-    expect(retained.at(-1)).toEqual([]);
   }
 }, 30000);

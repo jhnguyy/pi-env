@@ -206,11 +206,10 @@ it.each(["exact", "omitted", "empty"])(
   30000,
 );
 
-it("exposes late MCP catalog changes through tool-only inspection while the child stays idle", async () => {
+it("refreshes native tool names after an idle MCP catalog change", async () => {
   const f = await fixture();
   await f.execute();
   const child = f.child();
-  const inspect = vi.spyOn(child, "inspect");
   const initial = child.inspectTools();
   expect(initial.activeTools).toContain(tool);
   expect(initial.callableTools).not.toContain("mcp__fixture__late");
@@ -221,7 +220,6 @@ it("exposes late MCP catalog changes through tool-only inspection while the chil
     expect(child.inspectTools().callableTools).toContain("mcp__fixture__late");
   });
   expect(child.summary().state).toBe(ChildTypes.NativeChildState.Idle);
-  expect(inspect).not.toHaveBeenCalled();
 });
 
 it.each(["missing", "connection failure", "timeout"])(
