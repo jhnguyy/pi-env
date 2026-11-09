@@ -34,12 +34,6 @@ const it = test.extend({
     try {
       await symlink(join(repo, "scripts"), join(root, "scripts"), "dir");
       await symlink(join(repo, "node_modules"), join(root, "node_modules"), "dir");
-      await mkdir(join(root, "extensions/analyze"), { recursive: true });
-      await symlink(
-        join(repo, "extensions/analyze/dist"),
-        join(root, "extensions/analyze/dist"),
-        "dir",
-      );
       await copyFile(join(repo, ".oxlintrc-sensors.json"), join(root, ".oxlintrc-sensors.json"));
       await writeFile(
         join(root, "package.json"),
@@ -142,55 +136,55 @@ test("selects no work for an empty delta and only formatting for documentation",
   ]);
 });
 
-test("selects source checks and related units without whole-project type analysis", () => {
-  expect(
-    changedVerificationPlan({
-      base: "main",
-      files: ["src/feature/value.ts"],
-      edited: ["src/feature/value.ts"],
-    }),
-  ).toEqual([
-    {
-      label: "format:files",
-      command: "nub",
-      args: ["run", "format:files", "--check", "--", "src/feature/value.ts"],
-    },
-    {
-      label: "check:patterns",
-      command: "nub",
-      args: ["run", "check:patterns", "src/feature/value.ts"],
-    },
-    {
-      label: "lint:changed",
-      command: "nub",
-      args: ["run", "lint:changed", "--", "src/feature/value.ts"],
-    },
-    {
-      label: "check:duplicates:changed",
-      command: "nub",
-      args: ["run", "check:duplicates:changed", "--ref", "main"],
-    },
-    {
-      label: "check:async-risk:changed",
-      command: "nub",
-      args: ["run", "check:async-risk:changed", "--ref", "main"],
-    },
-    {
-      label: "test:unit",
-      command: "nub",
-      args: [
-        "run",
-        "test:unit",
-        "related",
-        "--maxWorkers=1",
-        "--no-file-parallelism",
-        "--bail=1",
-        "--passWithNoTests",
-        "./src/feature/value.ts",
-      ],
-    },
-  ]);
-});
+test.each([false, true])(
+  "keeps Analyze out of source verification (checksOnly=%s)",
+  (checksOnly) => {
+    expect(
+      changedVerificationPlan(
+        {
+          base: "main",
+          files: ["src/feature/value.ts"],
+          edited: ["src/feature/value.ts"],
+        },
+        { checksOnly },
+      ),
+    ).toEqual([
+      {
+        label: "format:files",
+        command: "nub",
+        args: ["run", "format:files", "--check", "--", "src/feature/value.ts"],
+      },
+      {
+        label: "check:patterns",
+        command: "nub",
+        args: ["run", "check:patterns", "src/feature/value.ts"],
+      },
+      {
+        label: "lint:changed",
+        command: "nub",
+        args: ["run", "lint:changed", "--", "src/feature/value.ts"],
+      },
+      ...(checksOnly
+        ? []
+        : [
+            {
+              label: "test:unit",
+              command: "nub",
+              args: [
+                "run",
+                "test:unit",
+                "related",
+                "--maxWorkers=1",
+                "--no-file-parallelism",
+                "--bail=1",
+                "--passWithNoTests",
+                "./src/feature/value.ts",
+              ],
+            },
+          ]),
+    ]);
+  },
+);
 
 it("lints the complete changed file without linting unchanged files", async ({ workspace }) => {
   // The complexity violation is already in the baseline; changing only the final
@@ -265,6 +259,8 @@ it("preserves sensor exclusions and nonblocking advisory awaits", async ({ works
   ]);
   const result = await workspace.verify(["--checks-only"]);
   expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+  const sensors = await workspace.run("sensors");
+  expect(sensors.exitCode, `${sensors.stdout}\n${sensors.stderr}`).toBe(0);
 });
 
 it("keeps both sides of a rename for impact selection but never passes deleted paths to source checkers", async ({
@@ -299,7 +295,7 @@ it("checks every changed shell script rather than treating later paths as argume
   expect(result.stderr).toContain("second.sh");
 });
 
-it("runs the owning component and transitive consumers without running unrelated tests", async ({
+it("runs related units without Analyze build artifacts or unrelated tests", async ({
   workspace,
 }) => {
   await writeFile(join(workspace.root, "src/feature/value.ts"), "export const value = 2;\n");
