@@ -60,6 +60,8 @@ All native operations conservatively acquire a workspace write lease. Native cal
 
 Parent and child codemode scripts share Pi's process-wide worker limit (`PI_CODEMODE_MAX_WORKERS`). A parent script waiting for children occupies a slot, and `maxConcurrentRuns` does not raise the upstream limit.
 
+Accepted background jobs belong to the parent session, including while queued. Finishing or interrupting the launching turn, or sending another prompt, does not cancel them. Use `subagent` with `action: "cancel"` to cancel a job; interrupting `wait` only stops waiting. Tree navigation also cancels and awaits current jobs. Jobs are not automatically restarted: earlier effects may already have occurred.
+
 Cancellation aborts native execution and waits for known tools and input hooks to settle. A running job remains `cancelling` until settlement. There is no grace-period force release or hard-kill guarantee. A run-time deadline requests abort; it does not prove that a remote effect stopped. Parent shutdown rejects new work and waits for owned work before releasing coordination.
 
 Native children do not initialize the root subagent, review, or session-manager interfaces. Advisory skill evaluation also remains a parent operation. Run-private tools are supplied directly to their native sessions, not published process-wide. Callers must close retained owners before deleting resources those owners may still use.
