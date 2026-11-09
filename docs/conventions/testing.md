@@ -2,6 +2,10 @@
 
 Use the [testing-practices skill](../../skills/testing-practices/SKILL.md) for the portable method: prove the target unit's functional promises through useful input/output seams and rely on established collaborator contracts. The conventions here apply that method to pi-env's suites, fixtures, and runtime boundaries. [Contribution guidance](../../CONTRIBUTING.md#verification) owns commands, build sequencing, and execution precautions.
 
+## Choose coverage by the behavior it protects
+
+Use verification commands to establish formatting, lint, type, and test-suite status. Focus automated tests on consequential behavior: diagnostic accuracy, failure propagation, cancellation, process cleanup, and resource ownership. Review test discovery, selection, and command wiring through configuration inspection and focused verification when those mechanisms change.
+
 ## Choose the suite and runtime
 
 Keep tests with their owning area under `__tests__`. The [Vitest configuration](../../vitest.config.ts) defines runnable roots and project selection: integration suites use `*.integration.test.ts` or `*.integration.test.mjs`, while E2E and real-workspace canary scenarios follow their configured filenames. Setup shell tests run separately using their [shared helpers](../../setup/__tests__/README.md).
