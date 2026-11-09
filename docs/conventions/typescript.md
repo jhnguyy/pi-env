@@ -25,7 +25,7 @@ export const LoadState = {
   DomContentLoaded: "domcontentloaded",
   NetworkIdle: "networkidle",
 } as const;
-export type LoadState = typeof LoadState[keyof typeof LoadState];
+export type LoadState = (typeof LoadState)[keyof typeof LoadState];
 
 await page.waitForLoadState(LoadState.DomContentLoaded);
 ```
@@ -82,4 +82,4 @@ For algebraic data types or error/result variants, prefer tagged objects/classes
 
 ## Lint
 
-Run `nub run lint:type`.
+Run `nub run lint` for full qualification. Use the [lint profiles](../lint.md) to select file-local, import-graph, or type-aware checks independently.

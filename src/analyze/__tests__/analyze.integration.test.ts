@@ -1240,7 +1240,14 @@ describe("external analyzers and parsers", () => {
       readFileSync(join(process.cwd(), "scripts/tool-node-run.sh")),
       { mode: 0o755 },
     );
-    writeFileSync(join(cwd, ".oxlintrc.json"), readFileSync(join(process.cwd(), ".oxlintrc.json")));
+    for (const config of [
+      ".oxlintrc.json",
+      ".oxlintrc-base.json",
+      ".oxlintrc-syntax.json",
+      ".oxlintrc-imports.json",
+      ".oxlintrc-types.json",
+    ])
+      writeFileSync(join(cwd, config), readFileSync(join(process.cwd(), config)));
     const findings = await Effect.runPromise(
       eslintAnalyzerEffect(cwd, allScope, 256).pipe(Effect.provide(processServiceLayer())),
     );

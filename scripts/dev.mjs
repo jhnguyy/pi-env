@@ -5,7 +5,6 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import * as HeavyweightLock from "./heavyweight-lock.mjs";
 import { changedFiles } from "./changed-files.mjs";
-import { runSupervisedNode } from "./run-supervised-node.mjs";
 import { changedVerificationPlan, unqualifiedGlobalInputs } from "./verification-plan.mjs";
 import { listPlan, runPlan } from "./verification-runner.mjs";
 
@@ -60,6 +59,12 @@ async function verify(args) {
     },
     { timeoutMs: HeavyweightLock.heavyweightLockTimeoutMs() },
   );
+}
+
+// Verification planning and checks do not need the Effect-backed process supervisor.
+async function runSupervisedNode(args) {
+  const supervisor = await import("./run-supervised-node.mjs");
+  return supervisor.runSupervisedNode(args);
 }
 
 async function dockerTests(args) {
