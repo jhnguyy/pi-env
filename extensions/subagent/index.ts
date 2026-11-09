@@ -301,7 +301,7 @@ export default function (
         }
         if (params.action === SubagentAction.Start) {
           if (signal?.aborted) throw new Error("Subagent start aborted.");
-          return runtime.startJob(requireRunParams(params), ctx, signal);
+          return runtime.startJob(requireRunParams(params), ctx);
         }
         return executeJobAction(params, signal);
       },

@@ -47,7 +47,6 @@ export interface SubagentJob {
   readonly controller: AbortController;
   readonly createdAt: string;
   finishedAt?: string;
-  startSignalCleanup?: () => void;
 }
 
 export type SubagentJobsChanged = (jobs: readonly SubagentJob[]) => void;
@@ -136,7 +135,7 @@ export class SubagentJobManager {
       supervisor ?? getOrCreateSubagentRunSupervisor(`jobs-${randomUUID()}`, this.config);
   }
 
-  start(params: SubagentParams, ctx: ExtensionContext, signal?: AbortSignal): SubagentJob {
+  start(params: SubagentParams, ctx: ExtensionContext): SubagentJob {
     const id = randomUUID();
     const done = Effect.runSync(Deferred.make<void>());
     const controller = new AbortController();
@@ -161,15 +160,7 @@ export class SubagentJobManager {
       return job;
     }
 
-    if (signal) {
-      const onAbort = () => this.cancel(id);
-      signal.addEventListener("abort", onAbort, { once: true });
-      job.startSignalCleanup = () => signal.removeEventListener("abort", onAbort);
-      if (signal.aborted) onAbort();
-    }
-    if (job.status === SubagentJobStatus.Queued) {
-      Effect.runFork(this.runEffect(job, params, ctx));
-    }
+    Effect.runFork(this.runEffect(job, params, ctx));
     return job;
   }
 
@@ -332,8 +323,6 @@ export class SubagentJobManager {
   }
 
   private finish(job: SubagentJob): void {
-    job.startSignalCleanup?.();
-    job.startSignalCleanup = undefined;
     if (job.latestDetails) this.ledger?.record(job.id, SubagentUsageMode.Async, job.latestDetails);
     this.record(job);
     Effect.runSync(Deferred.succeed(job.done, undefined));

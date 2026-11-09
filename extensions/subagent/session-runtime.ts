@@ -246,7 +246,6 @@ export class SubagentSessionRuntime {
   startJob(
     params: SubagentParams,
     ctx: ExtensionContext,
-    signal?: AbortSignal,
   ): AgentToolResult<SubagentJobRenderDetails> {
     if (this.sessionState !== SubagentSessionState.Active || !this.jobs) {
       return {
@@ -264,7 +263,7 @@ export class SubagentSessionRuntime {
       };
     }
     const normalizedParams = { ...params, cwd: cwd.value };
-    const job = this.jobs.start(normalizedParams, ctx, signal);
+    const job = this.jobs.start(normalizedParams, ctx);
     const message =
       job.status === SubagentJobStatus.Rejected
         ? `Rejected subagent job ${job.id} (${job.name}): ${job.errorMessage ?? "capacity unavailable"}.`
