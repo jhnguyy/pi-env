@@ -20,12 +20,7 @@ case "$profile" in
     config=.oxlintrc-sensors.json
     set -- --allow no-await-in-loop --no-error-on-unmatched-pattern "$@"
     ;;
-  syntax) config=.oxlintrc-syntax.json ;;
-  imports) config=.oxlintrc-imports.json ;;
-  types)
-    config=.oxlintrc-types.json
-    set -- --type-aware "$@"
-    ;;
+  syntax|imports|types) config=".oxlintrc-$profile.json" ;;
   *)
     echo "usage: scripts/lint.sh <all|syntax|imports|types|sensors|changed> [oxlint arguments...]" >&2
     exit 2

@@ -1,5 +1,5 @@
 {
-  "plugins": ["import", "typescript"],
-  "extends": ["./.oxlintrc-syntax.json", "./.oxlintrc-imports.json", "./.oxlintrc-types.json"],
-  "ignorePatterns": ["skills/**"]
+  "plugins": [],
+  "options": { "typeAware": false },
+  "extends": ["./.oxlintrc-syntax.json", "./.oxlintrc-imports.json", "./.oxlintrc-types.json"]
 }

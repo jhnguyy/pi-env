@@ -36,6 +36,7 @@ const it = test.extend({
       await symlink(join(repo, "setup"), join(root, "setup"), "dir");
       await symlink(join(repo, "node_modules"), join(root, "node_modules"), "dir");
       await copyFile(join(repo, ".oxlintrc-sensors.json"), join(root, ".oxlintrc-sensors.json"));
+      await copyFile(join(repo, ".eslintignore"), join(root, ".eslintignore"));
       await writeFile(
         join(root, "package.json"),
         JSON.stringify({ type: "module", engines: manifest.engines, scripts: manifest.scripts }),

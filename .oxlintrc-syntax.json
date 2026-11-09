@@ -1,7 +1,6 @@
 {
   "extends": ["./.oxlintrc-base.json"],
   "plugins": ["typescript"],
-  "ignorePatterns": ["skills/**"],
   "jsPlugins": [
     {
       "name": "anti-slop",

@@ -1241,6 +1241,7 @@ describe("external analyzers and parsers", () => {
       { mode: 0o755 },
     );
     for (const config of [
+      ".eslintignore",
       ".oxlintrc.json",
       ".oxlintrc-base.json",
       ".oxlintrc-syntax.json",

@@ -1,7 +1,7 @@
 {
   "extends": ["./.oxlintrc-base.json"],
   "plugins": ["typescript"],
-  "ignorePatterns": ["skills/**"],
+  "options": { "typeAware": true },
   "rules": {
     "typescript/await-thenable": "error",
     "typescript/no-deprecated": "error",

@@ -82,4 +82,4 @@ For algebraic data types or error/result variants, prefer tagged objects/classes
 
 ## Lint
 
-Run `nub run lint` for full qualification. Use the [lint profiles](../lint.md) to select file-local, import-graph, or type-aware checks independently.
+Use the [lint qualification workflow](../lint.md).

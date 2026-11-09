@@ -1,7 +1,6 @@
 {
   "extends": ["./.oxlintrc-base.json"],
   "plugins": ["import"],
-  "ignorePatterns": ["skills/**"],
   "rules": {
     "import/no-duplicates": "error",
     "import/no-empty-named-blocks": "error",
