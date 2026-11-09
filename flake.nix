@@ -3,11 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    hunk = {
-      url = "github:modem-dev/hunk/v0.24.1";
-      # Retain Intel macOS in Hunk and bun2nix's shared platform list.
-      inputs.systems.url = "github:nix-systems/default/da67096a3b9bf56a91d16901293e51ba5b49a27e";
-    };
+    hunk.url = "github:modem-dev/hunk/v0.24.1";
     nub = {
       url = "github:nubjs/nub/v0.10.0";
       inputs.nixpkgs.follows = "nixpkgs";

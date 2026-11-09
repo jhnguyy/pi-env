@@ -8,12 +8,11 @@ let
   systems = [
     "x86_64-linux"
     "aarch64-linux"
-    "x86_64-darwin"
     "aarch64-darwin"
   ];
   pkgsFor =
     system:
-    import (if system == "x86_64-darwin" then pi.inputs.nixpkgs-darwin-x64 else nixpkgs) {
+    import nixpkgs {
       inherit system;
     };
   manifest = builtins.fromJSON (builtins.readFile ../package.json);
@@ -54,16 +53,7 @@ let
         };
       nubPackage =
         let
-          # Reuse Nub's upstream packaging with Pi's supported Intel macOS input.
-          nubOutputs =
-            if pkgs.stdenv.hostPlatform.system == "x86_64-darwin" then
-              (import "${nub}/flake.nix").outputs {
-                self = nub;
-                nixpkgs = pi.inputs.nixpkgs-darwin-x64;
-              }
-            else
-              nub;
-          package = nubOutputs.packages.${pkgs.stdenv.hostPlatform.system}.default;
+          package = nub.packages.${pkgs.stdenv.hostPlatform.system}.default;
         in
         assert pkgs.lib.assertMsg (
           manifest.packageManager == "nub@${package.version}"
