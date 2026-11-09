@@ -1,67 +1,33 @@
 # Subagents
 
-The subagent extension delegates work to native Pi SDK sessions in the parent process. Each child loads configuration and resources for its target working directory. Pi owns its model execution, tools, messages, persistence, retry, and compaction. See the [common entrypoint](../extensions/subagent/execute.ts) and [native owner](../extensions/subagent/native-child.ts).
+Subagents run as native Pi sessions inside the parent process. Each child loads configuration, context, tools, and extensions for its target working directory rather than copying the parent's runtime configuration.
 
-## Delegation and results
+## Delegating
 
-The `subagent` tool selects its operation with one `action` parameter; the [parameter schema](../extensions/subagent/index.ts) owns the actions and their required fields. Job IDs are volatile.
+Call `subagent` directly or through codemode with `tools.subagent(...)`. Use the tool's description for available operations and inputs; the [parameter schema](../extensions/subagent/index.ts) owns that interface.
 
-The parent can call `subagent` directly or through native codemode with `tools.subagent(...)`. Pi owns nested-call events, usage aggregation, and cancellation signals. Children can use their own native codemode when their settings or explicit tool selection enable it. Child scripts reach the child's native callable tools, not the parent's registry. The root `subagent` tool is not registered in children, so neither direct calls nor codemode scripts can delegate recursively. Pi also excludes codemode itself from script-callable tools.
+Omit `model` and `tools` to use the child's defaults. The parent's advertised model hints do not determine availability in the child. `system_prompt` adds delegated instructions without replacing native context. A selection failure does not guarantee that startup hooks caused no effects.
 
-Omit `model` and `tools` to use child-native defaults. Explicit model and tool names must be available in the child's configuration.
+A different target directory needs its own saved project-trust decision; child startup does not prompt for new grants. See [target trust resolution](../extensions/subagent/resolver.ts).
 
-Glob tool selectors fail before child resources load. Exact tool availability is checked at native model preflight, after Pi's bounded direct-MCP readiness wait. Unavailable names stop inference, but native startup and input hooks may already have caused effects. If an input hook handles the task without model preflight, only the already-registered catalog can be checked. A configured MCP tool that is not yet discovered can fail on that handled-input path.
+Operations in the same Git workspace serialize, even when launched as separate background jobs. Configure concurrency, deadlines, and retention in the `subagent` settings block; [configuration](../extensions/subagent/config.ts) owns the keys and defaults.
 
-The model roster in the tool description describes the parent configuration for selection guidance. It lists the parent's scoped models (`--models` or `enabledModels`) when a scope exists, and every available model otherwise. The roster does not restrict selection: any available model works, and an unavailable selection reports the available models. A child does not copy the parent's runtime-only providers, transient CLI configuration, or model catalog. Model annotations are descriptive, not delegation permissions.
+## Interacting with children
 
-`system_prompt` supplies additional delegated instructions, not a replacement for Pi's native system/context loading. The child appends those delegated instructions to its native prompt. Native context files, skills, input hooks, and configured extensions still apply.
+Run `/subagents` in terminal mode, search the roster, and select a child. The child view shows keys for prompting, steering, following up, cancelling, and switching views. Human input goes to that child, subject to its native input hooks and commands.
 
-A completed initial result stays unchanged when a human continues the child. Use the native session for later messages. Job handles and live owners do not survive a parent restart.
+Closing the browser leaves children running. A completed job's initial result does not change when you continue the child; use the child's conversation for later messages. The browser is a bounded view, not the complete transcript. Inspect the native session file when you need retained history.
 
-## Direct interaction
+## Lifetime and cancellation
 
-Run `/subagents` in terminal mode. The roster includes retained blocking and background children. Type to search; use the arrow keys and Enter to select a child.
+Blocking `run` calls follow caller cancellation. Accepted background jobs, including queued work, survive the launching turn finishing or being interrupted and survive later parent prompts. Interrupting `wait` only stops waiting; use `action: "cancel"` to cancel the job.
 
-In a child view:
+Tree navigation cancels and awaits current jobs. Parent shutdown cancels and awaits owned work; job handles and live children do not survive a parent restart.
 
-- **Tab** cycles through conversation, instructions, configuration, and input provenance.
-- **p** opens the native multiline editor for an idle prompt.
-- **s** opens it for steering a running child.
-- **f** opens it for a follow-up to a running child.
-- **c** requests cancellation of the current operation.
-- **Arrow keys / Page Up / Page Down** scroll. **Home** moves to the beginning; **End** follows new output.
-- **Escape** returns to the roster, then to the parent.
+Cancellation and deadlines request abort and await known native work. They do not roll back earlier effects, guarantee that remote work stopped, or force an uncooperative tool to terminate. Failed jobs are not automatically restarted.
 
-The native editor uses the user's Pi editor bindings, including external-editor support. The browser temporarily hides its overlay while that editor owns focus. It does not replace the parent session or change the parent draft. Cancelling the editor sends nothing. A rejected submission retains its text for retry in the same child/input mode while the browser remains open.
+## Reopening saved sessions safely
 
-Human text goes directly to the existing child owner. The coordinator does not rewrite or approve it. Native input hooks, commands, and expansions can still handle or transform it. Provenance records the original coordinator task and human inputs separately from the resulting native conversation. Queued steering or follow-up is not a claim that the model has already consumed it. Input mode is revalidated when submitted.
+**Do not open a second transcript writer while the child still has a live owner.** Completion, idleness, or a cancellation request does not release ownership. After parent shutdown or retention eviction closes the owner, use `pi --session <exact-path>` to reopen its saved session.
 
-Configuration inspection separates active tools from callable tools. Background catalog changes do not independently refresh the browser; re-enter Configuration to read the latest tool names. Instructions and provenance preserve multiline text and remove terminal controls for display. Conversation display shows finalized native context messages, bounded with an omission notice. Native compaction can summarize earlier messages. The browser does not display partial streaming responses, thinking, or images. Inspect the native session file for retained history.
-
-Closing the browser does not cancel or close children. Parent shutdown closes the browser and its retained owners. This browser does not reopen historical sessions or provide nested delegation.
-
-## Persistence and ownership
-
-For a persistent parent, children normally live under `_children/<parent-session-id>/` in the parent's session directory. Native Pi discovery does not recurse into that directory. Recursive pi-env introspection can find these files. Children of in-memory parents use Pi's default session directory.
-
-Use `pi --session <exact-path>` only **after the previous owner closes**, such as after parent shutdown or retention eviction. Completion, idleness, or a cancellation request alone does not release a retained owner. Do not attach another transcript writer to a live child. Eviction does not delete its native session file.
-
-Set `subagent.sessionStorage` to `"sibling"` only when native Pi discovery must find children beside their parent.
-
-## Native context and trust
-
-Pi loads target configuration, context, skills, and extensions through its native resource loader. Parent trust applies only to the same canonical cwd. A different target uses its saved decision in Pi's native `ProjectTrustStore`; unknown or denied targets do not receive project trust. Child startup does not prompt for new grants. See [target trust resolution](../extensions/subagent/resolver.ts) and [native child startup](../extensions/subagent/native-child.ts).
-
-## Limits and cancellation
-
-One parent supervisor controls blocking runs, background jobs, and idle continuations. Configure its limits in the `subagent` settings block; [the configuration](../extensions/subagent/config.ts) owns the keys and defaults.
-
-All native operations conservatively acquire a workspace write lease. Native callable surfaces can exceed initial active-tool visibility, so a read-only label is not sufficient evidence for concurrent writers. Operations in the same canonical Git workspace serialize. Retention bounds settled owners and job handles; result truncation does not truncate the native transcript. Public runs have no turn-count limit. Internal callers can impose an initial-operation turn limit.
-
-Parent and child codemode scripts share Pi's process-wide worker limit (`PI_CODEMODE_MAX_WORKERS`). A parent script waiting for children occupies a slot, and `maxConcurrentRuns` does not raise the upstream limit.
-
-Blocking `run` calls follow their caller's cancellation signal. Accepted background jobs belong to the parent session, including while queued. Finishing or interrupting the launching turn, or sending another prompt, does not cancel them. Use `subagent` with `action: "cancel"` to cancel a job; interrupting `wait` only stops waiting. Tree navigation also cancels and awaits current jobs. Jobs are not automatically restarted: earlier effects may already have occurred.
-
-Cancellation aborts native execution and waits for known tools and input hooks to settle. A running job remains `cancelling` until settlement. There is no grace-period force release or hard-kill guarantee. A run-time deadline requests abort; it does not prove that a remote effect stopped. Parent shutdown rejects new work and waits for owned work before releasing coordination.
-
-Native children do not initialize the root subagent, review, or session-manager interfaces. Advisory skill evaluation also remains a parent operation. Run-private tools are supplied directly to their native sessions, not published process-wide. Callers must close retained owners before deleting resources those owners may still use.
+For persistent parents, child files normally live under `_children/<parent-session-id>/` in the parent's session directory. Native Pi session discovery does not recurse there. Set `subagent.sessionStorage` to `"sibling"` only when native discovery must find children beside their parent. Eviction does not delete saved sessions.
