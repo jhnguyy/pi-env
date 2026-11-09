@@ -36,7 +36,7 @@ The native editor uses the user's Pi editor bindings, including external-editor 
 
 Human text goes directly to the existing child owner. The coordinator does not rewrite or approve it. Native input hooks, commands, and expansions can still handle or transform it. Provenance records the original coordinator task and human inputs separately from the resulting native conversation. Queued steering or follow-up is not a claim that the model has already consumed it. Input mode is revalidated when submitted.
 
-Configuration inspection separates active tools from callable tools. Instructions and provenance preserve multiline text and remove terminal controls for display. Conversation display shows finalized native context messages, bounded with an omission notice. Native compaction can summarize earlier messages. The browser does not display partial streaming responses, thinking, or images. Inspect the native session file for retained history.
+Configuration inspection separates active tools from callable tools. Background catalog changes do not independently refresh the browser; re-enter Configuration to read the latest tool names. Instructions and provenance preserve multiline text and remove terminal controls for display. Conversation display shows finalized native context messages, bounded with an omission notice. Native compaction can summarize earlier messages. The browser does not display partial streaming responses, thinking, or images. Inspect the native session file for retained history.
 
 Closing the browser does not cancel or close children. Parent shutdown closes the browser and its retained owners. This browser does not reopen historical sessions or provide nested delegation.
 

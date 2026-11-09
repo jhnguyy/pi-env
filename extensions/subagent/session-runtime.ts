@@ -1,5 +1,9 @@
 import type { AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  createEventBus,
+  type ExtensionAPI,
+  type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { Effect, Result } from "effect";
 
 import {
@@ -83,6 +87,8 @@ export class SubagentSessionRuntime {
   private telemetryRuntime: ToolingTelemetryRuntime | undefined;
   private supervisor: SubagentRunSupervisor | undefined;
   private supervisorSessionId: string | undefined;
+  private readonly childChanges = createEventBus();
+  private unsubscribeChildren: (() => void) | undefined;
   private sessionStorage: SubagentRuntimeConfig["sessionStorage"] =
     DEFAULT_SUBAGENT_CONFIG.sessionStorage;
   private jobs: SubagentJobManager | undefined;
@@ -122,7 +128,6 @@ export class SubagentSessionRuntime {
           ledger: this.ledger,
           runId: toolCallId,
           supervisor,
-          onChild: (child) => supervisor.retainChild(child),
           sessionStorage:
             this.sessionState === SubagentSessionState.Active ? this.sessionStorage : undefined,
           telemetryRuntime:
@@ -141,6 +146,14 @@ export class SubagentSessionRuntime {
       ),
     );
   };
+
+  subscribeChildren(listener: () => void): () => void {
+    return this.childChanges.on("change", listener);
+  }
+
+  private notifyChildrenChanged(): void {
+    this.childChanges.emit("change", undefined);
+  }
 
   listChildren() {
     return [...(this.supervisor?.children.values() ?? [])].map((child) => child.summary());
@@ -203,6 +216,8 @@ export class SubagentSessionRuntime {
       this.ledger.clear();
       this.telemetryRuntime = nextRuntime;
       this.supervisor = supervisor;
+      this.unsubscribeChildren = supervisor.subscribeChildren(() => this.notifyChildrenChanged());
+      this.notifyChildrenChanged();
       this.supervisorSessionId = sessionId;
       this.sessionStorage = config.sessionStorage;
       this.jobs = jobs;
@@ -338,8 +353,11 @@ export class SubagentSessionRuntime {
     await settle(
       supervisorSessionId ? disposeSubagentRunSupervisor(supervisorSessionId) : undefined,
     );
+    this.unsubscribeChildren?.();
+    this.unsubscribeChildren = undefined;
     this.jobs = undefined;
     this.supervisor = undefined;
+    this.notifyChildrenChanged();
     this.supervisorSessionId = undefined;
     this.sessionStorage = DEFAULT_SUBAGENT_CONFIG.sessionStorage;
     this.telemetryRuntime = undefined;

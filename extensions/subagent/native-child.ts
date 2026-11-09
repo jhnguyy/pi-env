@@ -42,6 +42,7 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
   private controller?: AbortController;
   private closing?: Promise<void>;
   private teardown?: Promise<void>;
+  private unsubscribeChanges?: () => void;
   private readonly pendingInputs = new Set<Promise<ChildTypes.NativeInputResult>>();
   private updateUsage?: (usage: Types.SubagentDetails["usage"]) => void;
 
@@ -57,16 +58,38 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
   }
 
   private context<T>(operation: () => T): T {
-    return ChildContext.withChildContext({ cwd: this.run.cwd, agentDir: this.agentDir, id: this.id }, operation);
+    return ChildContext.withChildContext(
+      { cwd: this.run.cwd, agentDir: this.agentDir, id: this.id },
+      operation,
+    );
   }
 
   summary(): ChildTypes.NativeChildSummary {
     return {
-      id: this.id, runId: this.runId, name: this.run.name, task: this.run.task, cwd: this.run.cwd,
+      id: this.id,
+      runId: this.runId,
+      name: this.run.name,
+      task: this.run.task,
+      cwd: this.run.cwd,
       sessionFile: this.manager.getSessionFile(),
-      model: this.session?.model ? `${this.session.model.provider}/${this.session.model.id}` : undefined,
+      model: this.session?.model
+        ? `${this.session.model.provider}/${this.session.model.id}`
+        : undefined,
       state: this.state,
     };
+  }
+
+  private availableInputs(): readonly ChildTypes.NativeInputMode[] {
+    switch (this.state) {
+      case ChildTypes.NativeChildState.Idle:
+        return this.session ? [ChildTypes.NativeInputMode.Prompt] : [];
+      case ChildTypes.NativeChildState.Running:
+        return this.session?.isStreaming
+          ? [ChildTypes.NativeInputMode.Steer, ChildTypes.NativeInputMode.FollowUp]
+          : [];
+      default:
+        return [];
+    }
   }
 
   inspect(): ChildTypes.NativeChildSnapshot {
@@ -85,15 +108,19 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
       messages: structuredClone(session?.messages ?? []),
       inputs: structuredClone(this.inputs),
       state: this.state,
+      availableInputs: this.availableInputs(),
       initialResult: this.initialResult && structuredClone(this.initialResult),
     };
   }
 
   private async start(): Promise<void> {
     const selectors = this.run.toolNames?.filter((name) => name.includes("*"));
-    if (selectors?.length) throw new Error(`Child tools unavailable: use exact native names, not selectors: ${selectors.join(", ")}`);
+    if (selectors?.length)
+      throw new Error(
+        `Child tools unavailable: use exact native names, not selectors: ${selectors.join(", ")}`,
+      );
     const trusted = Resolver.isProjectTrustedForCwd(this.ctx, this.run.cwd);
-    const services = this.startupServices = await createAgentSessionServices({
+    const services = (this.startupServices = await createAgentSessionServices({
       cwd: this.run.cwd,
       agentDir: this.agentDir,
       settingsManager: SettingsManager.create(this.run.cwd, this.agentDir, {
@@ -109,12 +136,13 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
           (pi) => {
             // Native abort does not latch across asynchronous input preflight.
             // Run last so a cancelled preflight never starts a new model turn.
-            pi.on("input", () => this.activeSignal?.aborted ? { action: "handled" } : undefined);
+            pi.on("input", () => (this.activeSignal?.aborted ? { action: "handled" } : undefined));
             pi.on("before_agent_start", (_event, ctx) => {
               // MCP's earlier native hook has completed its bounded direct-server wait.
               // Throwing here is swallowed by the SDK; latch and synchronously abort.
               if (!this.activeSignal?.aborted) {
                 this.checkSelection();
+                this.supervisor.notifyChildrenChanged();
                 if (this.selection.failure) ctx.abort();
               }
             });
@@ -131,7 +159,7 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
           ...(this.run.systemPrompt ? [this.run.systemPrompt] : []),
         ],
       },
-    });
+    }));
     this.activeSignal?.throwIfAborted();
     const failures = [
       ...services.diagnostics.filter((d) => d.type === "error").map((d) => d.message),
@@ -162,6 +190,16 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
     });
     this.session = result.session;
     this.startupServices = undefined;
+    this.unsubscribeChanges = this.session.subscribe((event) => {
+      // The browser shows finalized context, not in-flight token deltas.
+      switch (event.type) {
+        case "message_end":
+        case "compaction_end":
+        case "agent_settled":
+          this.supervisor.notifyChildrenChanged();
+          break;
+      }
+    });
     await this.session.bindExtensions({ mode: "print" });
   }
 
@@ -179,7 +217,8 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
         this.session!.setActiveToolsByName([...this.run.toolNames]);
       }
     } catch (cause) {
-      this.selection.failure = cause instanceof Error ? cause : new Error("Child tool selection failed.", { cause });
+      this.selection.failure =
+        cause instanceof Error ? cause : new Error("Child tool selection failed.", { cause });
     }
   }
 
@@ -192,16 +231,27 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
     if (this.selection.failure) throw this.selection.failure;
   }
 
-  private record(text: string, mode: ChildTypes.NativeInputMode, source: ChildTypes.NativeChildInput["source"]): void {
+  private setState(state: ChildTypes.NativeChildSnapshot["state"]): void {
+    this.state = state;
+    this.supervisor.notifyChildrenChanged();
+  }
+
+  private record(
+    text: string,
+    mode: ChildTypes.NativeInputMode,
+    source: ChildTypes.NativeChildInput["source"],
+  ): void {
     const entry = { text, mode, source, at: new Date().toISOString() };
     this.inputs.push(entry);
     this.manager.appendCustomEntry("subagent-input", entry);
+    this.supervisor.notifyChildrenChanged();
   }
 
   private schedule<T>(initial: boolean, operation: () => Promise<T>): Promise<T> {
-    if (this.state !== ChildTypes.NativeChildState.Idle) return Promise.reject(new Error(`Child is ${this.state}`));
+    if (this.state !== ChildTypes.NativeChildState.Idle)
+      return Promise.reject(new Error(`Child is ${this.state}`));
     // Reserve before asynchronous admission: a second idle prompt cannot become a second writer.
-    this.state = ChildTypes.NativeChildState.Queued;
+    this.setState(ChildTypes.NativeChildState.Queued);
     const controller = (this.controller = new AbortController());
     const signal =
       initial && this.options.signal
@@ -225,13 +275,14 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
           this.options.onAdmitted?.();
           await this.start();
         }
-        if (lease.signal.aborted || this.state === ChildTypes.NativeChildState.Closing) throw new Error("Child cancelled");
+        if (lease.signal.aborted || this.state === ChildTypes.NativeChildState.Closing)
+          throw new Error("Child cancelled");
         this.selection = { checked: false };
-        this.state = ChildTypes.NativeChildState.Running;
+        this.setState(ChildTypes.NativeChildState.Running);
         return await operation();
       } catch (error) {
         if (initial) {
-          this.state = ChildTypes.NativeChildState.Closing;
+          this.setState(ChildTypes.NativeChildState.Closing);
           await this.session?.abort();
           await this.teardownNative();
         }
@@ -251,7 +302,11 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
     return pending.finally(() => {
       this.operation = undefined;
       this.controller = undefined;
-      if (this.state !== ChildTypes.NativeChildState.Closing && this.state !== ChildTypes.NativeChildState.Closed) this.state = ChildTypes.NativeChildState.Idle;
+      if (
+        this.state !== ChildTypes.NativeChildState.Closing &&
+        this.state !== ChildTypes.NativeChildState.Closed
+      )
+        this.setState(ChildTypes.NativeChildState.Idle);
       this.supervisor.pruneChildren();
     });
   }
@@ -293,7 +348,11 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
           };
         let result: AgentToolResult<Types.SubagentDetails>;
         try {
-          this.record(this.run.task, ChildTypes.NativeInputMode.Prompt, ChildTypes.NativeInputSource.Coordinator);
+          this.record(
+            this.run.task,
+            ChildTypes.NativeInputMode.Prompt,
+            ChildTypes.InputProvenance.Coordinator,
+          );
           await session.prompt(this.run.task, { source: "extension" });
           await session.waitForIdle();
           result = this.activeSignal?.aborted
@@ -311,8 +370,11 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
         }
         this.finishSelection();
         result.details.toolNames = session.getActiveToolNames();
-        result.details.model = session.model ? `${session.model.provider}/${session.model.id}` : result.details.model;
+        result.details.model = session.model
+          ? `${session.model.provider}/${session.model.id}`
+          : result.details.model;
         this.initialResult = structuredClone(result.details);
+        this.supervisor.notifyChildrenChanged();
         return result;
       });
     } catch (error) {
@@ -321,16 +383,28 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
     }
   }
 
-  async input(text: string, mode: ChildTypes.NativeInputMode): Promise<ChildTypes.NativeInputResult> {
-    if (this.state === ChildTypes.NativeChildState.Closing || this.state === ChildTypes.NativeChildState.Closed)
-      throw new Error(`Child is ${this.state}`);
-    if (mode !== ChildTypes.NativeInputMode.Prompt && mode !== ChildTypes.NativeInputMode.Steer && mode !== ChildTypes.NativeInputMode.FollowUp)
-      throw new Error("Invalid input mode");
+  async input(
+    text: string,
+    mode: ChildTypes.NativeInputMode,
+  ): Promise<ChildTypes.NativeInputResult> {
+    switch (mode) {
+      case ChildTypes.NativeInputMode.Prompt:
+      case ChildTypes.NativeInputMode.Steer:
+      case ChildTypes.NativeInputMode.FollowUp:
+        break;
+      default:
+        throw new Error("Invalid input mode");
+    }
+    const available = this.availableInputs();
+    if (!available.includes(mode))
+      throw new Error(
+        mode === ChildTypes.NativeInputMode.Prompt
+          ? `prompt unavailable: child is ${this.state}`
+          : `${mode} requires a streaming child; child is ${this.state}`,
+      );
     if (mode !== ChildTypes.NativeInputMode.Prompt) {
-      if (this.state !== ChildTypes.NativeChildState.Running || !this.session?.isStreaming)
-        throw new Error(`${mode} requires a streaming child`);
       const pending = this.context(async () => {
-        this.record(text, mode, ChildTypes.NativeInputSource.Human);
+        this.record(text, mode, ChildTypes.InputProvenance.Human);
         return { outcome: await this.session![mode](text, undefined, { source: "interactive" }) };
       });
       this.pendingInputs.add(pending);
@@ -341,8 +415,19 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
       }
     }
     return this.schedule(false, async () => {
-      this.record(text, mode, ChildTypes.NativeInputSource.Human);
-      const usage = new Usage.SubagentRunAccumulator({ name: this.run.name, task: text, toolNames: this.session!.getActiveToolNames(), modelOverride: this.run.modelOverride, cwd: this.run.cwd, sessionId: this.id, sessionName: this.manager.getSessionName() ?? this.run.name }, () => false);
+      this.record(text, mode, ChildTypes.InputProvenance.Human);
+      const usage = new Usage.SubagentRunAccumulator(
+        {
+          name: this.run.name,
+          task: text,
+          toolNames: this.session!.getActiveToolNames(),
+          modelOverride: this.run.modelOverride,
+          cwd: this.run.cwd,
+          sessionId: this.id,
+          sessionName: this.manager.getSessionName() ?? this.run.name,
+        },
+        () => false,
+      );
       const unsubscribe = this.session!.subscribe((event) => {
         if (event.type !== "message_end") return;
         usage.acceptEvent(event);
@@ -352,7 +437,9 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
       try {
         await this.session!.prompt(text, {
           source: "interactive",
-          preflightResult: (value) => { outcome = value; },
+          preflightResult: (value) => {
+            outcome = value;
+          },
         });
         await this.session!.waitForIdle();
         this.finishSelection();
@@ -374,7 +461,7 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
   }
 
   private teardownNative(): Promise<void> {
-    return this.teardown ??= this.context(async () => {
+    return (this.teardown ??= this.context(async () => {
       let startupRunner: ExtensionRunner | undefined;
       try {
         if (this.session) {
@@ -384,22 +471,31 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
           const loaded = services.resourceLoader.getExtensions();
           // Until session construction succeeds, the loaded extensions still need
           // their native shutdown hooks. No second execution owner is created.
-          startupRunner = new ExtensionRunner(loaded.extensions, loaded.runtime, this.run.cwd, this.manager, new ModelRegistry(services.modelRuntime));
+          startupRunner = new ExtensionRunner(
+            loaded.extensions,
+            loaded.runtime,
+            this.run.cwd,
+            this.manager,
+            new ModelRegistry(services.modelRuntime),
+          );
           await startupRunner.emit({ type: "session_shutdown", reason: "quit" });
         }
       } finally {
         startupRunner?.invalidate();
         this.startupServices = undefined;
+        this.unsubscribeChanges?.();
+        this.unsubscribeChanges = undefined;
         this.session?.dispose();
-        this.state = ChildTypes.NativeChildState.Closed;
+        this.setState(ChildTypes.NativeChildState.Closed);
       }
-    });
+    }));
   }
 
   close(): Promise<void> {
     if (this.closing) return this.closing;
-    if (this.state === ChildTypes.NativeChildState.Closed) return this.teardown ?? Promise.resolve();
-    this.state = ChildTypes.NativeChildState.Closing;
+    if (this.state === ChildTypes.NativeChildState.Closed)
+      return this.teardown ?? Promise.resolve();
+    this.setState(ChildTypes.NativeChildState.Closing);
     this.closing = this.context(async () => {
       await this.cancel();
       await this.teardownNative();

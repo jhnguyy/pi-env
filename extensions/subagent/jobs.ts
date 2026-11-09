@@ -269,7 +269,6 @@ export class SubagentJobManager {
       sessionStorage: this.config.sessionStorage,
       onAdmitted,
       onUsage,
-      onChild: (child) => this.supervisor.retainChild(child),
     };
     const run = runSubagentEffect(params, ctx, options);
 

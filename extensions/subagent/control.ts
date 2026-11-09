@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Data, Effect } from "effect";
+import { createEventBus } from "@earendil-works/pi-coding-agent";
 
 import type { SubagentRuntimeConfig } from "./config";
 import type { UsageStats } from "./types";
@@ -51,7 +52,6 @@ interface ActiveRun {
   timeout?: ReturnType<typeof setTimeout>;
 }
 
-
 interface SupervisorRegistry {
   supervisors: Map<string, SubagentRunSupervisor>;
 }
@@ -91,7 +91,6 @@ function addUsageDelta(total: UsageStats, previous: UsageStats, next: UsageStats
   total.turns += Math.max(0, next.turns - previous.turns);
 }
 
-
 export class SubagentRunSupervisor {
   private readonly active = new Map<string, ActiveRun>();
   private readonly pending: PendingAdmission[] = [];
@@ -99,6 +98,7 @@ export class SubagentRunSupervisor {
   private readonly totalUsage = zeroUsage();
   private readonly usageByRun = new Map<string, UsageStats>();
   readonly children = new Map<string, ChildTypes.NativeChildSession>();
+  private readonly childChanges = createEventBus();
   private readonly evicting = new Set<string>();
   private readonly evictionFailures: Error[] = [];
   private omittedEvictionFailures = 0;
@@ -117,9 +117,7 @@ export class SubagentRunSupervisor {
       try: (effectSignal) =>
         this.acquire({
           ...request,
-          signal: request.signal
-            ? AbortSignal.any([request.signal, effectSignal])
-            : effectSignal,
+          signal: request.signal ? AbortSignal.any([request.signal, effectSignal]) : effectSignal,
         }),
       catch: (cause) =>
         cause instanceof SubagentAdmissionError
@@ -167,9 +165,19 @@ export class SubagentRunSupervisor {
     );
   }
 
+  subscribeChildren(listener: () => void): () => void {
+    return this.childChanges.on("change", listener);
+  }
+
+  notifyChildrenChanged(): void {
+    this.childChanges.emit("change", undefined);
+  }
+
   retainChild(child: ChildTypes.NativeChildSession): void {
     if (this.closed) throw new Error("Parent subagent session is shutting down.");
+    if (this.children.get(child.id) === child) return;
     this.children.set(child.id, child);
+    this.notifyChildrenChanged();
   }
 
   pruneChildren(): void {
@@ -178,24 +186,36 @@ export class SubagentRunSupervisor {
     for (const child of this.children.values()) {
       if (excess <= 0) break;
       const state = child.summary().state;
-      if (this.evicting.has(child.id) || (state !== ChildTypes.NativeChildState.Idle && state !== ChildTypes.NativeChildState.Closed)) continue;
+      if (
+        this.evicting.has(child.id) ||
+        (state !== ChildTypes.NativeChildState.Idle && state !== ChildTypes.NativeChildState.Closed)
+      )
+        continue;
       excess--;
       this.evicting.add(child.id);
       void child.close().then(
-        () => { this.children.delete(child.id); this.evicting.delete(child.id); },
+        () => {
+          this.children.delete(child.id);
+          this.evicting.delete(child.id);
+          this.notifyChildrenChanged();
+        },
         (cause) => {
           if (this.evictionFailures.length < this.config.maxRetainedJobs) {
-            this.evictionFailures.push(new Error(`Child ${child.id} eviction cleanup failed.`, { cause }));
+            this.evictionFailures.push(
+              new Error(`Child ${child.id} eviction cleanup failed.`, { cause }),
+            );
           } else this.omittedEvictionFailures++;
-          if (child.summary().state === ChildTypes.NativeChildState.Closed) this.children.delete(child.id);
+          if (child.summary().state === ChildTypes.NativeChildState.Closed)
+            this.children.delete(child.id);
           this.evicting.delete(child.id);
+          this.notifyChildrenChanged();
         },
       );
     }
   }
 
   shutdown(): Promise<void> {
-    return this.shutdownPromise ??= this.shutdownOwnedRuns();
+    return (this.shutdownPromise ??= this.shutdownOwnedRuns());
   }
 
   private async shutdownOwnedRuns(): Promise<void> {
@@ -210,17 +230,26 @@ export class SubagentRunSupervisor {
     }
     for (const active of this.active.values()) active.controller.abort(error);
     const activeRuns = [...this.active.entries()];
-    const closingChildren = Promise.allSettled([...this.children.values()].map((child) => child.close()));
+    const closingChildren = Promise.allSettled(
+      [...this.children.values()].map((child) => child.close()),
+    );
     // Abort requests do not prove that tools or remote effects have settled.
     await Promise.all(activeRuns.map(([, active]) => active.done));
     const outcomes = await closingChildren;
     this.children.clear();
+    this.notifyChildrenChanged();
+    this.childChanges.clear();
     const failures = [
       ...this.evictionFailures,
-      ...outcomes.filter((outcome) => outcome.status === "rejected").map((failure) => failure.reason),
+      ...outcomes
+        .filter((outcome) => outcome.status === "rejected")
+        .map((failure) => failure.reason),
     ];
     if (failures.length) {
-      const omitted = this.omittedEvictionFailures > 0 ? ` ${this.omittedEvictionFailures} additional eviction failure causes omitted.` : "";
+      const omitted =
+        this.omittedEvictionFailures > 0
+          ? ` ${this.omittedEvictionFailures} additional eviction failure causes omitted.`
+          : "";
       throw new AggregateError(failures, `Child shutdown failed.${omitted}`);
     }
   }

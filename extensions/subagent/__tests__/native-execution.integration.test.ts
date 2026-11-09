@@ -12,8 +12,9 @@ import * as ChildContext from "../../_shared/child-context";
 import { settleOperations, testCleanup } from "./cleanup";
 
 function execute(...args: Parameters<typeof Execute.runResolvedSubagentEffect>) {
-  return ChildContext.withChildContext({ cwd: args[0].cwd, agentDir: join(args[0].cwd, "agent") }, () =>
-    Effect.runPromise(Execute.runResolvedSubagentEffect(...args)),
+  return ChildContext.withChildContext(
+    { cwd: args[0].cwd, agentDir: join(args[0].cwd, "agent") },
+    () => Effect.runPromise(Execute.runResolvedSubagentEffect(...args)),
   );
 }
 
@@ -26,7 +27,10 @@ it("holds native ownership until close settles and rejects overlapping input", a
   let child: ChildTypes.NativeChildSession | undefined;
   const operations: Promise<unknown>[] = [];
   const { Type } = await import("typebox");
-  const supervisor = new Control.SubagentRunSupervisor("native-test", Config.resolveSubagentRuntimeConfig({}));
+  const supervisor = new Control.SubagentRunSupervisor(
+    "native-test",
+    Config.resolveSubagentRuntimeConfig({}),
+  );
   cleanup(() => supervisor.shutdown());
   const blocker = await supervisor.acquire({
     runId: "blocker",
@@ -50,7 +54,10 @@ it("holds native ownership until close settles and rejects overlapping input", a
     aborted = resolve;
   });
   cleanup(
-    () => { blocker.release(); release(); },
+    () => {
+      blocker.release();
+      release();
+    },
     () => child?.close(),
     () => supervisor.shutdown(),
     () => settleOperations(operations),
@@ -110,10 +117,16 @@ export default function(pi) {
     );
     operations.push(running);
     await retention;
-    expect(child!.inspect().state).toBe("queued");
-    await expect(child!.input("not yet streaming", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow();
+    expect(child!.inspect()).toMatchObject({ state: "queued", availableInputs: [] });
+    await expect(
+      child!.input("not yet streaming", ChildTypes.NativeInputMode.Prompt),
+    ).rejects.toThrow();
     blocker.release();
     await entered;
+    expect(child!.inspect().availableInputs).toEqual([
+      ChildTypes.NativeInputMode.Steer,
+      ChildTypes.NativeInputMode.FollowUp,
+    ]);
     await expect(child!.input("overlap", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow();
     let closed = false;
     const closing = child!.close().then(() => {
@@ -132,13 +145,13 @@ export default function(pi) {
     await Promise.resolve();
     expect(competingAdmitted).toBe(false);
     expect(closed).toBe(false);
-    expect(child!.inspect().state).toBe("closing");
+    expect(child!.inspect()).toMatchObject({ state: "closing", availableInputs: [] });
     await expect(child!.input("too late", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow();
     release();
     await closing;
     await running;
     await competing;
-    expect(child!.inspect().state).toBe("closed");
+    expect(child!.inspect()).toMatchObject({ state: "closed", availableInputs: [] });
     await child!.close();
     const entries = SessionManager.open(child!.inspect().sessionFile!).getEntries();
     expect(

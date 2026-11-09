@@ -27,6 +27,7 @@ it("runs and resumes retained children through registered tools and direct brows
   const agentDir = join(root, "agent");
   let parent: Awaited<ReturnType<typeof createAgentSessionFromServices>>["session"] | undefined;
   let browser: Browser.SubagentBrowser | undefined;
+  let presented = "";
   let unsubscribeUpdates: (() => void) | undefined;
   const operations: Promise<unknown>[] = [];
   cleanup(
@@ -167,11 +168,21 @@ export default function(pi) {
       },
       custom: (factory: any, options: any) =>
         new Promise<void>((resolve) => {
+          let open = true;
           browser = factory(
-            { terminal: { rows: 60 }, requestRender: vi.fn() },
+            {
+              terminal: { rows: 60 },
+              requestRender: () =>
+                queueMicrotask(() => {
+                  if (open && browser && !overlayHidden) presented = browser.render(160).join("\n");
+                }),
+            },
             ui.theme,
             {},
-            resolve,
+            () => {
+              open = false;
+              resolve();
+            },
           );
           options.onHandle({
             setHidden: (hidden: boolean) => {
@@ -202,6 +213,7 @@ export default function(pi) {
       (child) => child.summary().name === "sync",
     )!;
     expect(syncChild.inspect().initialResult?.finalOutput).toBe("sync initial complete");
+    expect(syncChild.inspect().availableInputs).toEqual([ChildTypes.NativeInputMode.Prompt]);
     expect(syncChild.inspect().messages).toContainEqual(
       expect.objectContaining({
         role: "toolResult",
@@ -249,11 +261,16 @@ export default function(pi) {
       expect(browser!.render(160).join("\n")).toContain("Follow-up queued for native processing."),
     );
     await vi.waitFor(() => expect(asyncChild.inspect().inputs).toHaveLength(3));
+    for (let tab = 0; tab < 3; tab++) browser!.handleInput("\t");
+    await vi.waitFor(() => expect(presented).toContain("[running] · conversation"));
     await writeFile(join(root, "release-1"), "release");
     await vi.waitFor(() => expect(asyncChild.inspect().initialResult).toBeDefined());
     const initial = structuredClone(asyncChild.inspect().initialResult!);
     expect(initial.isError).toBe(false);
-    await vi.waitFor(() => expect(asyncChild.summary().state).toBe("idle"));
+    await vi.waitFor(() => {
+      expect(presented).toContain("[idle] · conversation");
+      expect(presented).toContain("async initial complete");
+    });
     editorInputs.push("Human idle\nverbatim");
     browser!.handleInput("p");
     const file = asyncChild.summary().sessionFile!;
@@ -261,6 +278,7 @@ export default function(pi) {
       expect(await readFile(file, "utf8")).toContain("idle human complete"),
     );
     await vi.waitFor(() => expect(asyncChild.summary().state).toBe("idle"));
+    await vi.waitFor(() => expect(presented).toContain("idle human complete"));
     const beforeHandled = asyncChild
       .inspect()
       .messages.filter((message) => message.role === "assistant");
@@ -316,6 +334,12 @@ export default function(pi) {
     editorInputs.push("next gated turn");
     browser!.handleInput("p");
     await vi.waitFor(() => expect(existsSync(join(root, "entered-2"))).toBe(true));
+    await vi.waitFor(() => {
+      expect(presented).toContain("[running] · conversation");
+      const turn = presented.indexOf("next gated turn");
+      expect(turn).toBeGreaterThanOrEqual(0);
+      expect(presented.slice(turn)).toContain("Tool: fixture_gate");
+    });
     browser!.handleInput("c");
     await vi.waitFor(() =>
       expect(browser!.render(160).join("\n")).toContain("cancellation settled"),
