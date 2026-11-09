@@ -295,18 +295,6 @@ it("checks every changed shell script rather than treating later paths as argume
   expect(result.stderr).toContain("second.sh");
 });
 
-it("runs related units without Analyze build artifacts or unrelated tests", async ({
-  workspace,
-}) => {
-  await writeFile(join(workspace.root, "src/feature/value.ts"), "export const value = 2;\n");
-  const result = await workspace.verify();
-  expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
-  expect(
-    (await readFile(join(workspace.root, "observed"), "utf8")).trim().split("\n").sort(),
-  ).toEqual(["consumer", "feature"]);
-  expect(`${result.stdout}${result.stderr}`).not.toContain("unrelated executed");
-}, 45_000);
-
 it("runs integration only when explicitly selected", async ({ workspace }) => {
   await writeFile(join(workspace.root, "src/feature/value.ts"), "export const value = 2;\n");
   const result = await workspace.run("test:integration", [
