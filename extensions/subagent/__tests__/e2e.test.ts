@@ -41,10 +41,10 @@ it.each(["on", "only"] as const)(
         mode,
         actions: ["run", "start", "wait", "result"],
         childTools: "target-native defaults",
-        cancellation: "parent abort during a nested child tool",
+        cancellation: "parent abort during a blocking run's nested child tool",
       },
       expected:
-        "Children use their own codemode without recursive delegation. Nested usage is reported once. Parent abort reaches the child tool, which settles cooperatively.",
+        "Children use their own codemode without recursive delegation. Nested usage is reported once. Parent abort reaches the blocking run's child tool, which settles cooperatively.",
       verdict: "failed",
     };
     let parent: Awaited<ReturnType<typeof createAgentSessionFromServices>>["session"] | undefined;
