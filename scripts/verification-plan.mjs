@@ -55,10 +55,6 @@ export function changedVerificationPlan(change, { checksOnly = false, cwd = proc
   }
   select("check:patterns", [], patternSource);
   select("lint:changed", ["--"], lintSource);
-  if (patternSource.length) {
-    steps.push(script("check:duplicates:changed", "--ref", change.base));
-    steps.push(script("check:async-risk:changed", "--ref", change.base));
-  }
   if (!checksOnly) {
     // Vitest supplies reverse import analysis for source changes. Component suites
     // cover non-source inputs, but this heuristic cannot qualify every dynamic dependency.

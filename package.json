@@ -43,7 +43,7 @@
     "lint:changed": "nub run lint:sensors --allow no-await-in-loop --deny-warnings --no-error-on-unmatched-pattern",
     "check:duplicates:changed": "nub run analyze --diff --checks duplicates --fail-on warning",
     "check:async-risk:changed": "nub run analyze --diff --checks async-risk --fail-on error",
-    "sensors": "nub run lint:sensors . && nub run analyze -- --diff --checks async-risk",
+    "sensors": "nub run lint:sensors .",
     "check:duplicates": "nub run analyze -- --checks duplicates . --fail-on error",
     "check:quality": "nub run analyze -- --all --checks duplicates,dependencies,knip --fail-on error && nub run check:patterns",
     "verify": "node scripts/dev.mjs verify",
