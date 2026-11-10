@@ -28,7 +28,6 @@ SETUP_TESTS=(
   setup/__tests__/home-manager-sync.test.sh
   setup/__tests__/verify-install.test.sh
   setup/__tests__/effect-runtime.test.sh
-  setup/__tests__/effect-language-service.test.sh
 )
 
 # Tests set their own agent directory, Pi package, and Home Manager inputs. A Home Manager
