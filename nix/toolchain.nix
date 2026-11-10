@@ -47,9 +47,9 @@ let
           "@earendil-works/pi-ai"
           "@earendil-works/pi-tui"
         ]) "Pi development dependencies must match the upstream Pi flake";
-        import ./pi-package.nix {
-          inherit pkgs node;
+        pkgs.callPackage (pi + "/nix/package.nix") {
           source = pi;
+          nodejs_22 = node;
         };
       nubPackage =
         let

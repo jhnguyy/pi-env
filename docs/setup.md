@@ -49,6 +49,15 @@ Leave `PI_PACKAGE_DIR` and `PI_ENV_PI_EXECUTABLE` unset during setup and subsequ
 
 After updating the application checkout, rerun the same setup command. Reuse the tools package while it satisfies the checkout's [runtime requirements](../package.json). The consumer owns source revision selection, persistent state, setup sequencing, and session restarts. Existing sessions do not reload the updated runtime automatically.
 
+## Update Pi and extension packages
+
+Pi and its installed extension packages have separate update paths. Plain `pi update` selects Pi's self-update path, not pi-env's reviewed dependency workflow:
+
+- **Pi libraries and CLI supplied by pi-env:** update the pinned Pi workspace packages in [package.json](../package.json) together with the Pi input in [flake.nix](../flake.nix), regenerate `nub.lock` and `flake.lock`, and verify the change in a contribution worktree. Use the [dependency-update skill](../skills/dependency-update/SKILL.md) to assess the release range. After adoption, rerun setup or activate the consuming Nix generation as described above, then restart Pi. `pi update --extensions` does not update these library pins.
+- **Installed extension packages:** `pi update --extensions` updates all configured packages; `pi update <source>` targets one. These commands mutate installed packages, so run them only when those updates are intended. Local-path packages such as a setup-registered pi-env checkout remain under Git and setup ownership.
+
+Starting with Pi 1.5.1, package updates print each changed npm version or Git commit. Keep that summary as evidence of what actually changed, then inspect the corresponding changelogs or commit range. Distinguish an unchanged result from offline skips or warnings: `No packages were updated, see the warnings above` is not confirmation that everything is current. The summary is human-readable update output, not a dry-run plan or a stable JSON interface.
+
 ## Gruvbox themes
 
 See [themes](themes.md) for Pi selection, terminal installation, and Slack reference strings.
