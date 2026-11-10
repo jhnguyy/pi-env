@@ -6,6 +6,8 @@ For installation modes and commands, start with [README](../README.md#setup-choi
 
 Package resource selections name paths inside pi-env. Setup moves pi-env's selections in your user settings from `.pi/extensions/` and `.agents/skills/` to `extensions/` and `skills/`. Update any project settings that select pi-env resources by those older paths yourself.
 
+For optional shell/session capture, see [Atuin](atuin.md).
+
 ## Explicit reset
 
 Run `./setup.sh --reset` to back up existing settings and restore the baseline with only pi-env registered. Reset replaces only `settings.json`; other agent-directory files and project settings remain. Reinstall local adapters afterward; adapter setup must not reset the base implicitly.
