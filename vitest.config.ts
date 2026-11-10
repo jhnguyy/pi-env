@@ -19,6 +19,8 @@ export default defineConfig({
   test: {
     project: ["unit"],
     pool: "forks",
+    // Keep automatic test-file fan-out independent of the host CPU count.
+    fileParallelism: false,
     // Global inputs require explicit full verification, not an implicit local suite expansion.
     forceRerunTriggers: [],
     testTimeout: 30_000,
