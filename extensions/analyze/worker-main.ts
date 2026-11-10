@@ -1,3 +1,4 @@
+import { StringDecoder } from "node:string_decoder";
 import { Effect, Result } from "effect";
 import { AnalyzeWorkerMessageType, parseAnalyzeWorkerRequest } from "../../src/analyze/protocol.js";
 import {
@@ -83,15 +84,19 @@ function boundedResult(result: AnalysisResult): AnalysisResult {
 }
 
 async function main(): Promise<void> {
+  const decoder = new StringDecoder("utf8");
   let input = "";
+  let inputBytes = 0;
   for await (const chunk of process.stdin) {
-    input += String(chunk);
-    if (Buffer.byteLength(input, "utf8") > MAX_INPUT_BYTES) {
+    inputBytes += chunk.byteLength;
+    if (inputBytes > MAX_INPUT_BYTES) {
       process.stderr.write("invalid request\n");
       process.exitCode = 2;
       return;
     }
+    input += decoder.write(chunk);
   }
+  input += decoder.end();
   const line = input.endsWith("\n") ? input.slice(0, -1) : input;
   const parsed = await Effect.runPromise(Effect.result(parseAnalyzeWorkerRequest(line)));
   if (Result.isFailure(parsed)) {

@@ -71,6 +71,53 @@ JSON
   [ "$(resolved_package_path "$settings" 0)" = "$repo" ] || fail "worktree setup should register primary checkout"
 }
 
+test_worktree_filters_migrate_with_primary_precedence() {
+  local tmp repo worktree settings node
+  tmp="$(with_temp_dir)"
+  repo="$tmp/repo"
+  worktree="$tmp/worktree"
+  settings="$tmp/settings.json"
+  node=$(node_bin)
+  git init -q "$repo"
+  git -C "$repo" -c user.name=Test -c user.email=test@example.invalid commit --allow-empty -qm init
+  git -C "$repo" worktree add -qb filters "$worktree"
+
+  "$node" --input-type=module - "$SCRIPT" "$settings" "$repo" "$worktree" <<'JS'
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+const [script, settings, repo, worktree] = process.argv.slice(2);
+const worktreeEntry = { source: worktree, extensions: ['!.pi/extensions/disabled.ts'],
+  skills: ['+.agents/skills/selected'], themes: [], prompts: ['prompts/keep.md'] };
+const primaryEntry = { source: repo, extensions: [], skills: ['skills/primary'], themes: ['themes/primary.json'] };
+const migrated = { ...worktreeEntry, source: repo, extensions: ['!extensions/disabled.ts'],
+  skills: ['+skills/selected'] };
+const apply = () => execFileSync(process.execPath, [script, settings, worktree], { encoding: 'utf8' });
+const read = () => JSON.parse(fs.readFileSync(settings, 'utf8'));
+const normalize = (entry) => ({ ...entry, source: path.resolve(path.dirname(settings), entry.source) });
+for (const [packages, expected] of [
+  [[worktreeEntry], migrated],
+  [[worktreeEntry, primaryEntry], primaryEntry],
+  [[primaryEntry, worktreeEntry], primaryEntry],
+  [[worktreeEntry, repo], repo],
+]) {
+  fs.writeFileSync(settings, JSON.stringify({ packages }));
+  apply();
+  const actual = read().packages;
+  assert.equal(actual.length, 1);
+  if (typeof expected === 'string') assert.equal(path.resolve(path.dirname(settings), actual[0]), expected);
+  else {
+    assert.equal(typeof actual[0], 'object', 'worktree resource filters must remain an object');
+    assert.deepEqual(normalize(actual[0]), expected);
+  }
+  const before = fs.readFileSync(settings, 'utf8');
+  assert.equal(apply().trim(), 'unchanged');
+  assert.equal(fs.readFileSync(settings, 'utf8'), before);
+}
+JS
+}
+
 test_rejects_noncanonical_settings_filename() {
   local tmp settings repo
   tmp="$(with_temp_dir)"
@@ -93,5 +140,6 @@ test_rejects_noncanonical_settings_filename() {
 
 test_rejects_malformed_package_entry_before_writing
 test_registers_primary_checkout_when_run_from_worktree
+test_worktree_filters_migrate_with_primary_precedence
 test_rejects_noncanonical_settings_filename
 echo "settings registration tests passed"

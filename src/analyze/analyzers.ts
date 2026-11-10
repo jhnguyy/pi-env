@@ -2,7 +2,14 @@ import { createHash } from "node:crypto";
 import { relative } from "node:path";
 import ts from "typescript";
 import { Effect } from "effect";
-import { AnalyzerName, AnalyzerRunError, FindingKind, Severity, type Finding, type Location } from "./model.js";
+import {
+  AnalyzerName,
+  AnalyzerRunError,
+  FindingKind,
+  Severity,
+  type Finding,
+  type Location,
+} from "./model.js";
 import type { SyntaxProject, TypeProject } from "./program.js";
 import type { Scope } from "./scope.js";
 import { intersectsHunks } from "./scope.js";
@@ -26,7 +33,9 @@ function* walkNodes(root: ts.Node): Generator<ts.Node> {
     const node = pending.pop()!;
     yield node;
     const start = pending.length;
-    ts.forEachChild(node, (child) => { pending.push(child); });
+    ts.forEachChild(node, (child) => {
+      pending.push(child);
+    });
     // Preserve TypeScript's source-order depth-first traversal.
     for (let left = start, right = pending.length - 1; left < right; left++, right--) {
       [pending[left], pending[right]] = [pending[right], pending[left]];
@@ -46,9 +55,11 @@ const TEST_MODIFIERS = new Set(["concurrent", "only", "skip", "todo"]);
 function isTestCallee(node: ts.Expression): boolean {
   if (ts.isIdentifier(node)) return node.text === "it" || node.text === "test";
   if (ts.isCallExpression(node)) return isTestEachFactory(node);
-  return ts.isPropertyAccessExpression(node)
-    && TEST_MODIFIERS.has(node.name.text)
-    && isTestCallee(node.expression);
+  return (
+    ts.isPropertyAccessExpression(node) &&
+    TEST_MODIFIERS.has(node.name.text) &&
+    isTestCallee(node.expression)
+  );
 }
 function isTestEachFactory(node: ts.Expression): boolean {
   if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return false;
@@ -86,9 +97,9 @@ function location(cwd: string, file: ts.SourceFile, node: ts.Node): Location {
 }
 
 const changed = (scope: Scope, value: Location): boolean =>
-  scope.mode === "all"
-  || scope.files.includes(value.path)
-    && intersectsHunks(value.line, value.endLine ?? value.line, scope.hunks.get(value.path));
+  scope.mode === "all" ||
+  (scope.files.includes(value.path) &&
+    intersectsHunks(value.line, value.endLine ?? value.line, scope.hunks.get(value.path)));
 
 const DUPLICATE_CANONICAL_CAPS = {
   nodesPerFunction: 10_000,
@@ -104,7 +115,10 @@ interface DuplicateCanonicalCaps {
   minimumTokenCount: number;
 }
 
-function canonicalizeWithCap(node: ts.Node, caps: DuplicateCanonicalCaps = DUPLICATE_CANONICAL_CAPS): CanonicalizationResult {
+function canonicalizeWithCap(
+  node: ts.Node,
+  caps: DuplicateCanonicalCaps = DUPLICATE_CANONICAL_CAPS,
+): CanonicalizationResult {
   const parts: string[] = [];
   let nodeCount = 0;
   let tokenCount = 0;
@@ -136,10 +150,11 @@ function canonicalizeWithCap(node: ts.Node, caps: DuplicateCanonicalCaps = DUPLI
   return { canonical: parts.join("|"), truncated, nodeCount, tokenCount };
 }
 
-const analyzerFailure = (analyzer: AnalyzerName, cause: unknown): AnalyzerRunError => new AnalyzerRunError({
-  analyzer,
-  message: cause instanceof Error ? cause.message : String(cause),
-});
+const analyzerFailure = (analyzer: AnalyzerName, cause: unknown): AnalyzerRunError =>
+  new AnalyzerRunError({
+    analyzer,
+    message: cause instanceof Error ? cause.message : String(cause),
+  });
 
 function cooperativeFileAnalysis(
   analyzer: AnalyzerName,
@@ -149,7 +164,10 @@ function cooperativeFileAnalysis(
   return Effect.gen(function* () {
     const output: Finding[] = [];
     for (const file of files) {
-      yield* Effect.try({ try: () => analyzeFile(file, output), catch: (cause) => analyzerFailure(analyzer, cause) });
+      yield* Effect.try({
+        try: () => analyzeFile(file, output),
+        catch: (cause) => analyzerFailure(analyzer, cause),
+      });
       yield* Effect.yieldNow;
     }
     return output;
@@ -167,9 +185,16 @@ const ANALYZER_CAPS = {
 const compareLocations = (left: Location, right: Location): number =>
   left.path.localeCompare(right.path) || left.line - right.line || left.column - right.column;
 
-interface DuplicateCollection { groups: Map<string, DuplicateGroup[]>; candidates: number; truncated: boolean }
+interface DuplicateCollection {
+  groups: Map<string, DuplicateGroup[]>;
+  candidates: number;
+  truncated: boolean;
+}
 
-function matchingDuplicateGroup(groups: readonly DuplicateGroup[], canonical: string): DuplicateGroup | undefined {
+function matchingDuplicateGroup(
+  groups: readonly DuplicateGroup[],
+  canonical: string,
+): DuplicateGroup | undefined {
   return groups.find((group) => canonicalizeWithCap(group.sample).canonical === canonical);
 }
 
@@ -180,10 +205,19 @@ function collectDuplicateFile(
   state: DuplicateCollection,
 ): void {
   for (const candidate of candidates) {
-    if (state.candidates >= ANALYZER_CAPS.duplicateCandidates) { state.truncated = true; return; }
+    if (state.candidates >= ANALYZER_CAPS.duplicateCandidates) {
+      state.truncated = true;
+      return;
+    }
     state.candidates++;
     const result = canonicalizeWithCap(candidate.body);
-    if (result.truncated || result.canonical.length < 80 || result.nodeCount < DUPLICATE_CANONICAL_CAPS.minimumNodeCount || result.tokenCount < DUPLICATE_CANONICAL_CAPS.minimumTokenCount) continue;
+    if (
+      result.truncated ||
+      result.canonical.length < 80 ||
+      result.nodeCount < DUPLICATE_CANONICAL_CAPS.minimumNodeCount ||
+      result.tokenCount < DUPLICATE_CANONICAL_CAPS.minimumTokenCount
+    )
+      continue;
     const hash = createHash("sha256").update(result.canonical).digest("hex");
     const groups = state.groups.get(hash) ?? [];
     const prior = matchingDuplicateGroup(groups, result.canonical);
@@ -218,8 +252,8 @@ function duplicateFinding(
 }
 
 function truncationFinding(analyzer: AnalyzerName): Finding {
-  const duplicate = analyzer === AnalyzerName.Duplicates
-    || analyzer === AnalyzerName.TestDuplicates;
+  const duplicate =
+    analyzer === AnalyzerName.Duplicates || analyzer === AnalyzerName.TestDuplicates;
   return {
     id: "",
     analyzer,
@@ -241,14 +275,19 @@ function duplicateFindings(
 ): Finding[] {
   const output: Finding[] = [];
   let truncated = collected.truncated;
+  let findingLimitReached = false;
   for (const groups of collected.groups.values()) {
     for (const group of groups) {
       const finding = duplicateFinding(group, scope, analyzer, message);
       if (finding === undefined) continue;
-      if (output.length >= ANALYZER_CAPS.duplicateFindings) { truncated = true; break; }
+      if (output.length >= ANALYZER_CAPS.duplicateFindings) {
+        truncated = true;
+        findingLimitReached = true;
+        break;
+      }
       output.push(finding);
     }
-    if (truncated) break;
+    if (findingLimitReached) break;
   }
   if (truncated) {
     if (output.length >= ANALYZER_CAPS.duplicateFindings) output.pop();
@@ -279,7 +318,11 @@ function duplicateAnalysisEffect(
   });
 }
 
-export function duplicatesEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], AnalyzerRunError> {
+export function duplicatesEffect(
+  project: SyntaxProject,
+  cwd: string,
+  scope: Scope,
+): Effect.Effect<Finding[], AnalyzerRunError> {
   return duplicateAnalysisEffect(
     AnalyzerName.Duplicates,
     project.files,
@@ -290,7 +333,11 @@ export function duplicatesEffect(project: SyntaxProject, cwd: string, scope: Sco
   );
 }
 
-export function testDuplicatesEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], AnalyzerRunError> {
+export function testDuplicatesEffect(
+  project: SyntaxProject,
+  cwd: string,
+  scope: Scope,
+): Effect.Effect<Finding[], AnalyzerRunError> {
   return duplicateAnalysisEffect(
     AnalyzerName.TestDuplicates,
     project.testFiles,
@@ -316,8 +363,10 @@ const booleanType = (type: ts.Type): string => {
 };
 
 const primitiveType = (type: ts.Type): string | undefined => {
-  if (type.flags & ts.TypeFlags.StringLike) return type.isStringLiteral() ? `string:${type.value}` : "string";
-  if (type.flags & ts.TypeFlags.NumberLike) return type.isNumberLiteral() ? `number:${type.value}` : "number";
+  if (type.flags & ts.TypeFlags.StringLike)
+    return type.isStringLiteral() ? `string:${type.value}` : "string";
+  if (type.flags & ts.TypeFlags.NumberLike)
+    return type.isNumberLiteral() ? `number:${type.value}` : "number";
   if (type.flags & ts.TypeFlags.BooleanLike) return booleanType(type);
   if (type.flags & ts.TypeFlags.BigIntLike) return "bigint";
   if (type.flags & ts.TypeFlags.Null) return "null";
@@ -329,25 +378,30 @@ const primitiveType = (type: ts.Type): string | undefined => {
   return undefined;
 };
 
-const TYPE_SHAPE_CAPS = { properties: 256, signatures: 64, unionParts: 128, signatureBytes: 4_096 } as const;
+const TYPE_SHAPE_CAPS = {
+  properties: 256,
+  signatures: 64,
+  unionParts: 128,
+  signatureBytes: 4_096,
+} as const;
 
-function propertyShapes(
-  checker: ts.TypeChecker,
-  type: ts.Type,
-  depth: number,
-): string[] {
+function propertyShapes(checker: ts.TypeChecker, type: ts.Type, depth: number): string[] {
   const properties = checker.getPropertiesOfType(type);
-  if (properties.length > TYPE_SHAPE_CAPS.properties) return [`#oversized-properties:${properties.length}`];
+  if (properties.length > TYPE_SHAPE_CAPS.properties)
+    return [`#oversized-properties:${properties.length}`];
   return properties
     .filter((property) => property.valueDeclaration !== undefined || property.declarations?.length)
     .map((property) => {
       const declaration = property.valueDeclaration ?? property.declarations![0];
       const propertyType = checker.getTypeOfSymbolAtLocation(property, declaration);
       const optional = (property.flags & ts.SymbolFlags.Optional) !== 0 ? "?" : "";
-      const readonly = ts.canHaveModifiers(declaration)
-        && ts.getModifiers(declaration)?.some((modifier) => modifier.kind === ts.SyntaxKind.ReadonlyKeyword)
-        ? "r"
-        : "";
+      const readonly =
+        ts.canHaveModifiers(declaration) &&
+        ts
+          .getModifiers(declaration)
+          ?.some((modifier) => modifier.kind === ts.SyntaxKind.ReadonlyKeyword)
+          ? "r"
+          : "";
       return `${property.name}${optional}${readonly}:${structuralType(checker, propertyType, declaration, depth)}`;
     })
     .sort();
@@ -355,32 +409,43 @@ function propertyShapes(
 
 function signatureShapes(checker: ts.TypeChecker, type: ts.Type, at: ts.Node): string[] {
   const signatures = [...type.getCallSignatures(), ...type.getConstructSignatures()];
-  if (signatures.length > TYPE_SHAPE_CAPS.signatures) return [`#oversized-signatures:${signatures.length}`];
+  if (signatures.length > TYPE_SHAPE_CAPS.signatures)
+    return [`#oversized-signatures:${signatures.length}`];
   return signatures
-    .map((signature) => checker.signatureToString(signature, at, ts.TypeFormatFlags.UseStructuralFallback).slice(0, TYPE_SHAPE_CAPS.signatureBytes))
+    .map((signature) =>
+      checker
+        .signatureToString(signature, at, ts.TypeFormatFlags.UseStructuralFallback)
+        .slice(0, TYPE_SHAPE_CAPS.signatureBytes),
+    )
     .sort();
 }
 
-const structuralType = (
-  checker: ts.TypeChecker,
-  type: ts.Type,
-  at: ts.Node,
-  depth = 0,
-): string => {
+const structuralType = (checker: ts.TypeChecker, type: ts.Type, at: ts.Node, depth = 0): string => {
   const primitive = primitiveType(type);
   if (primitive !== undefined) return primitive;
   if (depth >= 3) return `flags:${type.flags}`;
   if (type.isUnion()) {
-    if (type.types.length > TYPE_SHAPE_CAPS.unionParts) return `oversized-union:${type.types.length}`;
-    return `union(${type.types.map((part) => structuralType(checker, part, at, depth + 1)).sort().join("|")})`;
+    if (type.types.length > TYPE_SHAPE_CAPS.unionParts)
+      return `oversized-union:${type.types.length}`;
+    return `union(${type.types
+      .map((part) => structuralType(checker, part, at, depth + 1))
+      .sort()
+      .join("|")})`;
   }
   if (type.isIntersection()) {
-    if (type.types.length > TYPE_SHAPE_CAPS.unionParts) return `oversized-intersection:${type.types.length}`;
-    return `intersection(${type.types.map((part) => structuralType(checker, part, at, depth + 1)).sort().join("&")})`;
+    if (type.types.length > TYPE_SHAPE_CAPS.unionParts)
+      return `oversized-intersection:${type.types.length}`;
+    return `intersection(${type.types
+      .map((part) => structuralType(checker, part, at, depth + 1))
+      .sort()
+      .join("&")})`;
   }
 
   const arrayElement = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
-  if (arrayElement !== undefined && checker.getPropertiesOfType(type).some((property) => property.name === "length")) {
+  if (
+    arrayElement !== undefined &&
+    checker.getPropertiesOfType(type).some((property) => property.name === "length")
+  ) {
     return `array<${structuralType(checker, arrayElement, at, depth + 1)}>`;
   }
 
@@ -390,25 +455,42 @@ const structuralType = (
   return `{${[...properties, ...signatures.map((signature) => `call:${signature}`)].join(",")}}`;
 };
 
-const band = (count: number): string => count <= 1 ? "0-1" : count <= 3 ? "2-3" : count <= 6 ? "4-6" : "7+";
+const band = (count: number): string =>
+  count <= 1 ? "0-1" : count <= 3 ? "2-3" : count <= 6 ? "4-6" : "7+";
 
-function declaredType(checker: ts.TypeChecker, node: ts.InterfaceDeclaration | ts.TypeAliasDeclaration): ts.Type {
+function declaredType(
+  checker: ts.TypeChecker,
+  node: ts.InterfaceDeclaration | ts.TypeAliasDeclaration,
+): ts.Type {
   if (ts.isTypeAliasDeclaration(node)) return checker.getTypeFromTypeNode(node.type);
   const symbol = checker.getSymbolAtLocation(node.name);
-  return symbol === undefined ? checker.getTypeAtLocation(node) : checker.getDeclaredTypeOfSymbol(symbol);
+  return symbol === undefined
+    ? checker.getTypeAtLocation(node)
+    : checker.getDeclaredTypeOfSymbol(symbol);
 }
 
-function typeShape(checker: ts.TypeChecker, node: ts.InterfaceDeclaration | ts.TypeAliasDeclaration): TypeShape | undefined {
+function typeShape(
+  checker: ts.TypeChecker,
+  node: ts.InterfaceDeclaration | ts.TypeAliasDeclaration,
+): TypeShape | undefined {
   const type = declaredType(checker, node);
   const rawSignatures = [...type.getCallSignatures(), ...type.getConstructSignatures()];
-  if ((type.flags & ts.TypeFlags.Object) === 0 && rawSignatures.length === 0 && !type.isIntersection()) return undefined;
+  if (
+    (type.flags & ts.TypeFlags.Object) === 0 &&
+    rawSignatures.length === 0 &&
+    !type.isIntersection()
+  )
+    return undefined;
   const properties = propertyShapes(checker, type, 0);
   const signatures = signatureShapes(checker, type, node);
   if (properties.length === 0 && signatures.length === 0) return undefined;
   return {
     properties,
     signatures,
-    components: [...properties.map((value) => `p:${value}`), ...signatures.map((value) => `s:${value}`)],
+    components: [
+      ...properties.map((value) => `p:${value}`),
+      ...signatures.map((value) => `s:${value}`),
+    ],
     propertyCount: properties.length,
     signatureCount: signatures.length,
     bucket: `${band(properties.length)}:${band(signatures.length)}`,
@@ -423,8 +505,9 @@ const similarity = (left: TypeShape, right: TypeShape): number => {
 };
 
 const comparableBuckets = (left: TypeShape, right: TypeShape): boolean =>
-  left.bucket === right.bucket
-  || Math.abs(left.propertyCount - right.propertyCount) <= 1 && Math.abs(left.signatureCount - right.signatureCount) <= 1;
+  left.bucket === right.bucket ||
+  (Math.abs(left.propertyCount - right.propertyCount) <= 1 &&
+    Math.abs(left.signatureCount - right.signatureCount) <= 1);
 
 interface TypeCandidate {
   shape: TypeShape;
@@ -434,15 +517,30 @@ interface TypeCandidate {
   typeReference?: string;
 }
 
-interface TypeCollection { candidates: TypeCandidate[]; truncated: boolean }
+interface TypeCollection {
+  candidates: TypeCandidate[];
+  truncated: boolean;
+}
 
-function collectTypeFile(project: TypeProject, cwd: string, file: ts.SourceFile, state: TypeCollection): void {
+function collectTypeFile(
+  project: TypeProject,
+  cwd: string,
+  file: ts.SourceFile,
+  state: TypeCollection,
+): void {
   for (const statement of file.statements) {
     if (!ts.isInterfaceDeclaration(statement) && !ts.isTypeAliasDeclaration(statement)) continue;
-    if (state.candidates.length >= ANALYZER_CAPS.typeCandidates) { state.truncated = true; continue; }
+    if (state.candidates.length >= ANALYZER_CAPS.typeCandidates) {
+      state.truncated = true;
+      continue;
+    }
     const shape = typeShape(project.checker, statement);
     if (shape === undefined) continue;
-    const candidate: TypeCandidate = { shape, loc: location(cwd, file, statement), name: statement.name.text };
+    const candidate: TypeCandidate = {
+      shape,
+      loc: location(cwd, file, statement),
+      name: statement.name.text,
+    };
     if (ts.isInterfaceDeclaration(statement) && statement.heritageClauses !== undefined) {
       const parent = statement.heritageClauses.flatMap((clause) => clause.types).at(0)?.expression;
       if (parent !== undefined) candidate.extends = parent.getText(file);
@@ -482,14 +580,18 @@ function comparableTypeCandidates(seed: TypeCandidate, index: TypeCandidateIndex
       const propertyCount = seed.shape.propertyCount + propertyDelta;
       const signatureCount = seed.shape.signatureCount + signatureDelta;
       if (propertyCount < 0 || signatureCount < 0) continue;
-      for (const candidate of index.counts.get(`${propertyCount}:${signatureCount}`) ?? []) peers.add(candidate);
+      for (const candidate of index.counts.get(`${propertyCount}:${signatureCount}`) ?? [])
+        peers.add(candidate);
     }
   }
   return [...peers];
 }
 
 function typePairKey(left: TypeCandidate, right: TypeCandidate): string {
-  return [`${left.loc.path}:${left.loc.line}:${left.loc.column}`, `${right.loc.path}:${right.loc.line}:${right.loc.column}`]
+  return [
+    `${left.loc.path}:${left.loc.line}:${left.loc.column}`,
+    `${right.loc.path}:${right.loc.line}:${right.loc.column}`,
+  ]
     .sort()
     .join("|");
 }
@@ -550,7 +652,11 @@ function emitTypeMatches(
   return false;
 }
 
-interface TypeMatchingState { output: Finding[]; seen: Set<string>; truncated: boolean }
+interface TypeMatchingState {
+  output: Finding[];
+  seen: Set<string>;
+  truncated: boolean;
+}
 
 function finishTypeMatches(state: TypeMatchingState): Finding[] {
   if (state.truncated) {
@@ -560,17 +666,32 @@ function finishTypeMatches(state: TypeMatchingState): Finding[] {
   return state.output.sort((left, right) => compareLocations(left.location, right.location));
 }
 
-export function similarTypesEffect(project: TypeProject, cwd: string, scope: Scope, threshold = 0.8): Effect.Effect<Finding[], AnalyzerRunError> {
+export function similarTypesEffect(
+  project: TypeProject,
+  cwd: string,
+  scope: Scope,
+  threshold = 0.8,
+): Effect.Effect<Finding[], AnalyzerRunError> {
   return Effect.gen(function* () {
     const collected: TypeCollection = { candidates: [], truncated: false };
     for (const file of project.files) {
-      yield* Effect.try({ try: () => collectTypeFile(project, cwd, file, collected), catch: (cause) => analyzerFailure(AnalyzerName.Types, cause) });
+      yield* Effect.try({
+        try: () => collectTypeFile(project, cwd, file, collected),
+        catch: (cause) => analyzerFailure(AnalyzerName.Types, cause),
+      });
       yield* Effect.yieldNow;
     }
     const index = indexTypeCandidates(collected.candidates);
-    const state: TypeMatchingState = { output: [], seen: new Set(), truncated: collected.truncated };
+    const state: TypeMatchingState = {
+      output: [],
+      seen: new Set(),
+      truncated: collected.truncated,
+    };
     for (const seed of collected.candidates.filter((candidate) => changed(scope, candidate.loc))) {
-      if (emitTypeMatches(seed, index, threshold, state.seen, state.output)) { state.truncated = true; break; }
+      if (emitTypeMatches(seed, index, threshold, state.seen, state.output)) {
+        state.truncated = true;
+        break;
+      }
       yield* Effect.yieldNow;
     }
     return finishTypeMatches(state);
@@ -578,15 +699,18 @@ export function similarTypesEffect(project: TypeProject, cwd: string, scope: Sco
 }
 
 function isLoop(node: ts.Node): boolean {
-  return ts.isForStatement(node)
-    || ts.isForOfStatement(node)
-    || ts.isForInStatement(node)
-    || ts.isWhileStatement(node)
-    || ts.isDoStatement(node);
+  return (
+    ts.isForStatement(node) ||
+    ts.isForOfStatement(node) ||
+    ts.isForInStatement(node) ||
+    ts.isWhileStatement(node) ||
+    ts.isDoStatement(node)
+  );
 }
 
 function repeatedScanName(node: ts.Node): string | undefined {
-  if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return undefined;
+  if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression))
+    return undefined;
   const name = node.expression.name.text;
   return ["sort", "find", "filter", "some", "every", "reduce"].includes(name) ? name : undefined;
 }
@@ -638,12 +762,7 @@ function visitLoop(
   return true;
 }
 
-function visitAsyncRisks(
-  file: ts.SourceFile,
-  cwd: string,
-  scope: Scope,
-  output: Finding[],
-): void {
+function visitAsyncRisks(file: ts.SourceFile, cwd: string, scope: Scope, output: Finding[]): void {
   const visit = (node: ts.Node, loopDepth: number): void => {
     if (visitLoop(node, visit, loopDepth)) return;
     if (loopDepth > 0) {
@@ -665,6 +784,12 @@ function visitAsyncRisks(
   visit(file, 0);
 }
 
-export function asyncRisksEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], AnalyzerRunError> {
-  return cooperativeFileAnalysis(AnalyzerName.AsyncRisk, project.files, (file, output) => visitAsyncRisks(file, cwd, scope, output));
+export function asyncRisksEffect(
+  project: SyntaxProject,
+  cwd: string,
+  scope: Scope,
+): Effect.Effect<Finding[], AnalyzerRunError> {
+  return cooperativeFileAnalysis(AnalyzerName.AsyncRisk, project.files, (file, output) =>
+    visitAsyncRisks(file, cwd, scope, output),
+  );
 }

@@ -360,7 +360,8 @@ export function formatJobMetadata(job: SubagentJob): string {
   const details = job.latestDetails;
   const session = details?.sessionFile ? ` session:${details.sessionFile}` : "";
   const usage = details?.usage ? ` usage:${formatUsageCompact(details.usage)}` : "";
-  const error = job.errorMessage ? ` error:${job.errorMessage}` : "";
+  const errorMessage = job.errorMessage ?? details?.errorMessage;
+  const error = errorMessage ? ` error:${errorMessage}` : "";
   return `[${job.status}] ${job.id} ${job.name}${session}${usage}${error}`;
 }
 

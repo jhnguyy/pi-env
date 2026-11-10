@@ -104,6 +104,25 @@ describe("shared subagent run supervisor", () => {
     },
   );
 
+  it("removes failed shutdowns from the registry so a new owner can start", async () => {
+    const id = "failed-dispose";
+    const supervisor = Control.getOrCreateSubagentRunSupervisor(id, config());
+    testCleanup()(() => Control.disposeSubagentRunSupervisor(id));
+    const failure = new Error("native disposal failed");
+    const close = vi.spyOn(supervisor, "shutdown").mockRejectedValue(failure);
+    try {
+      await expect(Control.disposeSubagentRunSupervisor(id)).rejects.toBe(failure);
+      expect(Control.getSubagentRunSupervisor(id)).toBeUndefined();
+      const replacement = Control.getOrCreateSubagentRunSupervisor(id, config());
+      expect(replacement).not.toBe(supervisor);
+      const lease = await replacement.acquire(request("/replacement"));
+      lease.release();
+    } finally {
+      close.mockRestore();
+      await supervisor.shutdown();
+    }
+  });
+
   it("coalesces parent disposal until held work settles without reopening admission", async () => {
     const cleanup = testCleanup();
     const supervisor = Control.getOrCreateSubagentRunSupervisor("coalesced-dispose", config());

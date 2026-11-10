@@ -428,6 +428,19 @@ function collectProcess(
           ...output(),
         }),
       );
+    const onStdinError = (cause: NodeJS.ErrnoException): void => {
+      // A child may successfully exit without consuming all input. Its exit
+      // status remains authoritative for a closed pipe.
+      if (cause.code === "EPIPE") return;
+      failAndTerminate(
+        new ProcessFailure({
+          kind: ProcessFailureKind.Exit,
+          command,
+          message: cause.message,
+          ...output(),
+        }),
+      );
+    };
     const onClose = (code: number | null, closeSignal: NodeJS.Signals | null): void => {
       closed = true;
       const value = output();
@@ -498,7 +511,14 @@ function collectProcess(
       child.stderr?.on("data", onStderr);
       child.once("error", onError);
       child.once("close", onClose);
-      if (options.stdin !== undefined) child.stdin?.end(options.stdin);
+      const stdin = child.stdin;
+      if (stdin) {
+        // Keep ownership through stream close, including errors queued during
+        // interruption after the direct child has already exited.
+        stdin.on("error", onStdinError);
+        stdin.once("close", () => stdin.off("error", onStdinError));
+        if (options.stdin !== undefined) stdin.end(options.stdin);
+      }
     } catch (cause) {
       settle(
         Effect.fail(

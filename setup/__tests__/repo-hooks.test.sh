@@ -44,6 +44,28 @@ test_custom_hook_keeps_hooks_path_unset() {
 
 }
 
+test_custom_pre_push_still_runs_after_setup() {
+  local tmp repo remote output
+  tmp="$(with_temp_dir)"
+  repo="$tmp/repo"
+  remote="$tmp/remote.git"
+  new_repo "$repo"
+  git init --bare -q "$remote"
+  git -C "$repo" -c user.name=HookTest -c user.email=hook@example.invalid \
+    commit --allow-empty -qm initial
+  make_executable "$repo/.git/hooks/pre-push" '#!/bin/sh
+ echo custom-pre-push >&2
+ exit 37'
+
+  configure_repo_tools_env "$repo" "$tmp/home" >/dev/null
+  if output=$(git -C "$repo" push "$remote" HEAD:refs/heads/test 2>&1); then
+    fail 'custom pre-push should block push after setup'
+  fi
+  assert_eq "$(hooks_path "$repo")" "" 'custom pre-push prevents takeover'
+  grep -qxF 'custom-pre-push' <<<"$output" || fail "Git did not invoke custom pre-push: $output"
+  assert_eq "$(git --git-dir="$remote" for-each-ref --format='%(refname)')" "" 'blocked push creates no remote ref'
+}
+
 test_existing_hooks_path_is_not_replaced() {
   local tmp repo
   tmp="$(with_temp_dir)"
@@ -107,6 +129,7 @@ exit "${NUB_STATUS:-0}"'
 
 test_sets_hooks_path
 test_custom_hook_keeps_hooks_path_unset
+test_custom_pre_push_still_runs_after_setup
 test_existing_hooks_path_is_not_replaced
 test_global_hooks_path_is_not_overridden
 test_git_runs_hooks_in_primary_and_linked_worktrees

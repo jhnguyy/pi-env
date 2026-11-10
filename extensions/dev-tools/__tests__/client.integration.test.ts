@@ -367,7 +367,7 @@ describe("LspClient", () => {
   });
 
   describe("interruption and timeout isolation", () => {
-    effectIt.effect("interrupting one request removes only that request", () =>
+    effectIt.effect("aborting a call removes only that request", () =>
       Effect.gen(function* () {
         const bothWritten = yield* Deferred.make<void>();
         const received = new Map<string, { request: DaemonRequest; socket: Socket }>();
@@ -378,16 +378,21 @@ describe("LspClient", () => {
           }),
         );
         const client = track(new LspClient(socketPath));
-        const interrupted = yield* client
-          .requestEffect({ action: "symbols", query: "cancel" })
-          .pipe(Effect.forkChild);
+        const controller = new AbortController();
+        const interrupted = client
+          .call({ action: "symbols", query: "cancel" }, controller.signal)
+          .then(
+            () => false,
+            () => true,
+          );
         const survivor = yield* client
           .requestEffect({ action: "symbols", query: "survive" })
           .pipe(Effect.forkChild);
         yield* Deferred.await(bothWritten);
         expect(client.pendingRequestCount).toBe(2);
 
-        yield* Fiber.interrupt(interrupted);
+        controller.abort();
+        expect(yield* Effect.promise(() => interrupted)).toBe(true);
         expect(client.pendingRequestCount).toBe(1);
         expect(client.activeRequestTimerCount).toBe(1);
 

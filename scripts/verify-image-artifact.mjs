@@ -33,8 +33,8 @@ export function imageArtifactIssues(root) {
   return requiredOutputIssues(root);
 }
 
-function run(command, args, label) {
-  const result = spawnSync(command, args, { encoding: "utf8", stdio: "inherit" });
+function run(root, command, args, label) {
+  const result = spawnSync(command, args, { cwd: root, encoding: "utf8", stdio: "inherit" });
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(`${label} failed with exit code ${result.status}`);
@@ -45,9 +45,10 @@ export function verifyImageArtifact(root) {
   const issues = imageArtifactIssues(root);
   if (issues.length > 0) throw new Error(issues.join("\n"));
 
-  run("node", ["--version"], "Node.js check");
-  run("nub", ["--version"], "Nub check");
+  run(root, "node", ["--version"], "Node.js check");
+  run(root, "nub", ["--version"], "Nub check");
   run(
+    root,
     process.execPath,
     [
       join(root, "scripts", "generate-license-bundle.mjs"),
@@ -59,7 +60,7 @@ export function verifyImageArtifact(root) {
     ],
     "Image license compliance check",
   );
-  run("nub", ["run", "verify:install"], "Image install readiness check");
+  run(root, "nub", ["run", "verify:install"], "Image install readiness check");
 }
 
 function parseArgs(args) {

@@ -20,7 +20,16 @@ export function configureTerminalToolsEffect(ctx, policy) {
 
 function configureTmuxEffect(ctx, policy) {
   const tmuxConf = join(ctx.home, ".tmux.conf");
-  const sourceLine = `source-file ${join(ctx.sourceRoot, "setup/templates/tmux.conf")}`;
+  const sourcePath = join(ctx.sourceRoot, "setup/templates/tmux.conf");
+  // source-file expands globs after tmux parses its quoted argument.
+  const literalGlobPath = sourcePath.replace(/[\\*?\[\]]/g, "\\$&");
+  // tmux double quotes still expand variables and interpret backslash escapes.
+  const quotedPath = literalGlobPath.replace(/[\\"$\n\r]/g, (char) => {
+    if (char === "\n") return "\\n";
+    if (char === "\r") return "\\r";
+    return `\\${char}`;
+  });
+  const sourceLine = `source-file "${quotedPath}"`;
   return fileEffect("configure tmux", tmuxConf, () => {
     if (!policy.terminal.tmux.configure) {
       note("tmux config (managed externally)");

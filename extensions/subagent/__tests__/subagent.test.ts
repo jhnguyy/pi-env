@@ -76,6 +76,23 @@ describe("subagent extension", () => {
       ).toBe("");
     });
 
+    it("shows a bounded background failure diagnostic without expanding", () => {
+      const errorMessage = `Connection refused ${"x".repeat(500)}`;
+      const rendered = extractText(
+        registeredTool.renderResult(
+          {
+            content: [{ type: "text", text: errorMessage }],
+            details: { jobId: "job-1", status: "failed", name: "audit", errorMessage },
+          },
+          {},
+          mockTheme,
+          { ...hints, args: { action: "result", job_id: "job-1" } },
+        ),
+      );
+      expect(rendered).toContain("Connection refused");
+      expect(rendered).not.toContain(errorMessage);
+    });
+
     it("keeps background child output hidden until expansion", () => {
       const longTask = `inspect ${"B".repeat(500)}`;
       const fullOutput = `full child output\n${"C".repeat(500)}`;

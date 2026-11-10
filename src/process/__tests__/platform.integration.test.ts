@@ -41,6 +41,17 @@ describe("process platform streamProcess", () => {
     expect(out.stderr.trim()).toBe("warn");
   });
 
+  it("preserves a successful exit when the child closes stdin before consuming input", async () => {
+    await expect(
+      Effect.runPromise(
+        runProcess(node, ["-e", "process.exit(0)"], {
+          stdin: "x".repeat(1024 * 1024),
+          timeoutMs: 5_000,
+        }),
+      ),
+    ).resolves.toEqual({ exitCode: 0, stdout: "", stderr: "" });
+  });
+
   it("maps spawn errors", async () => {
     const result = await Effect.runPromise(
       Effect.result(streamProcess("/definitely/missing/pi-env-cmd", [], { timeoutMs: 1_000 })),

@@ -290,6 +290,8 @@ export function renderSubagentJobResult(
   if (!expanded) {
     let text = header;
     if (details.task) text += `\n${theme.fg("toolOutput", formatPromptPreview(details.task))}`;
+    if (details.errorMessage)
+      text += `\n${theme.fg("error", formatPromptPreview(details.errorMessage))}`;
     if (statParts.length > 0) text += `\n${theme.fg("dim", statParts.join(" · "))}`;
     const hint = ToolRender.toolExpandHint(theme, context);
     if (hint) text += `\n${hint}`;

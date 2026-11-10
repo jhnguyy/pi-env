@@ -248,7 +248,7 @@ async function executeRequest(
   }
 }
 
-function invokeRequest(
+async function invokeRequest(
   request: RuntimeRequest,
   handlers: RuntimeBusHandlers,
   cache: RequestCache,
@@ -294,7 +294,14 @@ export function startRuntimeBus(options: {
       let connections = 0;
       const cache: RequestCache = new Map();
       const sockets = new Set<Socket>();
+      const requests = new Set<Promise<void>>();
+      let stopping = false;
+      let closing: Promise<void> | undefined;
       const server = createServer((socket) => {
+        if (stopping) {
+          socket.destroy();
+          return;
+        }
         sockets.add(socket);
         if (++connections > MAX_CONNECTIONS) {
           sockets.delete(socket);
@@ -348,7 +355,7 @@ export function startRuntimeBus(options: {
             );
             return false;
           }
-          void invokeRequest(request, options.handlers, cache, now)
+          const handling = invokeRequest(request, options.handlers, cache, now)
             .then((result) =>
               writeFrame(socket, {
                 version: 1,
@@ -378,11 +385,13 @@ export function startRuntimeBus(options: {
             .catch(() => undefined)
             .finally(() => {
               inFlight -= 1;
+              requests.delete(handling);
             });
+          requests.add(handling);
           return true;
         };
         socket.on("data", (chunk: Buffer) => {
-          if (closed) return;
+          if (closed || stopping) return;
           buffer = Buffer.concat([buffer, chunk]);
           if (buffer.length > MAX_BUFFER_BYTES && !buffer.includes(0x0a)) {
             void protocolError("unknown", "FrameTooLarge", "request frame exceeds 64 KiB");
@@ -440,22 +449,28 @@ export function startRuntimeBus(options: {
         await rename(temporary, options.paths.metadataPath);
         return {
           runtimeId,
-          close: async () => {
-            for (const socket of sockets) socket.destroy();
-            await closeServer(server);
-            await Promise.all([
-              unlink(options.paths.socketPath).catch((error: NodeJS.ErrnoException) => {
-                if (error.code !== "ENOENT") throw error;
-              }),
-              unlink(options.paths.metadataPath).catch((error: NodeJS.ErrnoException) => {
-                if (error.code !== "ENOENT") throw error;
-              }),
-            ]);
-          },
+          close: () =>
+            (closing ??= (async () => {
+              stopping = true;
+              for (const socket of sockets) socket.destroy();
+              await closeServer(server);
+              // Disconnecting clients does not cancel the handlers' external effects.
+              await Promise.all(requests);
+              await Promise.all([
+                unlink(options.paths.socketPath).catch((error: NodeJS.ErrnoException) => {
+                  if (error.code !== "ENOENT") throw error;
+                }),
+                unlink(options.paths.metadataPath).catch((error: NodeJS.ErrnoException) => {
+                  if (error.code !== "ENOENT") throw error;
+                }),
+              ]);
+            })()),
         };
       } catch (error) {
+        stopping = true;
         for (const socket of sockets) socket.destroy();
         await closeServer(server).catch(() => undefined);
+        await Promise.all(requests);
         await Promise.all(
           [options.paths.socketPath, options.paths.metadataPath, temporary].flatMap((path) =>
             path ? [unlink(path).catch(() => undefined)] : [],

@@ -135,6 +135,33 @@ describe("analyze supervisor", () => {
     ).resolves.toMatchObject({ summary: { failures: 0 }, findings: [] });
   });
 
+  it("preserves UTF-8 findings split between worker output chunks", async () => {
+    const cwd = fixtureRoot();
+    const resume = join(cwd, "resume");
+    const worker = writeWorker(
+      cwd,
+      `
+const { existsSync } = await import('node:fs');
+emit({ version: 1, type: 'started', runId: request.runId });
+const diagnostic = { version: 1, type: 'diagnostic', runId: request.runId, event: { version: 1, runId: request.runId, timestampMs: Date.now(), type: 'stage-started', attributes: { stage: 'scope' }, terminal: false } };
+const result = { version: 1, type: 'result', runId: request.runId, result: { ...${emptyResult}, summary: { info: 0, warning: 1, error: 0, failures: 0 }, findings: [{ id: 'unicode', analyzer: 'duplicates', kind: 'duplicate', severity: 'warning', message: 'café', location: { path: 'café.ts', line: 1, column: 1 } }] } };
+const bytes = Buffer.from(JSON.stringify(result) + '\\n');
+const split = bytes.indexOf(Buffer.from('é')) + 1;
+process.stdout.write(Buffer.concat([Buffer.from(JSON.stringify(diagnostic) + '\\n'), bytes.subarray(0, split)]));
+while (!existsSync(${JSON.stringify(resume)})) await new Promise(resolve => setTimeout(resolve, 5));
+process.stdout.write(bytes.subarray(split));
+emit({ version: 1, type: 'complete', runId: request.runId });`,
+    );
+    const result = await superviseAnalyze(safeRequest(cwd), {
+      workerPath: worker,
+      env: disabledEnv,
+      onEvent: (event) => {
+        if (event.type === "diagnostic") writeFileSync(resume, "resume");
+      },
+    });
+    expect(result.findings[0]).toMatchObject({ message: "café", location: { path: "café.ts" } });
+  });
+
   it.each([
     [
       "result before started",

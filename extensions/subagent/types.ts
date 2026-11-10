@@ -51,6 +51,7 @@ export interface SubagentJobRenderDetails {
   sessionName?: string;
   sessionFile?: string;
   count?: number;
+  errorMessage?: string;
   resultTruncated?: boolean;
 }
 

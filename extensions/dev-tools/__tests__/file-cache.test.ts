@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, vi } from "vitest";
 import { FileCache, MAX_FILE_SIZE_BYTES, type FileCacheFileSystem } from "../file-cache";
 
 const fsMocks = {
-  stat: vi.fn<(path: string) => Promise<{ size: number }>>(),
+  stat: vi.fn<FileCacheFileSystem["stat"]>(),
   readFile: vi.fn<(path: string, encoding: "utf8") => Promise<string>>(),
 } satisfies FileCacheFileSystem;
 
@@ -13,11 +13,44 @@ function createCache(): FileCache {
 }
 
 beforeEach(() => {
-  fsMocks.stat.mockReset().mockResolvedValue({ size: 1 });
+  fsMocks.stat.mockReset().mockResolvedValue({ size: 1, mtimeMs: 0, ctimeMs: 0 });
   fsMocks.readFile.mockReset();
 });
 
 describe("FileCache", () => {
+  it("refreshes externally changed text and rejects files that disappear or grow too large", async () => {
+    let metadata = { size: 3, mtimeMs: 1, ctimeMs: 1 };
+    let content = "old";
+    let missing = false;
+    const readFile = vi.fn(async () => content);
+    const cache = new FileCache({
+      stat: async () => {
+        if (missing) throw new Error("missing");
+        return metadata;
+      },
+      readFile,
+    });
+    expect(await cache.getLine("/external.ts", 1)).toBe("old");
+    content = "new";
+    metadata = { ...metadata, mtimeMs: 2 };
+    expect(
+      await Promise.all([cache.getLine("/external.ts", 1), cache.getLine("/external.ts", 1)]),
+    ).toEqual(["new", "new"]);
+    expect(readFile).toHaveBeenCalledTimes(2);
+    content = "end";
+    metadata = { ...metadata, ctimeMs: 2 };
+    expect(await cache.extractLines("/external.ts", 0, 0)).toBe("end");
+    metadata = { ...metadata, size: MAX_FILE_SIZE_BYTES + 1 };
+    expect(await cache.readFile("/external.ts")).toBeNull();
+    metadata = { ...metadata, size: 3 };
+    expect(await cache.readFile("/external.ts")).toBe("end");
+    missing = true;
+    expect(await cache.readFile("/external.ts")).toBeNull();
+    missing = false;
+    content = "back";
+    expect(await cache.readFile("/external.ts")).toBe("back");
+  });
+
   it("keeps 64 least-recently-used entries", async () => {
     fsMocks.readFile.mockImplementation(async (path) => `content:${path}`);
     const cache = createCache();
@@ -88,20 +121,18 @@ describe("FileCache", () => {
         "shared",
       ]);
       expect(yield* Ref.get(lookupCount)).toBe(1);
-      expect(fsMocks.stat).toHaveBeenCalledTimes(1);
     }),
   );
 
   it("retries a file after an oversized result", async () => {
     fsMocks.stat
-      .mockResolvedValueOnce({ size: MAX_FILE_SIZE_BYTES + 1 })
-      .mockResolvedValueOnce({ size: 1 });
+      .mockResolvedValueOnce({ size: MAX_FILE_SIZE_BYTES + 1, mtimeMs: 0, ctimeMs: 0 })
+      .mockResolvedValueOnce({ size: 1, mtimeMs: 0, ctimeMs: 0 });
     fsMocks.readFile.mockResolvedValue("now-small");
     const cache = createCache();
 
     await expect(cache.readFile("/changing.ts")).resolves.toBeNull();
     await expect(cache.readFile("/changing.ts")).resolves.toBe("now-small");
-    expect(fsMocks.stat).toHaveBeenCalledTimes(2);
     expect(fsMocks.readFile).toHaveBeenCalledTimes(1);
   });
 
@@ -111,7 +142,6 @@ describe("FileCache", () => {
 
     await expect(cache.readFile("/retry.ts")).resolves.toBeNull();
     await expect(cache.readFile("/retry.ts")).resolves.toBe("ready");
-    expect(fsMocks.stat).toHaveBeenCalledTimes(2);
     expect(fsMocks.readFile).toHaveBeenCalledTimes(2);
   });
 

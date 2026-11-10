@@ -26,6 +26,25 @@ function testBackend(countFile: string): LspBackend {
 }
 
 describe("LspBackend lifecycle", () => {
+  it("rejects startup without an unhandled stdin error when the server exits during initialize", async () => {
+    const backend = new LspBackend({
+      mode: "lsp",
+      name: "early-exit",
+      binaryName: "test-language-server",
+      binaryArgs: [],
+      launchCommand: resolveNodeCommand(),
+      launchArgs: ["-e", "process.exit(0)"],
+      extensions: new Map([[".ts", "typescript"]]),
+      rootMarkers: [],
+      capabilities: { padding: "x".repeat(1024 * 1024) },
+      codePrefix: "TS",
+      supportsWorkspaceSymbols: true,
+    } as any);
+    onTestFinished(() => backend.shutdown());
+    await expect(backend.ensureStarted()).rejects.toThrow(/LSP/);
+    await backend.shutdown();
+    expect(backend.isRunning).toBe(false);
+  });
   it("coalesces a real LSP lifetime, recovers semantic health, releases and restarts cleanly", async () => {
     const root = TempDir.forTestSync("pi-dev-tools-backend-");
     const countFile = join(root, "starts");

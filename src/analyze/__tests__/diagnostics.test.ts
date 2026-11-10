@@ -1,10 +1,10 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "@effect/vitest";
 import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-node";
 import { Effect, Result } from "effect";
-import { describe, expect } from "vitest";
+import { describe, expect, vi } from "vitest";
 import {
   AnalyzeDiagnosticEventType,
   AnalyzeOutcome,
@@ -219,6 +219,35 @@ describe("bounded crash journal", () => {
         terminal: true,
       }),
     );
+  });
+
+  it("closes its handle even when the final sync fails", async () => {
+    const directory = fixtureRoot();
+    const probe = await open(join(directory, "probe"), "a");
+    const prototype: Pick<typeof probe, "sync"> = Object.getPrototypeOf(probe);
+    await probe.close();
+    const failure = new Error("sync failed");
+    let handle: typeof probe | undefined;
+    const sync = vi
+      .spyOn(prototype, "sync")
+      .mockImplementationOnce(async function (this: typeof probe) {
+        handle = this;
+        throw failure;
+      });
+    const errors: Error[] = [];
+    const journal = await AnalysisJournal.open({
+      directory,
+      onError: (error) => errors.push(error),
+    });
+    try {
+      await journal.close();
+      expect(handle?.fd).toBe(-1);
+      expect(errors).toEqual([failure]);
+    } finally {
+      sync.mockRestore();
+      await handle?.close();
+      await journal.close();
+    }
   });
 
   it("reports one initialization error across later append and close calls", async () => {

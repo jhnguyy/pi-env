@@ -575,6 +575,87 @@ describe("notes tool contract", () => {
     });
   });
 
+  it("ends collection sections at H1 while retaining nested H3 content", async () => {
+    const original = "## Notes\n\n- kept\n### Detail\n- nested\n# Other\n- unrelated\n";
+    const { provider: store, vault } = await vaultFixture({ "inbox/20260912.md": original });
+    const contract = createNotesContract(store, { now: () => new Date(2026, 8, 12) });
+    const read = await contract.execute(
+      { collection: "inbox", action: "read", date: "2026-09-12" },
+      { cwd: "/repo" },
+    );
+    expect(read.details.items).toEqual([
+      expect.objectContaining({ text: "kept" }),
+      expect.objectContaining({ text: "nested" }),
+    ]);
+    await contract.execute(
+      { collection: "inbox", action: "write", kind: "note", text: "capture" },
+      { cwd: "/repo" },
+    );
+    expect(await readFile(path.join(vault, "inbox/20260912.md"), "utf8")).toBe(
+      original.replace("# Other", "- capture\n# Other"),
+    );
+  });
+
+  it.each([
+    ["inbox", "## Notes\n\n- old\n```md\nexample\n"],
+    ["inbox", "# Context\n~~~\nexample"],
+    ["worklog", "## Worklog\n\n- old\n~~~~\n```\n"],
+  ] as const)(
+    "rejects hidden %s captures before writing an unclosed fence",
+    async (collection, original) => {
+      const notePath = collection === "inbox" ? "inbox/20260912.md" : "records/2026/09/12.md";
+      const { provider: store, vault } = await vaultFixture({ [notePath]: original });
+      const write = vi.spyOn(store, "write");
+      const contract = createNotesContract(store, { now: () => new Date(2026, 8, 12) });
+      await expect(
+        contract.execute(
+          collection === "inbox"
+            ? { collection, action: "write", kind: "note", text: "capture" }
+            : { collection, action: "record", text: "capture" },
+          { cwd: "/repo" },
+        ),
+      ).rejects.toThrow("unclosed code fence");
+      expect(write).not.toHaveBeenCalled();
+      expect(await readFile(path.join(vault, notePath), "utf8")).toBe(original);
+    },
+  );
+
+  it.each([
+    ["## Notes\n\n```md\nexample\n```\n", "## Notes\n\n```md\nexample\n```\n- capture\n"],
+    ["## Notes\n\n-\n~~~\nexample\n", "## Notes\n\n- capture\n~~~\nexample\n"],
+    [
+      "## Notes\n\n- old\n# Other\n```\nexample\n",
+      "## Notes\n\n- old\n- capture\n# Other\n```\nexample\n",
+    ],
+  ])("keeps captures visible at safe insertion points", async (original, expected) => {
+    const notePath = "inbox/20260912.md";
+    const { provider: store, vault } = await vaultFixture({ [notePath]: original });
+    const contract = createNotesContract(store, { now: () => new Date(2026, 8, 12) });
+    await contract.execute(
+      { collection: "inbox", action: "write", kind: "note", text: "capture" },
+      { cwd: "/repo" },
+    );
+    expect(await readFile(path.join(vault, notePath), "utf8")).toBe(expected);
+    const result = await contract.execute(
+      { collection: "inbox", action: "read", date: "2026-09-12" },
+      { cwd: "/repo" },
+    );
+    expect(result.details.items).toContainEqual(expect.objectContaining({ text: "capture" }));
+  });
+
+  it("returns bounded built-in search titles through the provider contract", async () => {
+    const { provider: store } = await vaultFixture({
+      "long.md": `# ${"x".repeat(300)}\nsearch target`,
+    });
+    const result = await createNotesContract(store).execute(
+      { action: "search", query: "search target" },
+      { cwd: "/repo" },
+    );
+    expect(result.details.results).toEqual([
+      expect.objectContaining({ path: "long.md", title: "x".repeat(256) }),
+    ]);
+  });
+
   it("rejects a collection append that would exceed the note byte limit", async () => {
     const notePath = "inbox/20260912.md";
     const prefix = "## Notes\n\n- ";

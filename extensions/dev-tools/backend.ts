@@ -590,6 +590,13 @@ export class LspBackend {
     process.stderr?.on("data", onStderr);
     process.once("exit", onExit);
     process.once("error", onError);
+    const stdin = process.stdin;
+    if (stdin) {
+      // Writes fail asynchronously, including during shutdown. Retain the error
+      // listener until stream close, not merely until the child exits.
+      stdin.on("error", onError);
+      stdin.once("close", () => stdin.off("error", onError));
+    }
     return { parser, onStdout, onStderr, onExit, onError };
   }
 

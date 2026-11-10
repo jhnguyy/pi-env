@@ -1,5 +1,5 @@
 import { closeSync, existsSync, fstatSync, openSync, readSync, realpathSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { Effect } from "effect";
 import ts from "typescript";
 import { ProgramError, ScopeMode } from "./model.js";
@@ -11,13 +11,17 @@ export const SyntaxSourceSelection = {
   Tests: "tests",
   ProductionAndTests: "production-and-tests",
 } as const;
-export type SyntaxSourceSelection = typeof SyntaxSourceSelection[keyof typeof SyntaxSourceSelection];
+export type SyntaxSourceSelection =
+  (typeof SyntaxSourceSelection)[keyof typeof SyntaxSourceSelection];
 
 export interface SyntaxProject {
   files: readonly ts.SourceFile[];
   testFiles: readonly ts.SourceFile[];
 }
-export interface TypeProject extends SyntaxProject { program: ts.Program; checker: ts.TypeChecker }
+export interface TypeProject extends SyntaxProject {
+  program: ts.Program;
+  checker: ts.TypeChecker;
+}
 
 export interface SyntaxSourceBudget {
   readonly maxFiles: number;
@@ -31,49 +35,70 @@ interface ParsedConfig {
 }
 
 const SourceCategory = { Production: "production", Test: "test" } as const;
-type SourceCategory = typeof SourceCategory[keyof typeof SourceCategory];
+type SourceCategory = (typeof SourceCategory)[keyof typeof SourceCategory];
 
 const sourcePath = (cwd: string, fileName: string): string =>
   normalizeWorkspacePath(relative(cwd, resolve(fileName)));
 function sourceCategory(cwd: string, fileName: string): SourceCategory | undefined {
   const path = sourcePath(cwd, fileName);
-  if (path.includes("node_modules/") || /(^|\/)(dist|generated)(\/|$)/.test(path)) return undefined;
-  if (/(^|\/)__tests__(\/|$)/.test(path)) {
-    return /\.[cm]?[jt]sx?$/.test(path) ? SourceCategory.Test : undefined;
-  }
+  if (
+    !/\.[cm]?[jt]sx?$/.test(path) ||
+    path.includes("node_modules/") ||
+    /(^|\/)(dist|generated)(\/|$)/.test(path)
+  )
+    return undefined;
+  if (/(^|\/)__tests__(\/|$)/.test(path)) return SourceCategory.Test;
   return /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path)
     ? SourceCategory.Test
     : SourceCategory.Production;
 }
-const analyzableSource = (cwd: string, fileName: string): boolean =>
-  sourceCategory(cwd, fileName) === SourceCategory.Production;
-const selectedSource = (category: SourceCategory | undefined, selection: SyntaxSourceSelection): boolean =>
-  category !== undefined
-  && (selection === SyntaxSourceSelection.ProductionAndTests
-    || selection === SyntaxSourceSelection.Production && category === SourceCategory.Production
-    || selection === SyntaxSourceSelection.Tests && category === SourceCategory.Test);
+const selectedSource = (
+  category: SourceCategory | undefined,
+  selection: SyntaxSourceSelection,
+): boolean =>
+  category !== undefined &&
+  (selection === SyntaxSourceSelection.ProductionAndTests ||
+    (selection === SyntaxSourceSelection.Production && category === SourceCategory.Production) ||
+    (selection === SyntaxSourceSelection.Tests && category === SourceCategory.Test));
 
-const toProgramError = (cause: unknown): ProgramError => cause instanceof ProgramError
-  ? cause
-  : new ProgramError({ message: cause instanceof Error ? cause.message : String(cause) });
+const toProgramError = (cause: unknown): ProgramError =>
+  cause instanceof ProgramError
+    ? cause
+    : new ProgramError({ message: cause instanceof Error ? cause.message : String(cause) });
 
 /** Parses the project tsconfig at the filesystem and compiler boundary. */
-const parseTsconfigEffect = (cwd: string): Effect.Effect<ParsedConfig, ProgramError> => Effect.try({
-  try: () => {
-    const configPath = ts.findConfigFile(cwd, existsSync, "tsconfig.json");
-    if (!configPath) throw new ProgramError({ message: "tsconfig.json not found" });
-    const config = ts.readConfigFile(configPath, ts.sys.readFile);
-    if (config.error) throw new ProgramError({ message: ts.flattenDiagnosticMessageText(config.error.messageText, "\n") });
-    const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, cwd);
-    if (parsed.errors.length > 0) {
-      throw new ProgramError({ message: parsed.errors.map((error) => ts.flattenDiagnosticMessageText(error.messageText, "\n")).join("\n") });
-    }
-    return { fileNames: parsed.fileNames, options: parsed.options };
-  },
-  catch: toProgramError,
-});
+const parseTsconfigEffect = (cwd: string): Effect.Effect<ParsedConfig, ProgramError> =>
+  Effect.try({
+    try: () => {
+      const configPath = ts.findConfigFile(cwd, existsSync, "tsconfig.json");
+      if (!configPath) throw new ProgramError({ message: "tsconfig.json not found" });
+      const config = ts.readConfigFile(configPath, ts.sys.readFile);
+      if (config.error)
+        throw new ProgramError({
+          message: ts.flattenDiagnosticMessageText(config.error.messageText, "\n"),
+        });
+      const parsed = ts.parseJsonConfigFileContent(
+        config.config,
+        ts.sys,
+        dirname(configPath),
+        undefined,
+        configPath,
+      );
+      if (parsed.errors.length > 0) {
+        throw new ProgramError({
+          message: parsed.errors
+            .map((error) => ts.flattenDiagnosticMessageText(error.messageText, "\n"))
+            .join("\n"),
+        });
+      }
+      return { fileNames: parsed.fileNames, options: parsed.options };
+    },
+    catch: toProgramError,
+  });
 
-export const tsconfigFileNamesEffect = (cwd: string): Effect.Effect<readonly string[], ProgramError> =>
+export const tsconfigFileNamesEffect = (
+  cwd: string,
+): Effect.Effect<readonly string[], ProgramError> =>
   parseTsconfigEffect(cwd).pipe(Effect.map((parsed) => parsed.fileNames));
 
 function sortedSourceFiles(
@@ -89,12 +114,15 @@ function sortedSourceFiles(
 function scriptKind(fileName: string): ts.ScriptKind {
   if (/\.tsx$/i.test(fileName)) return ts.ScriptKind.TSX;
   if (/\.[cm]?jsx$/i.test(fileName)) return ts.ScriptKind.JSX;
-  if (/\.json$/i.test(fileName)) return ts.ScriptKind.JSON;
   if (/\.[cm]?js$/i.test(fileName)) return ts.ScriptKind.JS;
   return ts.ScriptKind.TS;
 }
 
-function readBoundedSource(fileName: string, displayName: string, maxBytes: number): { text: string; bytes: number } {
+function readBoundedSource(
+  fileName: string,
+  displayName: string,
+  maxBytes: number,
+): { text: string; bytes: number } {
   const fd = openSync(fileName, "r");
   try {
     const initialSize = fstatSync(fd).size;
@@ -127,21 +155,27 @@ function createSyntaxProjectFromFiles(
   selection: SyntaxSourceSelection,
 ): SyntaxProject {
   const selectedFileNames = fileNames.filter((fileName) =>
-    selectedSource(sourceCategory(cwd, fileName), selection));
+    selectedSource(sourceCategory(cwd, fileName), selection),
+  );
   if (budget !== undefined && selectedFileNames.length > budget.maxFiles) {
-    throw new ProgramError({ message: `Syntax source file limit exceeded: ${selectedFileNames.length} > ${budget.maxFiles}` });
+    throw new ProgramError({
+      message: `Syntax source file limit exceeded: ${selectedFileNames.length} > ${budget.maxFiles}`,
+    });
   }
   const files: ts.SourceFile[] = [];
   const testFiles: ts.SourceFile[] = [];
   let totalBytes = 0;
   for (const fileName of selectedFileNames) {
-    const source = budget === undefined
-      ? { text: ts.sys.readFile(fileName), bytes: 0 }
-      : readBoundedSource(fileName, sourcePath(cwd, fileName), budget.maxFileBytes);
+    const source =
+      budget === undefined
+        ? { text: ts.sys.readFile(fileName), bytes: 0 }
+        : readBoundedSource(fileName, sourcePath(cwd, fileName), budget.maxFileBytes);
     if (source.text === undefined) continue;
     totalBytes += source.bytes;
     if (budget !== undefined && totalBytes > budget.maxTotalBytes) {
-      throw new ProgramError({ message: `Syntax source aggregate byte limit exceeded: ${totalBytes} > ${budget.maxTotalBytes}` });
+      throw new ProgramError({
+        message: `Syntax source aggregate byte limit exceeded: ${totalBytes} > ${budget.maxTotalBytes}`,
+      });
     }
     const file = ts.createSourceFile(fileName, source.text, target, true, scriptKind(fileName));
     if (sourceCategory(cwd, fileName) === SourceCategory.Test) testFiles.push(file);
@@ -161,9 +195,10 @@ function createSyntaxProject(
   selection: SyntaxSourceSelection,
 ): SyntaxProject {
   const selected = scoped && scope.mode !== "all" ? new Set(scope.files) : undefined;
-  const fileNames = selected === undefined
-    ? parsed.fileNames
-    : parsed.fileNames.filter((fileName) => selected.has(sourcePath(cwd, fileName)));
+  const fileNames =
+    selected === undefined
+      ? parsed.fileNames
+      : parsed.fileNames.filter((fileName) => selected.has(sourcePath(cwd, fileName)));
   return createSyntaxProjectFromFiles(
     cwd,
     fileNames,
@@ -188,13 +223,7 @@ function createExplicitSyntaxProject(
     }
     return resolved;
   });
-  return createSyntaxProjectFromFiles(
-    root,
-    fileNames,
-    ts.ScriptTarget.Latest,
-    budget,
-    selection,
-  );
+  return createSyntaxProjectFromFiles(root, fileNames, ts.ScriptTarget.Latest, budget, selection);
 }
 
 const createTypeProject = (
@@ -207,12 +236,14 @@ const createTypeProject = (
   return {
     program,
     checker: program.getTypeChecker(),
-    files: selection === SyntaxSourceSelection.Tests
-      ? []
-      : sortedSourceFiles(cwd, sourceFiles, SourceCategory.Production),
-    testFiles: selection === SyntaxSourceSelection.Production
-      ? []
-      : sortedSourceFiles(cwd, sourceFiles, SourceCategory.Test),
+    files:
+      selection === SyntaxSourceSelection.Tests
+        ? []
+        : sortedSourceFiles(cwd, sourceFiles, SourceCategory.Production),
+    testFiles:
+      selection === SyntaxSourceSelection.Production
+        ? []
+        : sortedSourceFiles(cwd, sourceFiles, SourceCategory.Test),
   };
 };
 
@@ -222,19 +253,24 @@ export const createSyntaxProjectEffect = (
   scope: Scope,
   sourceBudget?: SyntaxSourceBudget,
   selection: SyntaxSourceSelection = SyntaxSourceSelection.Production,
-): Effect.Effect<SyntaxProject, ProgramError> => scope.mode !== ScopeMode.All
-  ? Effect.try({
-    try: () => createExplicitSyntaxProject(cwd, scope, sourceBudget, selection),
-    catch: toProgramError,
-  })
-  : Effect.flatMap(parseTsconfigEffect(cwd), (parsed) => Effect.try({
-    try: () => createSyntaxProject(cwd, scope, true, parsed, sourceBudget, selection),
-    catch: toProgramError,
-  }));
+): Effect.Effect<SyntaxProject, ProgramError> =>
+  scope.mode !== ScopeMode.All
+    ? Effect.try({
+        try: () => createExplicitSyntaxProject(cwd, scope, sourceBudget, selection),
+        catch: toProgramError,
+      })
+    : Effect.flatMap(parseTsconfigEffect(cwd), (parsed) =>
+        Effect.try({
+          try: () => createSyntaxProject(cwd, scope, true, parsed, sourceBudget, selection),
+          catch: toProgramError,
+        }),
+      );
 
 /** Loads the semantic TypeScript project used by type analyzers. */
 export const createTypeProjectEffect = (cwd: string): Effect.Effect<TypeProject, ProgramError> =>
-  Effect.flatMap(parseTsconfigEffect(cwd), (parsed) => Effect.try({
-    try: () => createTypeProject(cwd, parsed),
-    catch: toProgramError,
-  }));
+  Effect.flatMap(parseTsconfigEffect(cwd), (parsed) =>
+    Effect.try({
+      try: () => createTypeProject(cwd, parsed),
+      catch: toProgramError,
+    }),
+  );

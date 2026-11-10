@@ -91,7 +91,10 @@ export async function activateNotesExtension(
         const suffix = count === undefined ? "" : ` (${count})`;
         const collection = context.args.collection ? ` ${String(context.args.collection)}` : "";
         return new Text(
-          theme.fg("success", `✓ notes${collection} ${String(context.args.action)}${suffix}`),
+          theme.fg(
+            context.isError ? "error" : "success",
+            `${context.isError ? "✗" : "✓"} notes${collection} ${String(context.args.action)}${suffix}`,
+          ),
           0,
           0,
         );

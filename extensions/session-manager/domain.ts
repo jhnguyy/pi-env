@@ -26,10 +26,9 @@ export function replaceWorkRecord(
   const sessions = manifest.sessions
     .filter((candidate) => candidate.sessionId !== record.sessionId)
     .concat(record)
-    .sort(
-      (left, right) =>
-        left.createdAt.localeCompare(right.createdAt) ||
-        left.sessionId.localeCompare(right.sessionId),
-    );
+    .sort((left, right) => {
+      if (left.createdAt !== right.createdAt) return left.createdAt < right.createdAt ? -1 : 1;
+      return left.sessionId < right.sessionId ? -1 : left.sessionId > right.sessionId ? 1 : 0;
+    });
   return { ...manifest, sessions };
 }

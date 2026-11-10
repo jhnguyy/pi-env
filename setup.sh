@@ -23,8 +23,25 @@ has_explicit_setup_mode() {
   return 1
 }
 
-if [ "${1:-}" = "--use-nix" ]; then
-  shift
+# Validate the complete argv before dispatch, including arguments after --help.
+source "$SCRIPT_DIR/setup/options.sh"
+setup_validate_args "$@"
+setup_args=()
+use_nix=0
+show_help=0
+for arg in "$@"; do
+  case "$arg" in
+    --use-nix) use_nix=1 ;;
+    -h|--help) show_help=1; setup_args+=("$arg") ;;
+    *) setup_args+=("$arg") ;;
+  esac
+done
+if [ "$show_help" = "1" ]; then
+  exec "$SCRIPT_DIR/setup/main.sh" --help
+fi
+
+if [ "$use_nix" = "1" ]; then
+  set -- "${setup_args[@]}"
   if ! command -v nix >/dev/null 2>&1; then
     echo "./setup.sh --use-nix requires nix with flakes enabled." >&2
     exit 127

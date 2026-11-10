@@ -1,7 +1,30 @@
 #!/usr/bin/env bash
 # Command-line option parsing for setup.sh.
 
+# Shared by both entrypoints so validation precedes Nix profile changes.
+setup_validate_args() {
+  local mode="" arg
+  for arg in "$@"; do
+    case "$arg" in
+      --use-nix|--nix-managed|--portable)
+        if [ -n "$mode" ] && [ "$mode" != "$arg" ]; then
+          echo "Conflicting setup modes: $mode and $arg" >&2
+          return 2
+        fi
+        mode="$arg"
+        ;;
+      --reset|--no-terminal|--no-path|--no-repo-hooks|--no-home-manager|--sync-home-manager|-h|--help) ;;
+      *)
+        echo "Unknown setup option: $arg" >&2
+        echo "Run ./setup.sh --help for usage." >&2
+        return 2
+        ;;
+    esac
+  done
+}
+
 setup_parse_args() {
+  setup_validate_args "$@" || return $?
   case "${PI_ENV_SETUP_MODE:-}:${PI_ENV_CONFIG_MANAGED_BY_NIX:-0}" in
     :1) PI_ENV_SETUP_MODE="nix-managed" ;;
     :*) PI_ENV_SETUP_MODE="portable" ;;

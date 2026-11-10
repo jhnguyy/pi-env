@@ -40,8 +40,14 @@ export interface SubagentRuntimeConfig {
   readonly sessionStorage: SubagentSessionStorage;
 }
 
-function positiveInteger(value: number | undefined, fallback: number): number {
-  return value !== undefined && Number.isSafeInteger(value) && value > 0 ? value : fallback;
+function positiveInteger(
+  value: number | undefined,
+  fallback: number,
+  maximum = Number.MAX_SAFE_INTEGER,
+): number {
+  return value !== undefined && Number.isSafeInteger(value) && value > 0 && value <= maximum
+    ? value
+    : fallback;
 }
 
 export function resolveSubagentRuntimeConfig(
@@ -64,7 +70,8 @@ export function resolveSubagentRuntimeConfig(
       settings.maxResultBytes,
       DEFAULT_SUBAGENT_LIMITS.maxResultBytes,
     ),
-    maxRunMs: positiveInteger(settings.maxRunMs, DEFAULT_SUBAGENT_LIMITS.maxRunMs),
+    // Node clamps overflowing delays to 1 ms instead of honoring the requested deadline.
+    maxRunMs: positiveInteger(settings.maxRunMs, DEFAULT_SUBAGENT_LIMITS.maxRunMs, 2_147_483_647),
     sessionStorage: settings.sessionStorage ?? DEFAULT_SUBAGENT_CONFIG.sessionStorage,
   };
 }

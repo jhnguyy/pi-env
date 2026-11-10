@@ -2,7 +2,11 @@ import { readFile, stat } from "node:fs/promises";
 import { Cache, Data, Duration, Effect, Exit } from "effect";
 
 export interface FileCacheFileSystem {
-  readonly stat: (path: string) => Promise<{ readonly size: number }>;
+  readonly stat: (path: string) => Promise<{
+    readonly size: number;
+    readonly mtimeMs: number;
+    readonly ctimeMs: number;
+  }>;
   readonly readFile: (path: string, encoding: "utf8") => Promise<string>;
 }
 
@@ -15,6 +19,7 @@ export const MAX_FILE_SIZE_BYTES = 512 * 1024;
 const MAX_CACHE_ENTRIES = 64;
 
 interface CacheEntry {
+  readonly file: Awaited<ReturnType<FileCacheFileSystem["stat"]>>;
   readonly content: string;
   readonly lines: readonly string[];
 }
@@ -34,7 +39,7 @@ function loadEntry(
         throw new Error(`File exceeds ${MAX_FILE_SIZE_BYTES} bytes`);
       }
       const content = await fileSystem.readFile(path, "utf8");
-      return { content, lines: content.split("\n") };
+      return { file, content, lines: content.split("\n") };
     },
     catch: (cause) => new FileCacheReadError({ cause }),
   });
@@ -45,12 +50,15 @@ function loadEntry(
  *
  * The Promise-returning surface is retained for daemon compatibility. Failed
  * lookups expire immediately so a missing, unreadable, or oversized file can
- * be retried after it changes.
+ * be retried after it changes. Reads validate size and timestamps so external
+ * edits do not leave navigation snippets cached indefinitely.
  */
 export class FileCache {
   private readonly cache: Cache.Cache<string, CacheEntry, FileCacheReadError>;
+  private readonly fileSystem: FileCacheFileSystem;
 
   constructor(fileSystem: FileCacheFileSystem = nodeFileSystem) {
+    this.fileSystem = fileSystem;
     this.cache = Effect.runSync(
       Cache.makeWith((path) => loadEntry(fileSystem, path), {
         capacity: MAX_CACHE_ENTRIES,
@@ -132,7 +140,21 @@ export class FileCache {
 
   private readEntry(path: string): Promise<CacheEntry | null> {
     return Effect.runPromise(
-      Cache.get(this.cache, path).pipe(Effect.catch(() => Effect.succeed(null))),
+      Effect.gen({ self: this }, function* () {
+        const entry = yield* Cache.get(this.cache, path);
+        const file = yield* Effect.tryPromise({
+          try: () => this.fileSystem.stat(path),
+          catch: (cause) => new FileCacheReadError({ cause }),
+        });
+        if (
+          file.size === entry.file.size &&
+          file.mtimeMs === entry.file.mtimeMs &&
+          file.ctimeMs === entry.file.ctimeMs
+        )
+          return entry;
+        yield* Cache.invalidateWhen(this.cache, path, (current) => current === entry);
+        return yield* Cache.get(this.cache, path);
+      }).pipe(Effect.catch(() => Cache.invalidate(this.cache, path).pipe(Effect.as(null)))),
     );
   }
 }

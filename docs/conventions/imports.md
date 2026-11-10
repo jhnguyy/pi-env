@@ -13,4 +13,4 @@ Use named imports when a public barrel is the intended dependency boundary. Keep
 
 Do not create a barrel only to avoid a namespace import. Re-export public contracts explicitly from the barrel that already owns that boundary.
 
-The pattern checker enables this rule one migrated root at a time. Add a root only after its existing local imports use namespace imports.
+Apply this convention during implementation and review; the pattern checker does not enforce it.
