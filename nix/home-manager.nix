@@ -11,6 +11,11 @@
 let
   cfg = config.pi-env;
   packages = packagesFor pkgs;
+  managedPiLauncher = import ./pi-launcher.nix {
+    inherit pkgs packages;
+    inherit (cfg) checkoutPath;
+    installedWrapperPath = "${config.home.homeDirectory}/.local/bin/pi";
+  };
 in
 {
   options.pi-env = {
@@ -20,6 +25,17 @@ in
       type = lib.types.bool;
       default = true;
       description = "Install the pi-env baseline CLI toolchain into the Home Manager profile.";
+    };
+
+    checkoutPath = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = lib.literalExpression ''"''${config.home.homeDirectory}/src/pi-env"'';
+      description = ''
+        Absolute path to a writable pi-env checkout. When set, Home Manager owns
+        ~/.local/bin/pi, including pi --start dispatch into that checkout's built
+        Session Manager. The checkout and its dependencies are not installed by Nix.
+      '';
     };
 
     shell.enable = lib.mkOption {
@@ -64,6 +80,9 @@ in
     lib.mkMerge [
       (lib.mkIf cfg.installTools {
         home.packages = packages.toolchainPackages;
+      })
+
+      (lib.mkIf (cfg.installTools || cfg.checkoutPath != null) {
         home.sessionVariables = {
           PI_ENV_NODE_BIN = "${packages.node}/bin/node";
           NODE_EXECUTABLE = "${packages.node}/bin/node";
@@ -74,6 +93,17 @@ in
 
       (lib.mkIf (cfg.shell.enable || cfg.shell.bashPrompt.enable || cfg.tmux.enable || cfg.ghostty.enable) {
         home.sessionVariables.PI_ENV_CONFIG_MANAGED_BY_NIX = "1";
+      })
+
+      (lib.mkIf (cfg.checkoutPath != null) {
+        assertions = [
+          {
+            assertion = lib.hasPrefix "/" cfg.checkoutPath;
+            message = "pi-env.checkoutPath must be an absolute checkout path string.";
+          }
+        ];
+        home.file.".local/bin/pi".source = lib.getExe managedPiLauncher;
+        home.sessionVariables.PI_ENV_CLI_MANAGED_BY_NIX = "1";
       })
 
       (lib.mkIf cfg.homeManager.sync.enable {
