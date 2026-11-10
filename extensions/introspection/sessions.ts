@@ -7,11 +7,15 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
-import { homedir } from "node:os";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { setImmediate } from "node:timers/promises";
 import { parseSessionMilestoneLabel } from "../_shared/session-milestones";
 
-export const DEFAULT_SESSION_DIR = resolve(homedir(), ".pi/agent/sessions");
+// Pi 1.5 does not publicly export getSessionsDir; match its implementation
+// through the public agent-directory owner instead of importing SDK internals.
+export function getSessionsDir(): string {
+  return join(getAgentDir(), "sessions");
+}
 
 export const SessionEntryType = {
   Session: "session",
@@ -21,19 +25,19 @@ export const SessionEntryType = {
   Message: "message",
   BranchSummary: "branch_summary",
 } as const;
-export type SessionEntryType = typeof SessionEntryType[keyof typeof SessionEntryType];
+export type SessionEntryType = (typeof SessionEntryType)[keyof typeof SessionEntryType];
 
 export const MessageRole = {
   User: "user",
   Assistant: "assistant",
   ToolResult: "toolResult",
 } as const;
-export type MessageRole = typeof MessageRole[keyof typeof MessageRole];
+export type MessageRole = (typeof MessageRole)[keyof typeof MessageRole];
 
 export const ContentBlockType = {
   Text: "text",
 } as const;
-export type ContentBlockType = typeof ContentBlockType[keyof typeof ContentBlockType];
+export type ContentBlockType = (typeof ContentBlockType)[keyof typeof ContentBlockType];
 
 export interface SessionDigest {
   file: string;
@@ -111,7 +115,9 @@ function oneLine(text: string, max = 220): string {
 function parseLine(line: string): SessionEntry | undefined {
   try {
     const value: unknown = JSON.parse(line);
-    return value !== null && typeof value === "object" && !Array.isArray(value) ? value as SessionEntry : undefined;
+    return value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as SessionEntry)
+      : undefined;
   } catch {
     return undefined;
   }
@@ -138,7 +144,11 @@ interface DigestState {
   labels: Array<{ targetId: string; label: string }>;
 }
 
-function applyMessageToDigest(message: NonNullable<SessionEntry["message"]>, state: DigestState, summarizePrompts: boolean): void {
+function applyMessageToDigest(
+  message: NonNullable<SessionEntry["message"]>,
+  state: DigestState,
+  summarizePrompts: boolean,
+): void {
   switch (message.role) {
     case MessageRole.User: {
       state.userTurns += 1;
@@ -161,7 +171,11 @@ function applyMessageToDigest(message: NonNullable<SessionEntry["message"]>, sta
   }
 }
 
-function applyEntryToDigest(entry: SessionEntry, state: DigestState, summarizePrompts: boolean): void {
+function applyEntryToDigest(
+  entry: SessionEntry,
+  state: DigestState,
+  summarizePrompts: boolean,
+): void {
   switch (entry.type) {
     case SessionEntryType.Session:
       state.sessionId = entry.id;
@@ -189,7 +203,12 @@ function digestLines(lines: string[], file: string, bytes = 0): SessionDigest {
   return digestEntries(parseSessionLines(lines), file, bytes);
 }
 
-function digestEntries(entries: ParsedSessionEntries, file: string, bytes = 0, summarizePrompts = true): SessionDigest {
+function digestEntries(
+  entries: ParsedSessionEntries,
+  file: string,
+  bytes = 0,
+  summarizePrompts = true,
+): SessionDigest {
   const filename = basename(file);
   const timestamp = parseTimestamp(filename);
   const state: DigestState = {
@@ -270,7 +289,12 @@ export function inspectEntries(
   const compactions: SessionView["compactions"] = [];
   const messageView = { userPrompts, toolErrorLocations };
 
-  if (![navigation.prompts, navigation.errors, navigation.branches, navigation.compactions].some(Boolean)) return { ...digest, ...messageView, branchSummaries, compactions };
+  if (
+    ![navigation.prompts, navigation.errors, navigation.branches, navigation.compactions].some(
+      Boolean,
+    )
+  )
+    return { ...digest, ...messageView, branchSummaries, compactions };
 
   entries.forEach((entry, index) => {
     const lineNo = index + 1;
@@ -278,11 +302,17 @@ export function inspectEntries(
 
     switch (entry.type) {
       case SessionEntryType.BranchSummary:
-        if (navigation.branches && entry.summary) branchSummaries.push({ line: lineNo, text: oneLine(entry.summary, 300) });
+        if (navigation.branches && entry.summary)
+          branchSummaries.push({ line: lineNo, text: oneLine(entry.summary, 300) });
         return;
 
       case SessionEntryType.Compaction:
-        if (navigation.compactions) compactions.push({ line: lineNo, tokensBefore: entry.tokensBefore, text: oneLine(entry.summary ?? "", 300) });
+        if (navigation.compactions)
+          compactions.push({
+            line: lineNo,
+            tokensBefore: entry.tokensBefore,
+            text: oneLine(entry.summary ?? "", 300),
+          });
         return;
 
       case SessionEntryType.Message:
@@ -302,7 +332,7 @@ export function readSessionFile(path: string): { lines: string[]; bytes: number 
   return { lines: raw.split("\n"), bytes: Buffer.byteLength(raw) };
 }
 
-export function assertUnderSessionDir(path: string, sessionDir = DEFAULT_SESSION_DIR): string {
+export function assertUnderSessionDir(path: string, sessionDir = getSessionsDir()): string {
   const file = resolve(path.replace(/^@/, ""));
   const root = resolve(sessionDir);
   const rel = relative(root, file);
@@ -312,7 +342,7 @@ export function assertUnderSessionDir(path: string, sessionDir = DEFAULT_SESSION
   return file;
 }
 
-export function discoverSessionFiles(sessionDir = DEFAULT_SESSION_DIR): string[] {
+export function discoverSessionFiles(sessionDir = getSessionsDir()): string[] {
   const root = resolve(sessionDir);
   if (!existsSync(root)) return [];
   const out: string[] = [];
@@ -328,19 +358,21 @@ export function discoverSessionFiles(sessionDir = DEFAULT_SESSION_DIR): string[]
   return out;
 }
 
-export function listSessionFiles(sessionDir = DEFAULT_SESSION_DIR): string[] {
+export function listSessionFiles(sessionDir = getSessionsDir()): string[] {
   return discoverSessionFiles(sessionDir)
     .map((file) => ({ file, mtime: statSync(file).mtimeMs }))
     .sort((a, b) => b.mtime - a.mtime)
     .map(({ file }) => file);
 }
 
-export function listSessionDigests(options: {
-  sessionDir?: string;
-  cwd?: string;
-  query?: string;
-  limit?: number;
-} = {}): SessionDigest[] {
+export function listSessionDigests(
+  options: {
+    sessionDir?: string;
+    cwd?: string;
+    query?: string;
+    limit?: number;
+  } = {},
+): SessionDigest[] {
   const limit = Math.max(1, Math.min(options.limit ?? 20, 100));
   const query = options.query?.toLowerCase().trim();
   const cwd = options.cwd ? resolve(options.cwd) : undefined;
@@ -351,7 +383,13 @@ export function listSessionDigests(options: {
     const digest = digestLines(lines, file, bytes);
     if (cwd && resolve(digest.cwd ?? dirname(file)) !== cwd) continue;
     if (query) {
-      const haystack = [digest.cwd, digest.name, digest.firstUserPrompt, digest.lastUserPrompt, digest.timestamp]
+      const haystack = [
+        digest.cwd,
+        digest.name,
+        digest.firstUserPrompt,
+        digest.lastUserPrompt,
+        digest.timestamp,
+      ]
         .filter(Boolean)
         .join("\n")
         .toLowerCase();
@@ -363,7 +401,6 @@ export function listSessionDigests(options: {
 
   return results;
 }
-
 
 export const SESSION_SEARCH_LIMIT = 20;
 
@@ -377,7 +414,8 @@ export interface SessionMatch {
 function matchSessionMessage(line: string, term: RegExp): Omit<SessionMatch, "file"> | undefined {
   const entry = parseLine(line);
   const message = entry?.type === SessionEntryType.Message ? entry.message : undefined;
-  if (!message || message.role !== MessageRole.User && message.role !== MessageRole.Assistant) return;
+  if (!message || (message.role !== MessageRole.User && message.role !== MessageRole.Assistant))
+    return;
   const text = textFromContent(message.content);
   const match = term.exec(text);
   if (!match) return;

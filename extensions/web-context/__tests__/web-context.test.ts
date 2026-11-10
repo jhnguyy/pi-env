@@ -185,21 +185,93 @@ describe("web fetch", () => {
     }
   });
 
-  it("returns typed body failures through the Promise seam", async () => {
+  it("treats a null body as empty without an unbounded buffer fallback", async () => {
     const response = new Response(null);
     response.arrayBuffer = async () => {
-      throw new Error("body stream reset");
+      throw new Error("must not buffer a response outside the streaming limit");
     };
-    const injectedFetch: WebFetch = async () => response;
-
-    await expect(
-      fetchWebText("https://example.com", {}, undefined, { fetch: injectedFetch }),
-    ).rejects.toMatchObject({
-      _tag: "WebFetchFailure",
-      kind: WebFetchFailureKind.Body,
-      message: "Web fetch body read failed: body stream reset",
-      cause: expect.any(Error),
+    const result = await fetchWebText("https://example.com", {}, undefined, {
+      fetch: async () => response,
     });
+    expect(result.text).toBe("");
+    expect(result.rawBytes).toBe(0);
+  });
+
+  it.each(["&#1114112;", "&#x110000;", "&#55296;", "&#xdfff;", `&#${"9".repeat(400)};`])(
+    "replaces invalid numeric Unicode entity %s",
+    async (entity) => {
+      const result = await fetchWebText("https://example.com", {}, undefined, {
+        fetch: async () =>
+          new Response(`<p>A${entity}B &#x1f600; &#1114111;</p>`, {
+            headers: { "content-type": "text/html" },
+          }),
+      });
+      expect(result.text).toBe("A\uFFFDB 😀 \u{10ffff}");
+    },
+  );
+
+  it.each([
+    ["a😀z", 4, "a", 1],
+    ["😀z", 3, "", 0],
+    ["é中z", 4, "é", 2],
+    ["é中", 5, "é中", 5],
+  ])(
+    "reports emitted UTF-8 bytes for %s with budget %s",
+    async (body, maxBytes, text, outputBytes) => {
+      const result = await fetchWebText("https://example.com", { maxBytes }, undefined, {
+        fetch: async () => new Response(body),
+      });
+      expect(result.text).toBe(text);
+      expect(result.outputBytes).toBe(outputBytes);
+      expect(result.truncated).toBe(text !== body);
+    },
+  );
+
+  it.each(Object.values(WebFetchMode))(
+    "rejects oversized streamed input in %s mode and cancels before EOF",
+    async (mode) => {
+      let pulls = 0;
+      const cancel = vi.fn(async () => {
+        await Promise.resolve();
+      });
+      const body = new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            pulls += 1;
+            if (pulls <= 12) controller.enqueue(new Uint8Array(1024 * 1024));
+            else controller.close();
+          },
+          cancel,
+        },
+        { highWaterMark: 0 },
+      );
+      await expect(
+        fetchWebText("https://example.com", { mode, maxBytes: 1 }, undefined, {
+          fetch: async () => new Response(body),
+        }),
+      ).rejects.toMatchObject({
+        kind: WebFetchFailureKind.Body,
+        message: expect.stringContaining("10485760"),
+      });
+      expect(pulls).toBe(11);
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(body.locked).toBe(false);
+    },
+  );
+
+  it("allows the exact input ceiling independently of the output budget", async () => {
+    const result = await fetchWebText(
+      "https://example.com",
+      { maxBytes: 1, mode: WebFetchMode.Raw },
+      undefined,
+      {
+        fetch: async () => new Response("a".repeat(10 * 1024 * 1024)),
+      },
+    );
+    expect(result.rawBytes).toBe(10485760);
+    expect(result.text).toBe("a");
+    expect(result.outputBytes).toBe(1);
+    expect(result.truncated).toBe(true);
   });
 
   it("preserves a stream read failure and releases the reader", async () => {

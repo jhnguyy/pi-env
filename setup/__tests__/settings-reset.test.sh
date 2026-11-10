@@ -39,7 +39,7 @@ RESET=$(cat "$SETTINGS_FILE")
 configure
 RERUN=$(cat "$SETTINGS_FILE")
 
-PRIMARY_REPO=$(git -C "$ROOT" worktree list --porcelain | awk '/^worktree / { print substr($0, 10); exit }')
+PRIMARY_REPO=$(git -C "$ROOT" worktree list --porcelain | awk '/^worktree / && !found { print substr($0, 10); found = 1 }')
 INITIAL="$INITIAL" PERSONAL="$PERSONAL" NORMAL="$NORMAL" RESET="$RESET" RERUN="$RERUN" \
   PRIMARY_REPO="$PRIMARY_REPO" "$NODE" --input-type=module - "$ROOT/setup/managed-settings-core.mjs" <<'JS'
 import fs from 'node:fs';

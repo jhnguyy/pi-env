@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import * as Execute from "../execute";
@@ -24,6 +24,8 @@ it("holds native ownership until close settles and rejects overlapping input", a
   const root = await mkdtemp(join(tmpdir(), "native-child-active-"));
   const cleanup = testCleanup();
   cleanup(() => rm(root, { recursive: true, force: true }));
+  vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
+  cleanup(() => vi.unstubAllEnvs());
   let child: ChildTypes.NativeChildSession | undefined;
   const operations: Promise<unknown>[] = [];
   const { Type } = await import("typebox");

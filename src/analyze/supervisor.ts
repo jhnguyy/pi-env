@@ -3,6 +3,8 @@ import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
+import { fileURLToPath } from "node:url";
 import type { SpanExporter } from "@opentelemetry/sdk-trace-node";
 import { Effect, Exit, Scope } from "effect";
 import {
@@ -54,10 +56,10 @@ function analyzeWorkerPath(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): string {
   if (env.PI_ENV_ANALYZE_WORKER !== undefined) return env.PI_ENV_ANALYZE_WORKER;
-  const adjacentWorker = new URL("./worker.js", import.meta.url).pathname;
+  const adjacentWorker = fileURLToPath(new URL("./worker.js", import.meta.url));
   return existsSync(adjacentWorker)
     ? adjacentWorker
-    : new URL("../../extensions/analyze/dist/worker.js", import.meta.url).pathname;
+    : fileURLToPath(new URL("../../extensions/analyze/dist/worker.js", import.meta.url));
 }
 
 function journalEnabled(value: string | undefined): boolean {
@@ -267,6 +269,7 @@ export async function superviseAnalyze(
       throw error;
     }
 
+    const stdoutDecoder = new StringDecoder("utf8");
     let pendingStdout = "";
     let stdoutBytes = 0;
     let stderrBytes = 0;
@@ -304,7 +307,7 @@ export async function superviseAnalyze(
         void stop("protocol", "analyze worker stdout exceeded its byte limit");
         return;
       }
-      pendingStdout += chunk.toString("utf8");
+      pendingStdout += stdoutDecoder.write(chunk);
       while (true) {
         const newline = pendingStdout.indexOf("\n");
         if (newline < 0) break;
@@ -336,6 +339,7 @@ export async function superviseAnalyze(
     await sendRequest(child, stop);
 
     await waitForClose(child);
+    pendingStdout += stdoutDecoder.end();
     await closeProcessScope().catch(() => undefined);
     clearTimeout(timeout);
     options.signal?.removeEventListener("abort", abort);

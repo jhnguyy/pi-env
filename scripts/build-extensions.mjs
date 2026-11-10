@@ -46,7 +46,8 @@ async function buildFile(entry, outfile, options = {}) {
 for (const ext of selectedExtensions) {
   const outdir = join(ext.absPath, "dist");
   if (!existsSync(ext.sourceEntry)) {
-    console.log(`  skip  ${ext.name} (no index.ts)`);
+    console.error(`  FAIL  ${ext.name}: Missing registered extension source: ${ext.sourceEntry}`);
+    fail += 1;
     continue;
   }
   mkdirSync(outdir, { recursive: true });

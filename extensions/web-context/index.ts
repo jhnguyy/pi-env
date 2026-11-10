@@ -55,7 +55,6 @@ export interface WebFetchResponse {
   readonly status: number;
   readonly url: string;
   readonly body: WebFetchBody | null;
-  arrayBuffer(): Promise<ArrayBuffer>;
 }
 
 export type WebFetch = (input: URL, init?: RequestInit) => Promise<WebFetchResponse>;
@@ -93,6 +92,9 @@ export interface WebFetchResult {
   rawBytes: number;
   outputBytes: number;
 }
+
+// Bound bytes delivered by fetch (after transport decompression), not extracted output.
+const webFetchMaxInputBytes = 10 * 1024 * 1024;
 
 const webFetchAcceptHeader =
   "text/html, text/plain, application/json, application/xml, application/rss+xml, text/*;q=0.9, */*;q=0.1";
@@ -139,21 +141,30 @@ async function readResponseBytes(
   response: WebFetchResponse,
   signal: AbortSignal,
 ): Promise<Uint8Array> {
-  if (signal.aborted) throw signal.reason ?? new Error("Web fetch aborted");
-  if (!response.body) return new Uint8Array(await response.arrayBuffer());
+  signal.throwIfAborted();
+  if (!response.body) return new Uint8Array();
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
+  let length = 0;
   const onAbort = () => {
     void reader.cancel(signal.reason).catch(() => undefined);
   };
   signal.addEventListener("abort", onAbort, { once: true });
   try {
     while (true) {
-      if (signal.aborted) throw signal.reason ?? new Error("Web fetch aborted");
+      signal.throwIfAborted();
       const { done, value } = await reader.read();
-      if (signal.aborted) throw signal.reason ?? new Error("Web fetch aborted");
+      signal.throwIfAborted();
       if (done) break;
-      chunks.push(value);
+      if (value.byteLength > webFetchMaxInputBytes - length) {
+        const cause = new Error(
+          `Response body exceeds the ${webFetchMaxInputBytes}-byte input limit`,
+        );
+        await reader.cancel(cause).catch(() => undefined);
+        throw cause;
+      }
+      length += value.byteLength;
+      if (value.byteLength) chunks.push(value);
     }
   } catch (cause) {
     throw signal.reason ?? cause;
@@ -165,7 +176,6 @@ async function readResponseBytes(
       // The lock may already be released by cancellation; ignore cleanup errors.
     }
   }
-  const length = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
   const bytes = new Uint8Array(length);
   let offset = 0;
   for (const chunk of chunks) {
@@ -229,7 +239,7 @@ export function fetchWebTextEffect(
       truncated,
       mode,
       rawBytes: bytes.byteLength,
-      outputBytes: Math.min(encoded.byteLength, limit),
+      outputBytes: new TextEncoder().encode(text).byteLength,
     };
   });
 }
@@ -358,6 +368,13 @@ function firstMatch(text: string, pattern: RegExp): string | undefined {
   return match?.[1];
 }
 
+function decodeNumericEntity(digits: string, radix: number): string {
+  const codePoint = Number.parseInt(digits, radix);
+  return codePoint <= 0x10ffff && !(codePoint >= 0xd800 && codePoint <= 0xdfff)
+    ? String.fromCodePoint(codePoint)
+    : "\uFFFD";
+}
+
 function decodeEntities(value: string): string {
   return value
     .replace(/&nbsp;/g, " ")
@@ -366,12 +383,8 @@ function decodeEntities(value: string): string {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/&#x([0-9a-f]+);/gi, (_match, hex: string) =>
-      String.fromCodePoint(Number.parseInt(hex, 16)),
-    )
-    .replace(/&#(\d+);/g, (_match, decimal: string) =>
-      String.fromCodePoint(Number.parseInt(decimal, 10)),
-    );
+    .replace(/&#x([0-9a-f]+);/gi, (_match, hex: string) => decodeNumericEntity(hex, 16))
+    .replace(/&#(\d+);/g, (_match, decimal: string) => decodeNumericEntity(decimal, 10));
 }
 
 function normalizeWhitespace(value: string): string {
@@ -452,6 +465,7 @@ export default function webContext(pi: ExtensionAPI) {
       "Fetch an http(s) URL as bounded text; no JS, clicks, auth, or visual inspection.",
       "Default mode='text' strips HTML boilerplate for lower token use; use mode='raw' only when exact markup matters.",
       "Use mode='metadata' for a compact title/headings/links view.",
+      `Response bodies over ${webFetchMaxInputBytes} bytes (10 MiB, after decompression) fail during streaming; this input ceiling is independent of maxBytes.`,
       "Do not use for secrets, authenticated pages, forms, or side effects.",
     ].join("\n"),
     parameters: Type.Object({

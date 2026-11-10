@@ -42,9 +42,13 @@ export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspCl
   type DevToolsToolParameters = typeof devToolsParameters;
 
   /** Execute the native dev-tools action, including rename. */
-  async function executeDevTools(_toolCallId: string, params: Static<DevToolsToolParameters>) {
+  async function executeDevTools(
+    _toolCallId: string,
+    params: Static<DevToolsToolParameters>,
+    signal?: AbortSignal,
+  ) {
     try {
-      const result = await client.call(Request.buildClientRequest(params));
+      const result = await client.call(Request.buildClientRequest(params), signal);
       return { content: [txt(formatResult(result))], details: result };
     } catch (e) {
       return { content: [txt(formatError(e))], details: null, isError: true };
@@ -69,8 +73,8 @@ export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspCl
       "Use rg for text and pattern searches, or when semantic tools do not cover or answer the question.",
     ],
     parameters: devToolsParameters,
-    async execute(toolCallId, params, _signal) {
-      return executeDevTools(toolCallId, params);
+    async execute(toolCallId, params, signal) {
+      return executeDevTools(toolCallId, params, signal);
     },
     renderCall(args, theme, _ctx) {
       return renderDevToolsCall(args, theme);

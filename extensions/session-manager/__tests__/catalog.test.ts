@@ -8,6 +8,7 @@ import {
   type SessionManifest,
 } from "../contracts.js";
 import { canonicalJson, gcTombstones, validateManifest } from "../schema.js";
+import { replaceWorkRecord } from "../domain.js";
 
 const cwd = "/tmp/workspace";
 const createdAt = "2025-01-01T00:00:00.000Z";
@@ -144,9 +145,7 @@ describe("session manifest v1", () => {
     const valid = {
       ...manifest(),
       coordinator,
-      sessions: [
-        openRecord({ sessionId: "work-a", name: "Fox" }),
-      ],
+      sessions: [openRecord({ sessionId: "work-a", name: "Fox" })],
     };
     expect(validateManifest(valid).sessions[0]?.name).toBe("Fox");
     expect(() =>
@@ -197,6 +196,15 @@ describe("session manifest v1", () => {
 });
 
 describe("session manifest transforms", () => {
+  it("orders same-timestamp records by code units so replacements remain valid", () => {
+    let result = manifest();
+    for (const sessionId of ["a", "Z", "_", "é"]) {
+      result = replaceWorkRecord(result, openRecord({ sessionId }));
+    }
+    expect(result.sessions.map((record) => record.sessionId)).toEqual(["Z", "_", "a", "é"]);
+    expect(validateManifest(result)).toEqual(result);
+  });
+
   it("serializes object keys deterministically", () => {
     expect(canonicalJson({ z: 1, a: { y: 2, b: 3 } })).toBe('{"a":{"b":3,"y":2},"z":1}');
   });

@@ -226,6 +226,7 @@ export function appendSectionItem(
   const lines = content.split(newline);
   const bounds = sectionBounds(lines, heading);
   if (!bounds) {
+    requireVisibleInsertion(lines, lines.length);
     const prefix =
       content.length === 0 ? "" : content.endsWith(newline) ? newline : newline.repeat(2);
     return `${content}${prefix}## ${heading}${newline}${newline}${bullet}${newline}`;
@@ -239,8 +240,15 @@ export function appendSectionItem(
   }
   let insertAt = bounds.end;
   while (insertAt > bounds.start && lines[insertAt - 1].trim() === "") insertAt -= 1;
+  requireVisibleInsertion(lines, insertAt);
   lines.splice(insertAt, 0, bullet);
   return lines.join(newline);
+}
+
+function requireVisibleInsertion(lines: readonly string[], insertAt: number): void {
+  if (!visibleMarkdownLines([...lines.slice(0, insertAt), ""])[insertAt]) {
+    throw invalidSelector("Cannot capture inside an unclosed code fence; close the fence first.");
+  }
 }
 
 export function newInboxNote(kind: InboxItemKind, text: string): string {
@@ -270,7 +278,7 @@ function sectionBounds(
   if (headingIndex < 0) return undefined;
   const relativeEnd = lines
     .slice(headingIndex + 1)
-    .findIndex((line, index) => visible[headingIndex + index + 1] && /^##(?:\s|$)/.test(line));
+    .findIndex((line, index) => visible[headingIndex + index + 1] && /^#{1,2}(?:\s|$)/.test(line));
   const end = relativeEnd < 0 ? lines.length : headingIndex + relativeEnd + 1;
   return { start: headingIndex + 1, end };
 }

@@ -113,6 +113,7 @@ function getJobRenderDetails(job: Jobs.SubagentJob): Types.SubagentJobRenderDeta
     model: details?.model,
     sessionName: details?.sessionName,
     sessionFile: details?.sessionFile,
+    errorMessage: job.errorMessage ?? details?.errorMessage,
     resultTruncated: job.resultTruncated,
   };
 }

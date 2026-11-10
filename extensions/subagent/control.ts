@@ -385,6 +385,9 @@ export async function disposeSubagentRunSupervisor(sessionId: string): Promise<v
   const store = registry().supervisors;
   const supervisor = store.get(sessionId);
   if (!supervisor) return;
-  await supervisor.shutdown();
-  if (store.get(sessionId) === supervisor) store.delete(sessionId);
+  try {
+    await supervisor.shutdown();
+  } finally {
+    if (store.get(sessionId) === supervisor) store.delete(sessionId);
+  }
 }

@@ -3,12 +3,14 @@ import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { setTimeout } from "node:timers/promises";
 import { Effect } from "effect";
 import {
   RuntimeBusFailure,
   RuntimeMethod,
   runtimeRequest,
   startRuntimeBus,
+  type RuntimeBusHandlers,
 } from "../runtime-bus.js";
 import { resolveRuntimePaths } from "../runtime-path.js";
 
@@ -25,7 +27,7 @@ async function temporaryRoot() {
   return root;
 }
 
-async function fixture() {
+async function fixture(handlers?: RuntimeBusHandlers) {
   const root = await temporaryRoot();
   const runtime = join(root, "runtime");
   const cwd = join(root, "workspace");
@@ -39,7 +41,7 @@ async function fixture() {
       paths,
       workspaceId: "a".repeat(64),
       coordinatorSessionId: "coordinator-a",
-      handlers: {
+      handlers: handlers ?? {
         reconcile: async () => {
           calls.reconcile += 1;
           return { outcomes: [] };
@@ -121,9 +123,71 @@ describe("session runtime bus", () => {
           timeoutMs: 2_000,
         }),
       );
+      const conflict = await failureOf(
+        runtimeRequest({
+          ...identity,
+          method: RuntimeMethod.PublishReady,
+          idempotencyKey: "ready-a",
+          params: { ...ready, windowId: "@3" },
+          timeoutMs: 2_000,
+        }),
+      );
+      expect(conflict.reason).toContain("IdempotencyConflict");
       expect(publications).toEqual([ready]);
     } finally {
       await server.close();
+    }
+  });
+
+  it("drains accepted handlers before close completes, even after client disconnect", async () => {
+    let enter!: () => void;
+    let resume!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const resumed = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const order: string[] = [];
+    const { paths, server } = await fixture({
+      reconcile: async () => {
+        enter();
+        await resumed;
+        order.push("reconciled");
+        return { outcomes: [] };
+      },
+      publishReady: async () => {},
+    });
+    const request = failureOf(
+      runtimeRequest({
+        socketPath: paths.socketPath,
+        workspaceId: "a".repeat(64),
+        coordinatorSessionId: "coordinator-a",
+        method: RuntimeMethod.Reconcile,
+        idempotencyKey: "restore-a",
+        timeoutMs: 2_000,
+      }),
+    );
+    let closing: Promise<void> | undefined;
+    try {
+      await entered;
+      closing = server.close().then(() => {
+        order.push("closed");
+      });
+      await request;
+      // The disconnected request cannot cancel reconciliation. Keep it gated while
+      // giving an incorrect close implementation a chance to finish filesystem cleanup.
+      expect(await Promise.race([closing.then(() => "closed"), setTimeout(50, "pending")])).toBe(
+        "pending",
+      );
+      resume();
+      await closing;
+      expect(order).toEqual(["reconciled", "closed"]);
+      await server.close();
+    } finally {
+      resume();
+      if (closing) await closing;
+      else await server.close();
     }
   });
 

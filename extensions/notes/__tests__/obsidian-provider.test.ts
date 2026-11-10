@@ -63,6 +63,27 @@ describe("Obsidian notes provider", () => {
     );
   });
 
+  it("paginates distinct Unicode paths that collate equally without losing either", async () => {
+    const paths = ["wiki/é.md", "wiki/e\u0301.md", "wiki/z.md"];
+    const { provider } = await fixture(Object.fromEntries(paths.map((name) => [name, name])));
+    const inventory = paginated(await provider.list({ prefix: "wiki/" }));
+    expect(inventory.entries.map((entry) => entry.path)).toEqual([
+      "wiki/e\u0301.md",
+      "wiki/é.md",
+      "wiki/z.md",
+    ]);
+    const collected: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = paginated(await provider.list({ prefix: "wiki/", limit: 1, cursor }));
+      collected.push(...page.entries.map((entry) => entry.path));
+      cursor = page.nextCursor;
+      expect(collected.length).toBeLessThanOrEqual(paths.length);
+    } while (cursor !== undefined);
+    expect(collected).toEqual(inventory.entries.map((entry) => entry.path));
+    expect(new Set(collected)).toEqual(new Set(paths));
+  });
+
   it("omits filesystem names that cannot round-trip through portable paths", async () => {
     const { provider } = await fixture({
       "wiki\\victim.md": "unsafe name",

@@ -12,7 +12,7 @@ if [ "$#" -lt 1 ]; then
 fi
 
 tool_node_supported() {
-  version="$($1 -p 'process.versions.node' 2>/dev/null || true)"
+  version="$("$1" -p 'process.versions.node' 2>/dev/null || true)"
   major=${version%%.*}
   rest=${version#*.}
   minor=${rest%%.*}

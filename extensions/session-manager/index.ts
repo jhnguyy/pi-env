@@ -71,6 +71,20 @@ function errorMessage(error: unknown): string {
   return cause === undefined ? summary : `${summary}: ${errorMessage(cause)}`;
 }
 
+async function verifyCoordinatorClaim(claimPath: string, launch: CoordinatorLaunch): Promise<void> {
+  const parsedClaim = parseStartupClaim(await readFile(claimPath, "utf8"));
+  if (Result.isFailure(parsedClaim)) throw parsedClaim.failure;
+  const claim = parsedClaim.success;
+  if (
+    claim.workspaceId !== launch.workspaceId ||
+    claim.coordinatorSessionId !== launch.expectedSessionId ||
+    claim.launchId !== launch.launchId ||
+    claim.pid !== process.pid
+  ) {
+    throw new Error("startup claim does not match the coordinator runtime");
+  }
+}
+
 function startInput(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -126,7 +140,7 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
   let readinessScope: Scope.Closeable | undefined;
   let coordinatorBinding: { readonly paneId: string; readonly sessionId: string } | undefined;
   let launchIntent: LaunchIntent | undefined;
-  let workStartup: Promise<void> | undefined;
+  let sessionStartup: Promise<void> | undefined;
 
   const run = <A>(effect: Effect.Effect<A, unknown>) => Effect.runPromise(effect);
   const queue = <A>(operation: () => Promise<A>): Promise<A> => {
@@ -195,43 +209,56 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     ctx.ui.setEditorComponent(installedFactory);
   };
 
-  const startCoordinatorSession = async (ctx: ExtensionContext, launch: CoordinatorLaunch) => {
+  const verifyCoordinatorLaunch = async (
+    ctx: ExtensionContext,
+    launch: CoordinatorLaunch,
+    reload: boolean,
+  ) => {
+    const identity = await run(options.catalog.identity(ctx.cwd));
+    if (
+      ctx.mode !== "tui" ||
+      launch.workspaceId !== workspaceId(identity.canonicalCwd) ||
+      launch.expectedSessionId !== ctx.sessionManager.getSessionId()
+    ) {
+      throw new Error("managed coordinator launch identity does not match");
+    }
+    const manifest = await run(options.catalog.read(identity.canonicalCwd));
+    if (!manifest?.coordinator || manifest.coordinator.sessionId !== launch.expectedSessionId) {
+      throw new Error("durable coordinator identity does not match");
+    }
+    const paths = await run(resolveRuntimePaths(identity.canonicalCwd, environment));
+    // Reload replaces the extension runtime in this process after shutdown has
+    // released its binding and bus. The initial launch already consumed the claim.
+    if (!reload) await verifyCoordinatorClaim(paths.claimPath, launch);
+    return { identity, paths };
+  };
+
+  const startCoordinatorSession = async (
+    ctx: ExtensionContext,
+    launch: CoordinatorLaunch,
+    startGeneration: number,
+    reload: boolean,
+  ) => {
     try {
-      const identity = await run(options.catalog.identity(ctx.cwd));
-      const expectedWorkspace = workspaceId(identity.canonicalCwd);
-      if (
-        ctx.mode !== "tui" ||
-        launch.workspaceId !== expectedWorkspace ||
-        launch.expectedSessionId !== ctx.sessionManager.getSessionId()
-      ) {
-        throw new Error("managed coordinator launch identity does not match");
-      }
-      const { paneId, expectedSessionId, extensionPath, wrapperPath } = launch;
-      const manifest = await run(options.catalog.read(identity.canonicalCwd));
-      if (!manifest?.coordinator || manifest.coordinator.sessionId !== expectedSessionId) {
-        throw new Error("durable coordinator identity does not match");
-      }
-      const paths = await run(resolveRuntimePaths(identity.canonicalCwd, environment));
-      const parsedClaim = parseStartupClaim(await readFile(paths.claimPath, "utf8"));
-      if (Result.isFailure(parsedClaim)) throw parsedClaim.failure;
-      const claim = parsedClaim.success;
-      if (
-        claim.workspaceId !== expectedWorkspace ||
-        claim.coordinatorSessionId !== manifest.coordinator.sessionId ||
-        claim.launchId !== launch.launchId ||
-        claim.pid !== process.pid
-      ) {
-        throw new Error("startup claim does not match the coordinator runtime");
-      }
-      await run(host.bindCurrent(paneId, manifest.coordinator.sessionId));
-      coordinatorBinding = { paneId, sessionId: manifest.coordinator.sessionId };
+      const { identity, paths } = await verifyCoordinatorLaunch(ctx, launch, reload);
+      const {
+        paneId,
+        expectedSessionId,
+        workspaceId: expectedWorkspace,
+        extensionPath,
+        wrapperPath,
+      } = launch;
+      if (startGeneration !== generation) return;
+      await run(host.bindCurrent(paneId, expectedSessionId));
+      coordinatorBinding = { paneId, sessionId: expectedSessionId };
+      if (startGeneration !== generation) return;
       const reconciler = createWorkspaceReconciler({
         catalog: options.catalog,
         host,
         paneId,
         cwd: identity.canonicalCwd,
         workspaceId: expectedWorkspace,
-        coordinatorSessionId: manifest.coordinator.sessionId,
+        coordinatorSessionId: expectedSessionId,
         wrapperPath,
         extensionPath,
         sessionFiles,
@@ -240,17 +267,22 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
         startRuntimeBus({
           paths,
           workspaceId: expectedWorkspace,
-          coordinatorSessionId: manifest.coordinator.sessionId,
+          coordinatorSessionId: expectedSessionId,
           handlers: reconciler,
         }),
       );
-      await unlink(paths.claimPath);
+      if (startGeneration !== generation) return;
+      if (!reload) await unlink(paths.claimPath);
+      if (startGeneration !== generation) return;
       installEditor(ctx, true);
       const summary = await reconciler.reconcile();
-      ctx.ui.notify(renderRestoreSummary(summary), restoreNoticeLevel(summary));
+      if (startGeneration === generation) {
+        ctx.ui.notify(renderRestoreSummary(summary), restoreNoticeLevel(summary));
+      }
     } catch (error) {
       await runtimeBus?.close().catch(() => undefined);
       runtimeBus = undefined;
+      if (startGeneration !== generation) return;
       notifyError(ctx, "Workspace coordinator startup", error);
       ctx.shutdown();
     }
@@ -349,11 +381,8 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     startGeneration: number,
     error: unknown,
   ): Promise<void> => {
-    if (startGeneration !== generation) {
-      await releaseInterruptedBinding(error);
-      return;
-    }
-    if (error instanceof SessionBindingFailed) activateManagedSession(ctx, error.session);
+    await releaseInterruptedBinding(error);
+    if (startGeneration !== generation) return;
     notifyError(ctx, "Session enrollment", error);
     if (launch.kind === "restored-work") ctx.shutdown();
   };
@@ -387,7 +416,7 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     }
   };
 
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", async (event, ctx) => {
     const startGeneration = ++generation;
     displayName = pi.getSessionName();
     launchIntent = undefined;
@@ -399,13 +428,13 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     }
     const launch = parsedLaunch.success;
     launchIntent = launch;
-    if (launch.kind === "coordinator") await startCoordinatorSession(ctx, launch);
-    else {
-      const startup = startWorkSession(ctx, launch, startGeneration);
-      workStartup = startup;
-      await startup;
-      if (workStartup === startup) workStartup = undefined;
-    }
+    const startup =
+      launch.kind === "coordinator"
+        ? startCoordinatorSession(ctx, launch, startGeneration, event.reason === "reload")
+        : startWorkSession(ctx, launch, startGeneration);
+    sessionStartup = startup;
+    await startup;
+    if (sessionStartup === startup) sessionStartup = undefined;
   });
 
   pi.on("agent_end", async (_event, ctx) => {
@@ -468,7 +497,7 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     const targetGeneration = generation;
     const previousDisplayName = displayName;
     displayName = event.name;
-    if (workStartup) await workStartup;
+    await sessionStartup;
     if (targetGeneration !== generation) return;
     if (
       !managed ||
@@ -510,10 +539,7 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
           "info",
         );
       } catch (error) {
-        if (error instanceof SessionBindingFailed) {
-          managed = error.session;
-          if (!installedFactory && ctx.mode === "tui") installEditor(ctx, false);
-        }
+        await releaseInterruptedBinding(error);
         notifyError(ctx, "Session adoption", error);
       }
     },
@@ -557,9 +583,10 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
 
   pi.on("session_shutdown", async (_event, ctx) => {
     generation += 1;
-    // An in-flight enrollment releases its own binding once it sees the new generation.
-    await workStartup;
-    workStartup = undefined;
+    // Work enrollment releases interrupted bindings itself; coordinator resources
+    // are retained here until startup has stopped acquiring or reconciling them.
+    await sessionStartup;
+    sessionStartup = undefined;
     if (readinessScope) await run(Scope.close(readinessScope, Exit.void));
     readinessScope = undefined;
     await runtimeBus?.close().catch(() => undefined);

@@ -556,15 +556,16 @@ export async function handleSymbols(
     });
 
     const raw = (lspRes?.result ?? []) as any[];
-    const items: SymbolItem[] = flattenSymbols(raw).slice(0, MAX);
-    backend.recordSemanticResult("textDocument/documentSymbol", raw.length);
+    const all = flattenSymbols(raw);
+    const items = all.slice(0, MAX);
+    backend.recordSemanticResult("textDocument/documentSymbol", all.length);
 
     return okResponse(req.id, {
       action: "symbols",
       path: req.path,
-      total: items.length,
+      total: all.length,
       items,
-      truncated: raw.length > MAX,
+      truncated: all.length > MAX,
     });
   }
 

@@ -191,8 +191,9 @@ export class LspClient {
   }
 
   /** Promise compatibility adapter for callEffect. */
-  call(req: Omit<DaemonRequest, "id">): Promise<LspResult> {
-    return Effect.runPromise(this.callEffect(req));
+  call(req: Omit<DaemonRequest, "id">, signal?: AbortSignal): Promise<LspResult> {
+    if (signal?.aborted) return Promise.reject(signal.reason);
+    return Effect.runPromise(this.callEffect(req), { signal });
   }
 
   /** Close the socket connection. Does not shut down a successfully spawned daemon. */

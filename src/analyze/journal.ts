@@ -119,7 +119,6 @@ export class AnalysisJournal {
     return journal;
   }
 
-
   append(event: AnalysisDiagnosticEvent): Promise<void> {
     this.#pending = this.#pending
       .then(() => this.#append(event))
@@ -132,12 +131,18 @@ export class AnalysisJournal {
     const handle = this.#handle;
     this.#handle = undefined;
     if (handle === undefined) return;
+    let failure: unknown;
     try {
       await handle.sync();
+    } catch (cause) {
+      failure = cause;
+    }
+    try {
       await handle.close();
     } catch (cause) {
-      await this.#disable(cause);
+      failure ??= cause;
     }
+    if (failure !== undefined) await this.#disable(failure);
   }
 
   async #initialize(): Promise<void> {

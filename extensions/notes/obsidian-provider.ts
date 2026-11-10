@@ -99,15 +99,13 @@ class ObsidianProvider implements NotesProvider {
         request.prefix === undefined ? undefined : normalizePrefix(request.prefix);
       const cursor = decodeListCursor(request.cursor, explicitPrefix);
       const limit = Math.min(request.limit ?? MAX_NOTE_COUNT, MAX_NOTE_COUNT);
-      const paths = (await walkMarkdownFiles(this.root, this.root, signal)).sort((left, right) =>
-        left.localeCompare(right),
-      );
+      const paths = (await walkMarkdownFiles(this.root, this.root, signal)).sort(compareNotePaths);
       const entries: NoteEntry[] = [];
       let hasMore = false;
       for (const notePath of paths) {
         signal?.throwIfAborted();
         if (explicitPrefix && !notePath.startsWith(explicitPrefix)) continue;
-        if (cursor !== undefined && notePath.localeCompare(cursor) <= 0) continue;
+        if (cursor !== undefined && compareNotePaths(notePath, cursor) <= 0) continue;
         if (entries.length === limit) {
           hasMore = true;
           break;
@@ -589,6 +587,10 @@ function normalizePrefix(input: string): string {
   return normalized;
 }
 
+function compareNotePaths(left: string, right: string): number {
+  return left.localeCompare(right) || (left < right ? -1 : left > right ? 1 : 0);
+}
+
 function encodeListCursor(notePath: string, prefix: string | undefined): string {
   return Buffer.from(JSON.stringify({ v: 1, path: notePath, prefix: prefix ?? null })).toString(
     "base64url",
@@ -833,7 +835,10 @@ function formatObsidianIndex(notes: readonly NoteEntry[]): string {
 }
 
 function markdownTitle(content: string): string | undefined {
-  return content.match(/^#\s+(.+)$/m)?.[1]?.trim();
+  return content
+    .match(/^#\s+(.+)$/m)?.[1]
+    ?.trim()
+    .slice(0, 256);
 }
 
 function matchingSnippet(content: string, needle: string): string | undefined {

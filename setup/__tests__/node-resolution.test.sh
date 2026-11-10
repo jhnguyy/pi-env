@@ -24,6 +24,9 @@ make_executable "$TEMP/tool-node" '#!/bin/sh
 if [ "$1" = -p ]; then printf "22.12.0\n"; else printf "tool:%s\n" "$*"; fi'
 assert_eq "$(PI_ENV_TOOL_NODE="$TEMP/tool-node" "$ROOT/scripts/tool-node-run.sh" launcher --check)" \
   'tool:launcher --check' 'native-tool adapter runs the tool'
+cp "$TEMP/tool-node" "$TEMP/tool node"
+assert_eq "$(PI_ENV_TOOL_NODE="$TEMP/tool node" "$ROOT/scripts/tool-node-run.sh" launcher --check)" \
+  'tool:launcher --check' 'native-tool adapter preserves executable paths containing spaces'
 make_executable "$TEMP/tool-node" '#!/bin/sh
 printf "22.11.0\n"'
 status=0

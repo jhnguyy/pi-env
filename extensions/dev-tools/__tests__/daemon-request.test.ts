@@ -271,6 +271,31 @@ describe("parsed daemon requests", () => {
     ]);
   });
 
+  it.each([49, 50, 51])(
+    "counts nested document symbols before limiting %i items",
+    async (count) => {
+      backend.responses.set("textDocument/documentSymbol", [
+        {
+          name: "Container",
+          kind: 5,
+          range: range(),
+          selectionRange: range(),
+          children: Array.from({ length: count - 1 }, (_, index) => ({
+            name: `member${index}`,
+            kind: 6,
+            range: range(index + 1),
+            selectionRange: range(index + 1),
+          })),
+        },
+      ]);
+      const response = result(await execute(request("symbols", position())), "symbols");
+      expect(response.total).toBe(count);
+      expect(response.items).toHaveLength(Math.min(count, 50));
+      expect(response.truncated).toBe(count > 50);
+      expect(response.items[0]).toMatchObject({ name: "Container", line: 1 });
+    },
+  );
+
   it("rejects workspace queries when no backend supports them", async () => {
     backend.supportsWorkspaceSymbols = false;
     expect(await execute(request("symbols", { query: "User" }))).toEqual({

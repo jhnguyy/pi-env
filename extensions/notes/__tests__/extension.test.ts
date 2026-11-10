@@ -97,6 +97,29 @@ function externalProvider(id: string, indexText: string): NotesProvider {
 }
 
 describe("notes extension", () => {
+  it("renders collapsed failures as errors and keeps expanded diagnostics", async () => {
+    const testHarness = harness();
+    await activateNotesExtension(
+      testHarness.pi as any,
+      "/repo",
+      settingsEnv({ notes: { provider: "notes-assistant" } }),
+    );
+    const tool = testHarness.tools[0];
+    const theme = { fg: (color: string, text: string) => `${color}:${text}` };
+    const result = { content: [{ type: "text", text: "Revision conflict" }], details: undefined };
+    const context = { args: { collection: "wiki", action: "write" }, isError: true };
+    const collapsed = tool.renderResult(result, { expanded: false }, theme, context);
+    expect(collapsed.render(100).join("\n")).toContain("error:✗ notes wiki write");
+    expect(collapsed.render(100).join("\n")).not.toContain("✓");
+    const expanded = tool.renderResult(result, { expanded: true }, theme, context);
+    expect(expanded.render(100).join("\n")).toContain("Revision conflict");
+    const success = tool.renderResult(result, { expanded: false }, theme, {
+      ...context,
+      isError: false,
+    });
+    expect(success.render(100).join("\n")).toContain("success:✓ notes wiki write");
+  });
+
   it("does not register a tool without notes settings", async () => {
     const testHarness = harness();
 

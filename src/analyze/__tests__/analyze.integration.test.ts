@@ -314,6 +314,62 @@ describe("diff scope integrity", () => {
     expect(intersectsHunks(1, 9, hunks)).toBe(false);
   });
 
+  it("keeps quoted Git paths and their hunks separate", () => {
+    const hunks = parseUnifiedHunks(
+      [
+        "diff --git a/a.ts b/a.ts",
+        "+++ b/a.ts",
+        "@@ -1 +2 @@",
+        'diff --git "a/caf\\303\\251.ts" "b/caf\\303\\251.ts"',
+        '+++ "b/caf\\303\\251.ts"',
+        "@@ -1 +20 @@",
+        "diff --git a/deleted.ts b/deleted.ts",
+        "+++ /dev/null",
+        "@@ -1 +0,0 @@",
+        "diff --git a/a space.ts b/a space.ts",
+        "+++ b/a space.ts\t",
+        "@@ -1 +3 @@",
+      ].join("\n"),
+    );
+    expect([...hunks]).toEqual([
+      ["a.ts", [{ start: 2, end: 2 }]],
+      ["café.ts", [{ start: 20, end: 20 }]],
+      ["a space.ts", [{ start: 3, end: 3 }]],
+    ]);
+  });
+
+  it("limits nested diff scope to cwd and preserves unusual untracked filenames", async () => {
+    const cwd = writeProject({
+      "src/a.ts": "export const a = 1;",
+      "outside.ts": "export const b = 1;",
+    });
+    const git = (...args: string[]) => execFileSync("git", args, { cwd, stdio: "ignore" });
+    git("init", "-b", "main");
+    git("config", "diff.noprefix", "true");
+    git("add", ".");
+    git(
+      "-c",
+      "user.name=Analyze Test",
+      "-c",
+      "user.email=analyze@example.invalid",
+      "commit",
+      "-m",
+      "baseline",
+    );
+    writeFileSync(join(cwd, "src/a.ts"), "export const a = 2;");
+    writeFileSync(join(cwd, "outside.ts"), "export const b = 2;");
+    for (const name of ["café.ts", "tab\tname.ts", "line\nname.ts"])
+      writeFileSync(join(cwd, "src", name), "export {};");
+    const scope = await Effect.runPromise(
+      resolveScopeEffect({ cwd: join(cwd, "src"), scope: ScopeMode.Diff, ref: "main" }).pipe(
+        Effect.provide(processServiceLayer()),
+      ),
+    );
+    expect(scope.files).toEqual(["a.ts", "café.ts", "line\nname.ts", "tab\tname.ts"]);
+    const project = await Effect.runPromise(createSyntaxProjectEffect(join(cwd, "src"), scope));
+    expect(project.files).toHaveLength(4);
+  });
+
   it("expresses owned diff hunks in current worktree lines and excludes vendored plugin source", async () => {
     const cwd = writeProject({
       "src/a.ts": "export const first = 1;\nexport const second = 2;\nexport const third = 3;\n",
@@ -573,6 +629,27 @@ describe("analysis budgets and capability loading", () => {
 });
 
 describe("project source selection and bounds", () => {
+  it("resolves ancestor tsconfig paths relative to the config, not the invocation", async () => {
+    const cwd = writeProject({ "src/a.ts": "export const a = 1;" });
+    const project = await Effect.runPromise(createSyntaxProjectEffect(join(cwd, "src"), allScope));
+    expect(project.files.map((file) => file.fileName)).toEqual([join(cwd, "src/a.ts")]);
+  });
+
+  it("excludes configuration files from syntax source budgets", async () => {
+    const cwd = writeProject({
+      "src/a.ts": "export const a = 1;",
+      "large.json": JSON.stringify({ text: "x".repeat(1_000) }),
+    });
+    const project = await Effect.runPromise(
+      createSyntaxProjectEffect(cwd, pathScope(["src/a.ts", "large.json"]), {
+        maxFiles: 1,
+        maxFileBytes: 100,
+        maxTotalBytes: 100,
+      }),
+    );
+    expect(project.files.map((file) => file.fileName)).toEqual([join(cwd, "src/a.ts")]);
+  });
+
   it("keeps scoped syntax loading within the selected paths", async () => {
     const cwd = writeProject({
       "src/changed.ts": "export const changed = 1;",

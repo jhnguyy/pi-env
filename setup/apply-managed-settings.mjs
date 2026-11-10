@@ -101,11 +101,23 @@ if (baseSettings === null || typeof baseSettings !== "object" || Array.isArray(b
   throw new Error("settings must be a JSON object");
 }
 const settings = applyManagedSettings(baseSettings);
+const packagePath = packageRepoPath();
 if (settings.packages !== undefined) {
   if (!Array.isArray(settings.packages)) throw new Error("settings.packages must be an array");
   assertValidPackageSources(settings);
-  const piEnvSources = new Set([path.resolve(repoPath), path.resolve(packageRepoPath())]);
+  const piEnvSources = new Set([path.resolve(repoPath), path.resolve(packagePath)]);
   settings.packages = settings.packages.map((entry) => relocatePiEnvFilters(entry, piEnvSources));
+  if (packagePath !== repoPath) {
+    const sourceOf = (entry) => resolveSource(typeof entry === "string" ? entry : entry.source);
+    const hasPrimary = settings.packages.some((entry) => sourceOf(entry) === packagePath);
+    // Keep an existing primary selection intact; combining filters could enable
+    // resources the user excluded. Otherwise move the whole worktree entry.
+    settings.packages = settings.packages.flatMap((entry) => {
+      if (sourceOf(entry) !== path.resolve(repoPath)) return [entry];
+      if (hasPrimary) return [];
+      return [typeof entry === "string" ? packagePath : { ...entry, source: packagePath }];
+    });
+  }
 }
 
 fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
@@ -122,9 +134,7 @@ try {
     fs.writeFileSync(settingsFile, renderSettings(settings));
   settingsManager = SettingsManager.create(repoPath, agentDir, { projectTrusted: false });
   const packageManager = new DefaultPackageManager({ cwd: repoPath, agentDir, settingsManager });
-  const packagePath = packageRepoPath();
   await packageManager.installAndPersist(packagePath);
-  if (packagePath !== repoPath) packageManager.removeSourceFromSettings(repoPath);
   await settingsManager.flush();
   const settingsErrors = settingsManager.drainErrors();
   if (settingsErrors.length > 0) {

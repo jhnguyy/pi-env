@@ -4,6 +4,7 @@ import * as TempDir from "../../../src/testing/temp-dir";
 import type {
   ExtensionAPI,
   ExtensionContext,
+  ExtensionCommandContext,
   SessionInfoChangedEvent,
   SessionShutdownEvent,
   SessionStartEvent,
@@ -15,7 +16,12 @@ import { registerSessionManager, type SessionManagerOptions } from "../index.js"
 import { createFileSessionCatalog } from "../storage.js";
 import { executor } from "./tmux-executor.js";
 
-type Event = SessionStartEvent | SessionInfoChangedEvent | SessionShutdownEvent;
+type Event =
+  | SessionStartEvent
+  | SessionInfoChangedEvent
+  | SessionShutdownEvent
+  | { type: "agent_end"; messages: [] }
+  | { type: "command"; name: string };
 type EditorFactory = NonNullable<ReturnType<ExtensionContext["ui"]["getEditorComponent"]>>;
 type Editor = ReturnType<EditorFactory> & {
   actionHandlers: Map<string, () => void>;
@@ -87,7 +93,11 @@ export async function createExtensionFixture() {
         handlers.delete(event);
       };
     },
-    registerCommand: () => {},
+    registerCommand: (name, command) => {
+      handlers.set(`command:${name}`, (_event: Event, ctx: ExtensionContext) =>
+        command.handler("", ctx as ExtensionCommandContext),
+      );
+    },
     getSessionName: () => native.session.name,
     setSessionName: (name: string) => {
       native.session.name = name.trim() || undefined;
@@ -97,7 +107,9 @@ export async function createExtensionFixture() {
   function emit(event: Event, session = native.session): Promise<void> {
     if (event.type === "session_start") native.session = session;
     if (event.type === "session_info_changed") session.name = event.name;
-    const registeredHandler = handlers.get(event.type);
+    const registeredHandler = handlers.get(
+      event.type === "command" ? `command:${event.name}` : event.type,
+    );
     if (typeof registeredHandler !== "function")
       throw new Error(`No registered handler for ${event.type}`);
     const handler = registeredHandler as (event: Event, ctx: ExtensionContext) => unknown;
@@ -162,7 +174,8 @@ export async function createExtensionFixture() {
     emit,
     readManifest: () => Effect.runPromise(catalog.read(cwd)),
     register: (options: Partial<SessionManagerOptions> = {}) => {
-      if (registered) throw new Error("Session manager already registered");
+      // Native reload replaces registrations while retaining the session and environment.
+      handlers.clear();
       registerSessionManager(pi as ExtensionAPI, {
         catalog,
         host,
