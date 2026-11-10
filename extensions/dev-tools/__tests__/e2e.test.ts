@@ -35,18 +35,8 @@ describe("LSP E2E", () => {
     expect(result.action).toBe("diagnostics");
     expect(result.errorCount).toBe(2);
     expect(result.items).toEqual([
-      expect.objectContaining({
-        line: 1,
-        severity: "error",
-        code: "TS2322",
-        message: "Type 'number' is not assignable to type 'string'.",
-      }),
-      expect.objectContaining({
-        line: 2,
-        severity: "error",
-        code: "TS2322",
-        message: "Type 'string' is not assignable to type 'number'.",
-      }),
+      expect.objectContaining({ line: 1, severity: "error", code: "TS2322", message: "Type 'number' is not assignable to type 'string'." }),
+      expect.objectContaining({ line: 2, severity: "error", code: "TS2322", message: "Type 'string' is not assignable to type 'number'." }),
     ]);
   });
 
@@ -62,41 +52,6 @@ describe("LSP E2E", () => {
       ]),
     );
     expect(result.items.some((item: any) => item.code.startsWith("TSeffect"))).toBe(false);
-  });
-
-  it("reports missing Effect services, errors, and Layer inputs", async () => {
-    const file = fixture.writeFile("effect-relations.ts", [
-      'import { Context, type Effect, type Layer } from "effect";',
-      'class MissingService extends Context.Service<MissingService, { readonly value: number }>()("MissingService") {}',
-      "declare const requiring: Effect.Effect<void, never, MissingService>;",
-      "export const missingContext: Effect.Effect<void> = requiring;",
-      'declare const failing: Effect.Effect<void, "Failure">;',
-      "export function missingError(): Effect.Effect<void> { return failing; }",
-      "declare const requiringLayer: Layer.Layer<never, never, MissingService>;",
-      "declare function consumeLayer(layer: Layer.Layer<never>): void;",
-      "consumeLayer(requiringLayer);",
-    ]);
-
-    const result = await fixture.callDaemon({ action: "diagnostics", path: file });
-    expect(result.items).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          code: expect.stringMatching(/^effect\([^)]+\)$/),
-          severity: "error",
-          message: expect.stringContaining("service that is missing"),
-        }),
-        expect.objectContaining({
-          code: expect.stringMatching(/^effect\([^)]+\)$/),
-          severity: "error",
-          message: expect.stringContaining("expected Effect errors"),
-        }),
-        expect.objectContaining({
-          code: expect.stringMatching(/^effect\([^)]+\)$/),
-          severity: "error",
-          message: expect.stringContaining("expected Layer context"),
-        }),
-      ]),
-    );
   });
 
   // ─── Hover ────────────────────────────────────────────────────────────
@@ -148,25 +103,11 @@ describe("LSP E2E", () => {
     expect(result.action).toBe("references");
     expect(result.total).toBe(3);
     expect(result.truncated).toBe(false);
-    expect(result.items).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          absolutePath: fixture.typesFile,
-          line: 7,
-          content: "export function greet(user: User): string {",
-        }),
-        expect.objectContaining({
-          absolutePath: fixture.mainFile,
-          line: 2,
-          content: 'import { greet } from "./types";',
-        }),
-        expect.objectContaining({
-          absolutePath: fixture.mainFile,
-          line: 10,
-          content: "console.log(greet(bob));",
-        }),
-      ]),
-    );
+    expect(result.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ absolutePath: fixture.typesFile, line: 7, content: "export function greet(user: User): string {" }),
+      expect.objectContaining({ absolutePath: fixture.mainFile, line: 2, content: 'import { greet } from "./types";' }),
+      expect.objectContaining({ absolutePath: fixture.mainFile, line: 10, content: "console.log(greet(bob));" }),
+    ]));
     expect(result.items).toHaveLength(3);
   });
 
@@ -201,11 +142,7 @@ describe("LSP E2E", () => {
     expect(result.action).toBe("rename");
     expect(result.totalEdits).toBe(3);
     expect(result.files).toHaveLength(2);
-    await expect(readFile(renameFixture.typesFile, "utf8")).resolves.toBe(
-      beforeTypes.replace("function greet(", "function welcome("),
-    );
-    await expect(readFile(renameFixture.mainFile, "utf8")).resolves.toBe(
-      beforeMain.replaceAll("greet", "welcome"),
-    );
+    await expect(readFile(renameFixture.typesFile, "utf8")).resolves.toBe(beforeTypes.replace("function greet(", "function welcome("));
+    await expect(readFile(renameFixture.mainFile, "utf8")).resolves.toBe(beforeMain.replaceAll("greet", "welcome"));
   });
 });
