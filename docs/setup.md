@@ -22,11 +22,19 @@ See [the philosophy](../setup/templates/APPEND_SYSTEM.md), [guidance installatio
 
 `PI_CODING_AGENT_DIR` selects user state; `PI_AGENT_DIR` is a legacy alias. Conflicting selections are rejected. See [directory resolution](../setup/agent-dir.sh).
 
-The [runtime adapter](../setup/runtime.mjs) owns CLI installation and session launching. [Hydration](../scripts/hydrate.mjs) prepares dependency-install artifacts. In Nix-backed setups, the [package outputs](../nix/outputs.nix) distinguish a tools-only environment from a toolchain that also supplies Pi. Keeping those outputs separate lets infrastructure provision tools without taking ownership of the application's revision.
+The [runtime adapter](../setup/runtime.mjs) provides portable CLI installation and session launching. [Hydration](../scripts/hydrate.mjs) prepares dependency-install artifacts. In Nix-backed setups, the [package outputs](../nix/outputs.nix) distinguish a tools-only environment from a toolchain that also supplies Pi. Keeping those outputs separate lets infrastructure provision tools without taking ownership of the application's revision.
 
 ### Declarative host integration
 
 The exported [Home Manager module](../nix/home-manager.nix) can provision Pi and terminal integration from a locked flake input. When it does, editing a working checkout does not replace those activated artifacts. Update the consuming input and activate its generation when those are the intended changes. Builder access, binary-cache trust, and host activation belong to that consuming infrastructure, not portable setup; use isolated state rather than a live profile to validate setup changes.
+
+To let Home Manager own the `pi` launcher, declare the writable checkout containing the built Session Manager:
+
+```nix
+pi-env.checkoutPath = "${config.home.homeDirectory}/src/pi-env";
+```
+
+Home Manager then owns `~/.local/bin/pi`; ordinary invocations use the packaged Pi executable, and exact `pi --start` dispatches into the checkout. The checkout and its dependencies still require installation and building. Existing launcher files use Home Manager's normal collision/backup handling, not an automatic overwrite. Open a new shell after activation so setup sees the CLI-ownership setting. If shell integration is disabled, ensure `~/.local/bin` is on `PATH`. Leaving `checkoutPath` unset preserves the existing portable and externally provisioned setup paths.
 
 With `pi-env.homeManager.sync.enable`, setup reports when the consuming flake's pi-env input differs from `main`. Setup also runs from the post-merge hook, so it updates the input and switches generations only when you pass `--sync-home-manager`. See [Home Manager sync](../setup/home-manager.mjs) for the conditions it checks.
 
