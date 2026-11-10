@@ -79,7 +79,3 @@ Avoid cascading `if`/`else if` for state-machine or parser logic. Avoid forcing 
 ## Effect-style tagged data
 
 For algebraic data types or error/result variants, prefer tagged objects/classes over enums. With Effect, use patterns such as `Data.TaggedError`, `_tag` discriminants, or `Data.taggedEnum`-style constructors when they fit the boundary. Keep tags as literal values derived from objects or constructors rather than TypeScript enums.
-
-## Lint
-
-Run `nub run lint:type`. Full lint uses the installed Effect compiler package's Oxlint launcher without patching dependency files. This selects compatible native binaries; it does not enable Effect lint rules by itself. `nub run typecheck` remains the compiler and Effect-diagnostic gate.
