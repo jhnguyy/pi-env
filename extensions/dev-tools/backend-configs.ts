@@ -107,7 +107,7 @@ function nativeLaunch(
   return { launchCommand: binaryName, launchArgs: args };
 }
 
-/** Use Nub's workspace TypeScript, which prepare patches with Effect diagnostics. */
+/** Use workspace TypeScript; the configured language-service plugin supplies Effect diagnostics. */
 function resolveTypeScriptServerPath(): string {
   return require.resolve("typescript/lib/tsserver.js");
 }
