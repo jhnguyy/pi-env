@@ -11,11 +11,6 @@
 let
   cfg = config.pi-env;
   packages = packagesFor pkgs;
-  ghosttyDirectory =
-    if pkgs.stdenv.hostPlatform.isDarwin then
-      "Library/Application Support/com.mitchellh.ghostty"
-    else
-      ".config/ghostty";
 in
 {
   options.pi-env = {
@@ -117,10 +112,13 @@ in
       })
 
       (lib.mkIf cfg.ghostty.enable {
-        home.file = {
-          "${ghosttyDirectory}/config".source = "${self}/ghostty/config";
+        home.file = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin {
+          "Library/Application Support/com.mitchellh.ghostty/config".source = "${self}/ghostty/config";
         };
         xdg.configFile = {
+          "ghostty/config" = lib.mkIf (!pkgs.stdenv.hostPlatform.isDarwin) {
+            source = "${self}/ghostty/config";
+          };
           "ghostty/themes/pi-env-gruvbox-dark".source =
             "${self}/ghostty/themes/pi-env-gruvbox-dark";
           "ghostty/themes/pi-env-gruvbox-light".source =
