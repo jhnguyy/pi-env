@@ -49,6 +49,8 @@ Local verification selects related unit tests. An integration-only edit may sele
 | Isolated session-manager/tmux E2Es | `nub run test:e2e:session-manager:docker` |
 | Broader CI integration pipeline    | `nub run verify:full`                     |
 
+Vitest aliases invoke the runner directly; Vitest owns selection, workers, and test lifecycle. Standalone test commands do not acquire the cross-worktree heavyweight lock or use the supervisor's command timeout and process-group cleanup. `verify` retains its outer lock, and `verify:full` retains both locking and command supervision. `PI_ENV_TEST_TIMEOUT_MS` and `PI_ENV_TEST_KILL_GRACE_MS` apply only to supervised commands.
+
 CI runs `verify:full`; select the canary and Docker qualification separately when relevant.
 
 [Testing conventions](docs/conventions/testing.md) cover organization, fixtures, and qualification boundaries. [`package.json#scripts`](package.json) owns executable commands.
