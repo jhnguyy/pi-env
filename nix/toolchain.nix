@@ -1,14 +1,14 @@
 {
-  nixpkgs,
   hunk,
+  nixpkgs,
   nub,
   pi,
 }:
 let
   systems = [
-    "x86_64-linux"
-    "aarch64-linux"
     "aarch64-darwin"
+    "aarch64-linux"
+    "x86_64-linux"
   ];
   pkgsFor =
     system:
@@ -42,9 +42,9 @@ let
         pkgs.tmux;
       piPackage =
         assert pkgs.lib.assertMsg (builtins.all (name: manifest.devDependencies.${name} == piVersion) [
-          "@earendil-works/pi-coding-agent"
           "@earendil-works/pi-agent-core"
           "@earendil-works/pi-ai"
+          "@earendil-works/pi-coding-agent"
           "@earendil-works/pi-tui"
         ]) "Pi development dependencies must match the upstream Pi flake";
         pkgs.callPackage (pi + "/nix/package.nix") {
@@ -64,20 +64,20 @@ let
       toolsPackages = [
         atuin
         hunkPackage
-        pkgs.git
-        pkgs.gh
         node
         nubPackage
         pkgs.coreutils
         pkgs.findutils
+        pkgs.flock
         pkgs.gawk
+        pkgs.gh
+        pkgs.git
         pkgs.gnugrep
         pkgs.gnused
-        pkgs.neovim
         pkgs.ncurses
+        pkgs.neovim
         pkgs.ripgrep
         tmux
-        pkgs.flock
       ];
       toolchainPackages = toolsPackages ++ [ piPackage ];
       package =
@@ -99,13 +99,13 @@ let
         };
     in
     {
-      inherit node tmux atuin toolchainPackages;
-      pi = piPackage;
+      inherit atuin node tmux toolchainPackages;
       hunk = hunkPackage;
-      tools = package "pi-env-tools" toolsPackages;
+      pi = piPackage;
       toolchain = package "pi-env-toolchain" toolchainPackages;
+      tools = package "pi-env-tools" toolsPackages;
     };
 in
 {
-  inherit systems pkgsFor packagesFor;
+  inherit packagesFor pkgsFor systems;
 }

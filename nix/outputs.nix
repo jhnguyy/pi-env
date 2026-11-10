@@ -1,22 +1,22 @@
 {
-  self,
-  pkgs,
   packages,
+  pkgs,
+  self,
 }:
 let
   inherit (packages) node pi toolchain;
   selectorEnv.PI_ENV_AGENT_DIR_SCRIPT = "${../setup/agent-dir.sh}";
   runtimeEnv = {
-    PI_ENV_NODE_BIN = "${node}/bin/node";
     NODE_EXECUTABLE = "${node}/bin/node";
-    PI_PACKAGE_DIR = "${pi}/lib/pi/node_modules/@earendil-works/pi-coding-agent";
+    PI_ENV_NODE_BIN = "${node}/bin/node";
     PI_ENV_PI_EXECUTABLE = pkgs.lib.getExe pi;
+    PI_PACKAGE_DIR = "${pi}/lib/pi/node_modules/@earendil-works/pi-coding-agent";
   };
   setupApp = pkgs.writeShellApplication {
     name = "pi-env-setup";
     runtimeInputs = [
-      toolchain
       pkgs.nix
+      toolchain
     ];
     runtimeEnv =
       runtimeEnv
@@ -30,8 +30,8 @@ let
   bootstrapApp = pkgs.writeShellApplication {
     name = "pi-env-bootstrap";
     runtimeInputs = [
-      pkgs.git
       pkgs.coreutils
+      pkgs.git
     ];
     runtimeEnv = selectorEnv // {
       PI_ENV_SETUP_COMMAND = pkgs.lib.getExe setupApp;
@@ -46,11 +46,11 @@ let
   };
 in
 {
-  packages = {
-    default = toolchain;
-    inherit (packages) tools toolchain pi tmux hunk atuin;
-  };
   apps = {
+    bootstrap = {
+      type = "app";
+      program = pkgs.lib.getExe bootstrapApp;
+    };
     default = {
       type = "app";
       program = pkgs.lib.getExe setupApp;
@@ -58,10 +58,6 @@ in
     setup = {
       type = "app";
       program = pkgs.lib.getExe setupApp;
-    };
-    bootstrap = {
-      type = "app";
-      program = pkgs.lib.getExe bootstrapApp;
     };
     verify-install = {
       type = "app";
@@ -80,9 +76,9 @@ in
       pkgs.gnugrep
       pkgs.gnused
     ];
-    PI_ENV_SOURCE = self;
-    PI_ENV_SETUP_SCRIPT = ../setup.sh;
     PI_ENV_NODE_BIN = "${node}/bin/node";
+    PI_ENV_SETUP_SCRIPT = ../setup.sh;
+    PI_ENV_SOURCE = self;
   } (builtins.readFile ./check-setup.sh);
   devShells.default = pkgs.mkShell (
     runtimeEnv
@@ -90,4 +86,8 @@ in
       packages = packages.toolchainPackages;
     }
   );
+  packages = {
+    default = toolchain;
+    inherit (packages) atuin hunk pi tmux toolchain tools;
+  };
 }

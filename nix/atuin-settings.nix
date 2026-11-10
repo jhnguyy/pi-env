@@ -1,12 +1,12 @@
 {
   auto_sync = true;
-  sync.records = true;
   daemon = {
-    enabled = true;
     autostart = true;
+    enabled = true;
   };
-  pty_proxy.enabled = true;
   output.enabled = true;
+  pty_proxy.enabled = true;
+  sync.records = true;
   threads = {
     capture = true;
     capture_tools = true;
