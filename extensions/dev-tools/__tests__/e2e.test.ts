@@ -66,12 +66,13 @@ describe("LSP E2E", () => {
 
   it("reports missing Effect services, errors, and Layer inputs", async () => {
     const file = fixture.writeFile("effect-relations.ts", [
-      'import type { Effect, Layer } from "effect";',
-      'declare const requiring: Effect.Effect<void, never, "MissingService">;',
+      'import { Context, type Effect, type Layer } from "effect";',
+      'class MissingService extends Context.Service<MissingService, { readonly value: number }>()("MissingService") {}',
+      "declare const requiring: Effect.Effect<void, never, MissingService>;",
       "export const missingContext: Effect.Effect<void> = requiring;",
       'declare const failing: Effect.Effect<void, "Failure">;',
       "export function missingError(): Effect.Effect<void> { return failing; }",
-      'declare const requiringLayer: Layer.Layer<never, never, "MissingService">;',
+      "declare const requiringLayer: Layer.Layer<never, never, MissingService>;",
       "declare function consumeLayer(layer: Layer.Layer<never>): void;",
       "consumeLayer(requiringLayer);",
     ]);
