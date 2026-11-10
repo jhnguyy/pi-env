@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { constants as osConstants } from "node:os";
-import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import * as HeavyweightLock from "./heavyweight-lock.mjs";
 import { changedFiles } from "./changed-files.mjs";
 import { changedVerificationPlan, unqualifiedGlobalInputs } from "./verification-plan.mjs";
 import { listPlan, runPlan } from "./verification-runner.mjs";
 
-const repo = resolve(import.meta.dirname, "..");
 function capture(command, args, cwd = process.cwd()) {
   return execFileSync(command, args, {
     cwd,
@@ -97,16 +95,8 @@ async function main([command, ...args]) {
       // Reject obsolete inspection flags before a broad pipeline can allocate work.
       parseArgs({ args, options: {} });
       return runSupervisedNode(["--heavyweight", "--command", "nub", "run", "verify:integration"]);
-    case "typecheck": {
-      const compiler = capture(
-        process.execPath,
-        [join(repo, "node_modules/@effect/tsgo/dist/effect-tsgo.cjs"), "get-exe-path"],
-        repo,
-      );
-      return runSupervisedNode(["--heavyweight", "--command", compiler, ...args]);
-    }
     default:
-      throw new Error("usage: node scripts/dev.mjs <verify|full|typecheck|test:docker> [args...]");
+      throw new Error("usage: node scripts/dev.mjs <verify|full|test:docker> [args...]");
   }
 }
 
