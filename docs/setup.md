@@ -28,13 +28,13 @@ The [runtime adapter](../setup/runtime.mjs) provides portable CLI installation a
 
 The exported [Home Manager module](../nix/home-manager.nix) can provision Pi and terminal integration from a locked flake input. When it does, editing a working checkout does not replace those activated artifacts. Update the consuming input and activate its generation when those are the intended changes. Builder access, binary-cache trust, and host activation belong to that consuming infrastructure, not portable setup; use isolated state rather than a live profile to validate setup changes.
 
-To let Home Manager own the `pi` launcher, declare the writable checkout containing the built Session Manager:
+To manage the launcher through Home Manager, set `pi-env.checkoutPath` in your enabled pi-env module configuration:
 
 ```nix
 pi-env.checkoutPath = "${config.home.homeDirectory}/src/pi-env";
 ```
 
-Home Manager then owns `~/.local/bin/pi`; ordinary invocations use the packaged Pi executable, and exact `pi --start` dispatches into the checkout. The checkout and its dependencies still require installation and building. Existing launcher files use Home Manager's normal collision/backup handling, not an automatic overwrite. Open a new shell after activation so setup sees the CLI-ownership setting. If shell integration is disabled, ensure `~/.local/bin` is on `PATH`. Leaving `checkoutPath` unset preserves the existing portable and externally provisioned setup paths.
+Use a writable checkout prepared through the existing [setup instructions](../README.md#setup-choices). Home Manager does not prepare the checkout. When replacing an existing launcher, resolve the activation collision through Home Manager's normal backup handling.
 
 With `pi-env.homeManager.sync.enable`, setup reports when the consuming flake's pi-env input differs from `main`. Setup also runs from the post-merge hook, so it updates the input and switches generations only when you pass `--sync-home-manager`. See [Home Manager sync](../setup/home-manager.mjs) for the conditions it checks.
 
