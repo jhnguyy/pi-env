@@ -15,6 +15,50 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Create memory-bounded qualification builder
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Bound BuildKit and its build children together, without swap growth.
+        docker buildx create --name pi-env-qualification --driver docker-container \
+          --driver-opt image=moby/buildkit@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe \
+          --driver-opt memory=4g,memory-swap=4g --use --bootstrap
+        [[ "$(docker info --format '{{.CgroupVersion}}')" == 2 ]]
+        [[ "$(docker inspect buildx_buildkit_pi-env-qualification0 --format '{{.HostConfig.CgroupnsMode}}')" == private ]]
+        docker exec buildx_buildkit_pi-env-qualification0 sh -ec \
+          'test "$(cat /sys/fs/cgroup/memory.max)" = 4294967296; test "$(cat /sys/fs/cgroup/memory.swap.max)" = 0'
+
+    - name: Verify build workers inherit the memory boundary
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        builder_pid=$(docker inspect buildx_buildkit_pi-env-qualification0 --format '{{.State.Pid}}')
+        builder_group=$(awk -F: '$1 == "0" {print $3}' "/proc/$builder_pid/cgroup")
+        [[ -n "$builder_group" && "$builder_group" != / ]]
+        base_image=$(awk '$1 == "FROM" {print $2; exit}' Dockerfile)
+        docker buildx build --build-arg "BASE_IMAGE=$base_image" --no-cache --output=type=cacheonly - <<'DOCKERFILE' &
+        ARG BASE_IMAGE
+        FROM ${BASE_IMAGE}
+        RUN sleep 5
+        DOCKERFILE
+        probe_pid=$!
+        trap 'kill "$probe_pid" 2>/dev/null || true' EXIT
+        for attempt in {1..120}; do
+          worker_pid=$(docker top buildx_buildkit_pi-env-qualification0 -eo pid,comm | awk '$2 == "sleep" {print $1; exit}')
+          if [[ -n "$worker_pid" ]]; then
+            worker_group=$(awk -F: '$1 == "0" {print $3}' "/proc/$worker_pid/cgroup")
+            [[ "$worker_group" == "$builder_group" || "$worker_group" == "$builder_group/"* ]]
+            echo "Build worker cgroup $worker_group inherits capped builder $builder_group."
+            wait "$probe_pid"
+            exit 0
+          fi
+          kill -0 "$probe_pid" || break
+          sleep 1
+        done
+        echo "::error::Could not establish build-worker memory containment."
+        exit 1
+
     - name: Build container image candidate
       shell: bash
       working-directory: ${{ github.workspace }}
@@ -22,7 +66,7 @@ runs:
         IMAGE_TAG: ${{ inputs.image-tag }}
       run: |
         set -euo pipefail
-        if ! docker buildx bake image --set "image.tags=$IMAGE_TAG"; then
+        if ! docker buildx bake image --load --set "image.tags=$IMAGE_TAG"; then
           echo "::error title=Container image build failed::Docker could not build the image candidate."
           exit 1
         fi
@@ -127,4 +171,21 @@ runs:
         if [[ "$summary_status" -ne 0 ]]; then
           echo "::error title=Container image scanner failed::The scanner returned an invalid image report."
           exit "$summary_status"
+        fi
+
+    - name: Report builder memory and remove qualification builder
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        if docker inspect buildx_buildkit_pi-env-qualification0 >/dev/null 2>&1; then
+          docker inspect buildx_buildkit_pi-env-qualification0 \
+            --format 'Builder OOM-killed={{.State.OOMKilled}} exit={{.State.ExitCode}}'
+          if ! docker exec buildx_buildkit_pi-env-qualification0 sh -c \
+            'for metric in memory.peak memory.events; do echo "$metric"; cat "/sys/fs/cgroup/$metric"; done'; then
+            echo "Builder cgroup metrics unavailable; inspect the builder state above."
+          fi
+        fi
+        if docker buildx inspect pi-env-qualification >/dev/null 2>&1; then
+          docker buildx rm --force pi-env-qualification
         fi
