@@ -4,7 +4,6 @@
     "correctness": "off"
   },
   "ignorePatterns": [
-    "skills/**",
     "**/node_modules/**",
     "**/dist/**",
     "**/generated/**",

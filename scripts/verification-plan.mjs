@@ -1,5 +1,4 @@
-import { globSync, readFileSync } from "node:fs";
-import { join, matchesGlob } from "node:path";
+import { globSync } from "node:fs";
 
 const script = (name, ...args) => ({ label: name, command: "nub", args: ["run", name, ...args] });
 const codeFile = (file) => /\.[cm]?[jt]sx?$/.test(file);
@@ -7,16 +6,6 @@ const formattable = (file) => /\.(?:[cm]?[jt]sx?|jsonc?|ya?ml|md|css|html)$/.tes
 function owner(file) {
   if (file.startsWith("extensions/_shared/")) return undefined;
   return /^(extensions\/[^/]+|src\/[^/]+|scripts|setup)\//.exec(file)?.[1];
-}
-
-function lintIgnorePatterns(cwd) {
-  try {
-    return (
-      JSON.parse(readFileSync(join(cwd, ".oxlintrc-sensors.json"), "utf8")).ignorePatterns ?? []
-    );
-  } catch {
-    return [];
-  }
 }
 
 export function unqualifiedGlobalInputs(files) {
@@ -37,24 +26,16 @@ export function changedVerificationPlan(change, { checksOnly = false, cwd = proc
   };
   const source = change.edited.filter(codeFile);
   const renames = (change.renames ?? []).filter(({ to }) => codeFile(to));
-  // Pattern and lint scopes depend on the path, so a rename can move unchanged content into them.
-  // Content already linted at its old path keeps its findings; anything newly lintable is checked.
-  const lintIgnored = lintIgnorePatterns(cwd);
-  const linted = (file) =>
-    codeFile(file) && !lintIgnored.some((pattern) => matchesGlob(file, pattern));
-  const patternSource = [...source, ...renames.map(({ to }) => to)];
-  const lintSource = [
-    ...source,
-    ...renames.filter(({ from, to }) => linted(to) && !linted(from)).map(({ to }) => to),
-  ];
+  // Renames change path-based policy; each checker decides applicability at the destination.
+  const candidates = [...source, ...renames.map(({ to }) => to)];
   select("format:files", ["--check", "--"], change.edited.filter(formattable));
   for (const file of change.edited.filter(
     (file) => file.endsWith(".sh") || file.startsWith("setup/hooks/"),
   )) {
     steps.push({ label: "shell syntax", command: "bash", args: ["-n", file] });
   }
-  select("check:patterns", [], patternSource);
-  select("lint:changed", ["--"], lintSource);
+  select("check:patterns", [], candidates);
+  select("lint:changed", ["--"], candidates);
   if (!checksOnly) {
     // Vitest supplies reverse import analysis for source changes. Component suites
     // cover non-source inputs, but this heuristic cannot qualify every dynamic dependency.

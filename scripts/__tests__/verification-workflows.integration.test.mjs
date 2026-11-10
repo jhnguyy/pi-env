@@ -33,8 +33,10 @@ const it = test.extend({
     const root = await mkdtemp(join(tmpdir(), "verification-"));
     try {
       await symlink(join(repo, "scripts"), join(root, "scripts"), "dir");
+      await symlink(join(repo, "setup"), join(root, "setup"), "dir");
       await symlink(join(repo, "node_modules"), join(root, "node_modules"), "dir");
       await copyFile(join(repo, ".oxlintrc-sensors.json"), join(root, ".oxlintrc-sensors.json"));
+      await copyFile(join(repo, ".eslintignore"), join(root, ".eslintignore"));
       await writeFile(
         join(root, "package.json"),
         JSON.stringify({ type: "module", engines: manifest.engines, scripts: manifest.scripts }),
@@ -52,7 +54,7 @@ const it = test.extend({
         Effect.runPromise(
           runProcess("nub", ["--no-env-file", "run", script, ...args], {
             cwd: root,
-            env,
+            env: { ...env, PI_ENV_REPO: root },
             timeoutMs: 40_000,
           }),
         );

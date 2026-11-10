@@ -33,9 +33,9 @@ nub run verify --list
 nub run verify
 ```
 
-Use `--base <ref>` to choose the comparison and `--checks-only` to omit tests. Routine verification runs formatting, shell syntax, source-pattern checks, native lint sensors, and related unit tests as selected by the delta; it does not launch Analyze. The commit hook runs checks only. Native lint still takes the heavyweight lock.
+Use `--base <ref>` to choose the comparison and `--checks-only` to omit tests. Routine verification runs formatting, shell syntax, source-pattern checks, native lint sensors, and related unit tests as selected by the delta; it does not launch Analyze. The commit hook runs checks only. Verification holds the heavyweight lock while running its selected checks.
 
-`nub run sensors` runs native lint sensors only. Select [Analyze investigations](docs/analyze.md#on-demand-investigations) explicitly when their findings would inform a decision; they are not prerequisites for routine verification.
+`nub run sensors` runs native lint sensors only. Run `nub run lint:type` for full lint qualification, including import resolution and type-aware rules. Select [Analyze investigations](docs/analyze.md#on-demand-investigations) explicitly when their findings would inform a decision; they are not prerequisites for routine verification.
 
 Local verification selects related unit tests. An integration-only edit may select no runnable unit tests, and generated artifacts or dynamic inputs can escape import-based selection. Choose qualification for the affected contracts:
 
@@ -49,7 +49,7 @@ Local verification selects related unit tests. An integration-only edit may sele
 | Isolated session-manager/tmux E2Es | `nub run test:e2e:session-manager:docker` |
 | Broader CI integration pipeline    | `nub run verify:full`                     |
 
-Run broad qualification only in an environment with adequate capacity. Supervision and serial execution do not guarantee aggregate memory containment. CI runs `verify:full`; select the canary and Docker qualification separately when relevant.
+CI runs `verify:full`; select the canary and Docker qualification separately when relevant.
 
 [Testing conventions](docs/conventions/testing.md) cover organization, fixtures, and qualification boundaries. [`package.json#scripts`](package.json) owns executable commands.
 

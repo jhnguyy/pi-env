@@ -1,6 +1,5 @@
 {
   "plugins": ["import", "typescript"],
-  "ignorePatterns": ["skills/**"],
   "jsPlugins": [
     {
       "name": "anti-slop",
