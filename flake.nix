@@ -9,7 +9,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     pi = {
-      url = "github:earendil-works/pi/v1.5.0";
+      url = "github:earendil-works/pi/v1.5.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
