@@ -1230,25 +1230,23 @@ describe("external analyzers and parsers", () => {
     }
   });
 
-  it("smoke tests the type-aware Oxlint backend", async () => {
+  it("reports floating promises through the native lint backend", async () => {
     const cwd = writeProject({ "src/a.ts": "async function f() { Promise.resolve(1); }\nf();" });
     symlinkSync(join(process.cwd(), "node_modules"), join(cwd, "node_modules"), "junction");
-    symlinkSync(join(process.cwd(), "tools"), join(cwd, "tools"), "junction");
     mkdirSync(join(cwd, "scripts"), { recursive: true });
     writeFileSync(
       join(cwd, "scripts/tool-node-run.sh"),
       readFileSync(join(process.cwd(), "scripts/tool-node-run.sh")),
       { mode: 0o755 },
     );
-    for (const config of [
-      ".eslintignore",
-      ".oxlintrc.json",
-      ".oxlintrc-base.json",
-      ".oxlintrc-syntax.json",
-      ".oxlintrc-imports.json",
-      ".oxlintrc-types.json",
-    ])
-      writeFileSync(join(cwd, config), readFileSync(join(process.cwd(), config)));
+    writeFileSync(
+      join(cwd, ".oxlintrc.json"),
+      JSON.stringify({
+        plugins: ["typescript"],
+        categories: { correctness: "off" },
+        rules: { "typescript/no-floating-promises": "error" },
+      }),
+    );
     const findings = await Effect.runPromise(
       eslintAnalyzerEffect(cwd, allScope, 256).pipe(Effect.provide(processServiceLayer())),
     );

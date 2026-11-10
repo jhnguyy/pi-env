@@ -35,7 +35,7 @@ nub run verify
 
 Use `--base <ref>` to choose the comparison and `--checks-only` to omit tests. Routine verification runs formatting, shell syntax, source-pattern checks, native lint sensors, and related unit tests as selected by the delta; it does not launch Analyze. The commit hook runs checks only. Verification holds the heavyweight lock while running its selected checks.
 
-`nub run sensors` runs native lint sensors only. Use [lint qualification](docs/lint.md) for the complete rule policy. Select [Analyze investigations](docs/analyze.md#on-demand-investigations) explicitly when their findings would inform a decision; they are not prerequisites for routine verification.
+`nub run sensors` runs native lint sensors only. Run `nub run lint:type` for full lint qualification, including import resolution and type-aware rules. Oxlint configuration owns shared lint policy; package scripts declare job-specific scope, and the existing supervisor manages process execution. Select [Analyze investigations](docs/analyze.md#on-demand-investigations) explicitly when their findings would inform a decision; they are not prerequisites for routine verification.
 
 Local verification selects related unit tests. An integration-only edit may select no runnable unit tests, and generated artifacts or dynamic inputs can escape import-based selection. Choose qualification for the affected contracts:
 
@@ -49,7 +49,7 @@ Local verification selects related unit tests. An integration-only edit may sele
 | Isolated session-manager/tmux E2Es | `nub run test:e2e:session-manager:docker` |
 | Broader CI integration pipeline    | `nub run verify:full`                     |
 
-Run broad qualification only in an environment with adequate capacity. Supervision and serial execution do not guarantee aggregate memory containment. CI runs `verify:full`; select the canary and Docker qualification separately when relevant.
+Use a dedicated job with an OS-enforced aggregate memory budget and timeout for broad or type-aware qualification; a small target can still load a large project. Establish that boundary before launch. Supervision, serial execution, and Node heap limits do not provide that containment. When a suitable boundary is unavailable, report static checks separately and leave expensive runtime qualification pending. CI runs `verify:full`; select the canary and Docker qualification separately when relevant.
 
 [Testing conventions](docs/conventions/testing.md) cover organization, fixtures, and qualification boundaries. [`package.json#scripts`](package.json) owns executable commands.
 

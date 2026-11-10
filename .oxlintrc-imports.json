@@ -1,9 +1,0 @@
-{
-  "extends": ["./.oxlintrc-base.json"],
-  "plugins": ["import"],
-  "rules": {
-    "import/no-duplicates": "error",
-    "import/no-empty-named-blocks": "error",
-    "import/no-self-import": "error"
-  }
-}
