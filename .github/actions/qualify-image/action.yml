@@ -37,9 +37,8 @@ runs:
         builder_group=$(awk -F: '$1 == "0" {print $3}' "/proc/$builder_pid/cgroup")
         [[ -n "$builder_group" && "$builder_group" != / ]]
         base_image=$(awk '$1 == "FROM" {print $2; exit}' Dockerfile)
-        docker buildx build --build-arg "BASE_IMAGE=$base_image" --no-cache --output=type=cacheonly - <<'DOCKERFILE' &
-        ARG BASE_IMAGE
-        FROM ${BASE_IMAGE}
+        docker buildx build --no-cache --output=type=cacheonly - <<DOCKERFILE &
+        FROM $base_image
         RUN sleep 5
         DOCKERFILE
         probe_pid=$!
@@ -48,8 +47,12 @@ runs:
           worker_pid=$(docker top buildx_buildkit_pi-env-qualification0 -eo pid,comm | awk '$2 == "sleep" {print $1; exit}')
           if [[ -n "$worker_pid" ]]; then
             worker_group=$(awk -F: '$1 == "0" {print $3}' "/proc/$worker_pid/cgroup")
-            [[ "$worker_group" == "$builder_group" || "$worker_group" == "$builder_group/"* ]]
-            echo "Build worker cgroup $worker_group inherits capped builder $builder_group."
+            echo "Builder cgroup: $builder_group"
+            echo "Build worker cgroup: $worker_group"
+            if [[ "$worker_group" != "$builder_group" && "$worker_group" != "$builder_group/"* ]]; then
+              echo "::error::Build worker escaped the builder's memory boundary."
+              exit 1
+            fi
             wait "$probe_pid"
             exit 0
           fi
