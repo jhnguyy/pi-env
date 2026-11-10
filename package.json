@@ -33,7 +33,7 @@
     "test:canary": "vitest --run --project real-workspace-canary",
     "test:e2e:session-manager:docker": "node scripts/dev.mjs test:docker",
     "typecheck": "effect-tsgo tsc --noEmit --project tsconfig.typecheck.json",
-    "lint:type": "scripts/tool-node-run.sh node_modules/@effect/tsgo/dist/effect-tsgo.cjs oxlint . --type-aware --threads=1 --deny-warnings --ignore-pattern 'tests/**' --ignore-pattern '**/dist/**'",
+    "lint:type": "effect-tsgo oxlint . --type-aware --threads=1 --deny-warnings --ignore-pattern 'tests/**' --ignore-pattern '**/dist/**'",
     "check:dependencies": "depcruise . --output-type err --progress none",
     "format:files": "scripts/tool-node-run.sh node_modules/oxfmt/bin/oxfmt --threads=1",
     "format": "nub run format:files 'scripts/*.{js,mjs}' '.dependency-cruiser*.{cjs,json}' '.ox*.json'",
