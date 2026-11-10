@@ -60,7 +60,9 @@ let
         ) "Nub flake must match package.json#packageManager";
         package;
       hunkPackage = hunk.packages.${pkgs.stdenv.hostPlatform.system}.hunk;
+      atuin = import ./atuin.nix { inherit pkgs; };
       toolsPackages = [
+        atuin
         hunkPackage
         pkgs.git
         pkgs.gh
@@ -97,7 +99,7 @@ let
         };
     in
     {
-      inherit node tmux toolchainPackages;
+      inherit node tmux atuin toolchainPackages;
       pi = piPackage;
       hunk = hunkPackage;
       tools = package "pi-env-tools" toolsPackages;
