@@ -12,6 +12,8 @@ Keep dependency links and generated bundles local to each checkout. Installation
 nub run --no-check worktree:init
 ```
 
+Global setup changes your personal environment and is not a worktree-initialization fallback. If initialization fails, diagnose the toolchain or report the blocker rather than sharing another checkout's dependencies.
+
 ## Develop
 
 Follow the [extension conventions](docs/conventions/extensions.md) for package registration, runtime boundaries, and shared services. Pi loads generated bundles, so build changes before exercising them in a Pi session:
