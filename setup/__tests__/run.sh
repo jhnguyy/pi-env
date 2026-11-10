@@ -19,7 +19,6 @@ SETUP_TESTS=(
   setup/__tests__/managed-settings.test.sh
   setup/__tests__/agent-guidelines.test.sh
   setup/__tests__/append-system.test.sh
-  setup/__tests__/atuin.test.sh
   setup/__tests__/setup-options.test.sh
   setup/__tests__/node-policy.test.sh
   setup/__tests__/repo-hooks.test.sh

@@ -6,7 +6,7 @@ For installation modes and commands, start with [README](../README.md#setup-choi
 
 Package resource selections name paths inside pi-env. Setup moves pi-env's selections in your user settings from `.pi/extensions/` and `.agents/skills/` to `extensions/` and `skills/`. Update any project settings that select pi-env resources by those older paths yourself.
 
-For opt-in history, output, and native Pi thread capture with a user-selected sync server, see [Atuin integration](atuin.md). It is separate from normal setup and account onboarding.
+For declarative history, output, and native Pi thread capture using native Home Manager options, see [Atuin capture](atuin.md). Hosts own the sync endpoint, storage policy, and account onboarding; normal setup does not enable capture.
 
 ## Explicit reset
 

@@ -40,6 +40,7 @@
       apps = nixpkgs.lib.mapAttrs (_: outputs: outputs.apps) perSystem;
       checks = nixpkgs.lib.mapAttrs (_: outputs: outputs.checks) perSystem;
       devShells = nixpkgs.lib.mapAttrs (_: outputs: outputs.devShells) perSystem;
+      lib.atuin.captureSettings = import ./nix/atuin-settings.nix;
       lib.themes.gruvbox = {
         palettes = builtins.mapAttrs (_: file: (builtins.fromJSON (builtins.readFile file)).vars) {
           dark = ./themes/gruvbox-dark.json;
