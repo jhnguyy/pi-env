@@ -35,6 +35,14 @@ runs:
         set -euo pipefail
         builder_pid=$(docker inspect buildx_buildkit_pi-env-qualification0 --format '{{.State.Pid}}')
         builder_group=$(awk -F: '$1 == "0" {print $3}' "/proc/$builder_pid/cgroup")
+        # BuildKit moves its daemon into an init leaf; find the capped ancestor.
+        while [[ -n "$builder_group" && "$builder_group" != / ]]; do
+          if [[ "$(cat "/sys/fs/cgroup$builder_group/memory.max")" == 4294967296 && \
+                "$(cat "/sys/fs/cgroup$builder_group/memory.swap.max")" == 0 ]]; then
+            break
+          fi
+          builder_group=${builder_group%/*}
+        done
         [[ -n "$builder_group" && "$builder_group" != / ]]
         base_image=$(awk '$1 == "FROM" {print $2; exit}' Dockerfile)
         docker buildx build --no-cache --output=type=cacheonly - <<DOCKERFILE &
