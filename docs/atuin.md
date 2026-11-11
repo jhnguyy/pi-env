@@ -11,6 +11,18 @@ the same user. History and thread text sync encrypted; terminal output stays loc
 omitted, including media: capture is context, not lossless archival. Continuing
 an existing session can capture its prior conversation.
 
+## Pi command hook
+
+Setup installs the reviewed upstream hook when `atuin` is on `PATH` and
+`extensions/atuin.ts` is absent from the agent directory. Existing files and
+symlinks remain untouched. For declarative ownership, use the packaged hook file
+in the Home Manager example below. Reload Pi after installation or updates;
+disable the hook through `pi config`.
+
+The hook records Bash attempts, not proof of execution: a later permission denial
+can appear as a failed history entry. Collector failures fail open but can delay
+a call by ten seconds per collector invocation.
+
 ## Home Manager
 
 For Home Manager 26.05, pass `inputs.pi-env` to the consuming module and replace
@@ -37,6 +49,7 @@ in
       }});
     }
   '';
+  home.file.".pi/agent/extensions/atuin.ts".source = "${atuin}/share/atuin/pi/atuin.ts";
   home.sessionVariables = environment;
   programs.atuin = {
     enable = true;
