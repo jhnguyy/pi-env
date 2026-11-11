@@ -36,6 +36,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     git \
     libevent-core-2.1-7 \
     tini \
+    util-linux \
   && npm install --global --omit=dev "$(node -p 'JSON.parse(require("fs").readFileSync("/tmp/pi-env-package.json")).packageManager.replace("nub@", "@nubjs/nub@")')" \
   && nub --version \
   && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \

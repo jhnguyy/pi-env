@@ -272,9 +272,8 @@ describe("LspClient", () => {
   });
 
   describe("shared connection and deterministic retry", () => {
-    effectIt.effect("shares stale recovery and spawns exactly once for concurrent requests", () =>
+    effectIt.effect("shares startup and spawns exactly once for concurrent requests", () =>
       Effect.gen(function* () {
-        writeFileSync(socketPath, "stale");
         const spawnStarted = yield* Deferred.make<void>();
         const child = createFakeChild();
         let spawnCalls = 0;
@@ -306,7 +305,7 @@ describe("LspClient", () => {
         yield* Effect.forEach(requests, Fiber.join, { discard: true });
 
         expect(spawnCalls).toBe(1);
-        expect(connectCalls).toBe(2);
+        expect(connectCalls).toBe(1);
         expect(serverConnections).toBe(1);
         expect(child.unref).toHaveBeenCalledTimes(1);
         expect(child.kill).not.toHaveBeenCalled();
@@ -455,7 +454,7 @@ describe("LspClient", () => {
       }),
     );
 
-    effectIt.effect("tears down the stale socket when the retry also times out", () =>
+    effectIt.effect("closes a timed-out connection without removing the server's socket", () =>
       Effect.gen(function* () {
         const firstWritten = yield* Deferred.make<void>();
         const retryWritten = yield* Deferred.make<void>();
@@ -487,7 +486,7 @@ describe("LspClient", () => {
         expect(client.pendingRequestCount).toBe(0);
         expect(client.activeRequestTimerCount).toBe(0);
         expect(serverSockets.size).toBe(0);
-        expect(existsSync(socketPath)).toBe(false);
+        expect(existsSync(socketPath)).toBe(true);
       }),
     );
   });

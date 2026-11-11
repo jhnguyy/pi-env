@@ -7,6 +7,7 @@ import { Effect } from "effect";
 import * as TempDir from "../../../src/testing/temp-dir";
 import { noopToolingTelemetryRuntime } from "../../../src/telemetry/tooling";
 import { LspDaemon } from "../daemon";
+import { LspClient } from "../client";
 import { parseResponse, serializeRequest, type DaemonResponse } from "../protocol";
 import { ControlledBackend } from "./controlled-backend";
 import { pathToUri } from "../utils";
@@ -108,6 +109,54 @@ describe("daemon socket lifecycle", () => {
     await once(socket, "connect");
     return socket;
   }
+
+  it("refuses an existing listener that does not use lifetime locking", async () => {
+    const existing = new Server((socket) => socket.end());
+    await new Promise<void>((resolve) => existing.listen(socketPath, resolve));
+    writeFileSync(pidPath, "legacy owner");
+    try {
+      await expect(daemon.start()).rejects.toThrow("already in use");
+      await daemon.shutdown();
+      expect(existing.listening).toBe(true);
+      expect(existsSync(socketPath)).toBe(true);
+      expect(readFileSync(pidPath, "utf8")).toBe("legacy owner");
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        existing.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
+  it("recovers stale artifacts only after acquiring ownership", async () => {
+    writeFileSync(socketPath, "stale socket");
+    writeFileSync(pidPath, "0");
+    await daemon.start();
+    const client = new LspClient(socketPath);
+    try {
+      expect(await client.call({ action: "status" })).toMatchObject({ running: true });
+    } finally {
+      client.close();
+    }
+  });
+
+  it("keeps one reachable owner across concurrent startup and loser shutdown", async () => {
+    const contender = new LspDaemon(socketPath, pidPath, 60_000, noopToolingTelemetryRuntime, {
+      backends: [],
+    });
+    const client = new LspClient(socketPath);
+    try {
+      const starts = await Promise.allSettled([daemon.start(), contender.start()]);
+      expect(starts.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+      const loser = starts[0].status === "rejected" ? daemon : contender;
+      await loser.shutdown();
+      expect(await client.call({ action: "status" })).toMatchObject({ running: true });
+      expect(existsSync(socketPath)).toBe(true);
+      expect(readFileSync(pidPath, "utf8")).toBe(String(process.pid));
+    } finally {
+      client.close();
+      await contender.shutdown();
+    }
+  });
 
   it("acknowledges stop and ends the protocol before blocked cleanup completes", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});

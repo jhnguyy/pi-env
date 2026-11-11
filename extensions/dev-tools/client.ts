@@ -4,7 +4,7 @@
  * Responsibilities:
  * - Connect to the daemon socket (auto-spawn if not running)
  * - Send JSON-over-newline requests, receive responses
- * - Handle ECONNREFUSED / ENOENT (stale socket → remove + respawn)
+ * - Handle ECONNREFUSED / ENOENT (daemon owner handles stale artifacts)
  * - Bound individual daemon requests, including cold language-server startup
  */
 
@@ -23,7 +23,6 @@ import {
   type DaemonResponse,
   type LspResult,
 } from "./protocol";
-import { removeStaleArtifact } from "./socket-artifacts";
 import { CLIENT_REQUEST_TIMEOUT_MS } from "./timeouts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -80,14 +79,12 @@ type ConnectionAttempt = {
 export interface LspClientDependencies {
   readonly socketExists: (socketPath: string) => boolean;
   readonly connect: (socketPath: string) => Socket;
-  readonly removeStaleArtifact: (socketPath: string) => boolean;
   readonly spawnDaemon: (nodeBinary: string, daemonScript: string) => ChildProcess;
 }
 
 const defaultDependencies: LspClientDependencies = {
   socketExists: existsSync,
   connect,
-  removeStaleArtifact,
   spawnDaemon: (nodeBinary, daemonScript) =>
     spawn(nodeBinary, [daemonScript], {
       detached: true,
@@ -358,7 +355,6 @@ export class LspClient {
       yield* client.assertOpenEffect();
       if (connected) return;
 
-      client.dependencies.removeStaleArtifact(client.socketPath);
       yield* client.spawnDaemonEffect();
       yield* client.assertOpenEffect();
 
@@ -573,7 +569,6 @@ export class LspClient {
   }
 
   private discardStaleSocket(error: LspClientError): void {
-    this.dependencies.removeStaleArtifact(this.socketPath);
     if (this.socket) this.teardownSocket(this.socket, error, true);
   }
 
