@@ -1,14 +1,13 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { PiEvent } from "../_shared/agent-tools";
-import { getMergedBranches } from "../_shared/git";
-
-import { buildStatusLine, buildStatusLineThemed, getGitStatus, isGitMutating, invalidateGitCache, resetGitFailureCache } from "./context";
 import {
-  cleanupHandoffs,
-  detectMergedBranch,
-  isGitPull,
-} from "./handoff-cleanup";
+  buildStatusLine,
+  buildStatusLineThemed,
+  isGitMutating,
+  invalidateGitCache,
+  resetGitFailureCache,
+} from "./context";
 import type { TodoStore } from "./store";
 import type { WorkTrackerConfig } from "./types";
 
@@ -17,7 +16,7 @@ const SessionStartReason = {
   Resume: "resume",
   Fork: "fork",
 } as const;
-type SessionStartReason = typeof SessionStartReason[keyof typeof SessionStartReason];
+type SessionStartReason = (typeof SessionStartReason)[keyof typeof SessionStartReason];
 
 const REPLACEMENT_SESSION_REASONS = new Set<string>([
   SessionStartReason.New,
@@ -33,57 +32,21 @@ function refreshWorkTrackerSlots(
 ): void {
   if (!ctx.hasUI) return;
   ctx.ui.setWidget("session-todos", store.renderWidget(ctx.ui.theme), { placement: "aboveEditor" });
-  const statusLine = options.includeGitStatus ? buildStatusLineThemed(config, ctx.ui.theme) : undefined;
-  ctx.ui.setWidget("work-tracker", statusLine ? [statusLine] : undefined, { placement: "belowEditor" });
+  const statusLine = options.includeGitStatus
+    ? buildStatusLineThemed(config, ctx.ui.theme)
+    : undefined;
+  ctx.ui.setWidget("work-tracker", statusLine ? [statusLine] : undefined, {
+    placement: "belowEditor",
+  });
 }
 
-export function registerHooks(
-  pi: ExtensionAPI,
-  config: WorkTrackerConfig,
-  store: TodoStore,
-): void {
-  pi.on(PiEvent.ToolResult, async (event, ctx) => {
+export function registerHooks(pi: ExtensionAPI, config: WorkTrackerConfig, store: TodoStore): void {
+  pi.on(PiEvent.ToolResult, async (event) => {
     if (event.toolName !== "bash" || event.isError) return;
 
     const command = (event.input as Record<string, string>).command ?? "";
 
     if (isGitMutating(command)) invalidateGitCache();
-    const output = (event.content as Array<{ type: string; text?: string }>)
-      .filter((c) => c.type === "text")
-      .map((c) => c.text ?? "")
-      .join("");
-
-    const mergedBranch = detectMergedBranch(command, output);
-    if (mergedBranch) {
-      const deleted = cleanupHandoffs(mergedBranch);
-      if (deleted.length > 0) {
-        ctx.ui.notify(
-          `🧹 Merged ${mergedBranch} — deleted ${deleted.length} handoff(s): ${deleted.join(", ")}`,
-          "info",
-        );
-      }
-      return;
-    }
-
-    if (!isGitPull(command)) return;
-
-    const allMerged = new Set<string>();
-    for (const repoPath of config.guardedRepos) {
-      const { branch: current } = getGitStatus(repoPath);
-      if (!current || !config.protectedBranches.includes(current)) continue;
-      for (const branch of getMergedBranches(repoPath)) {
-        if (!config.protectedBranches.includes(branch)) allMerged.add(branch);
-      }
-    }
-
-    if (allMerged.size === 0) return;
-    const deleted = cleanupHandoffs(allMerged);
-    if (deleted.length > 0) {
-      ctx.ui.notify(
-        `🧹 Pulled main — deleted ${deleted.length} handoff(s): ${deleted.join(", ")}`,
-        "info",
-      );
-    }
   });
 
   pi.on(PiEvent.SessionStart, async (event, ctx) => {

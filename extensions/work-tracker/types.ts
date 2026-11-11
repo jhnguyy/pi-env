@@ -1,7 +1,7 @@
 export interface WorkTrackerConfig {
-  /** Repositories included in worktree, dirty-state, and handoff cleanup checks. */
+  /** Repositories included in worktree and dirty-state checks. */
   guardedRepos: string[];
-  /** Base branches whose merged topic branches can trigger handoff cleanup. */
+  /** Legacy configuration retained for compatibility; no handoff cleanup runs. */
   protectedBranches: string[];
 }
 

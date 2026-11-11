@@ -37,12 +37,3 @@ export function getDirtyCount(cwd: string): number {
   if (status !== 0 || !stdout) return 0;
   return stdout.trim().split("\n").filter(Boolean).length;
 }
-
-export function getMergedBranches(cwd: string): string[] {
-  const { status, stdout } = gitSync(cwd, ["branch", "--merged", "HEAD"]);
-  if (status !== 0 || !stdout) return [];
-  return stdout
-    .split("\n")
-    .map((b) => b.replace(/^\*?\s+/, "").trim())
-    .filter(Boolean);
-}
