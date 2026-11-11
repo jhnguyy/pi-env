@@ -63,16 +63,10 @@ environment to that service. Change managed TOML through Nix, not `atuin config 
 
 ## Agent guidance
 
-After configuring Atuin MCP, opt in to the [history-use guidance](../setup/templates/atuin.md)
-when running setup:
-
-```bash
-PI_ENV_ATUIN_GUIDANCE=1 ./setup.sh --nix-managed
-```
-
-Use your usual setup mode. This adds guidance only; it does not configure or check
-MCP connectivity. Repeat the opt-in on subsequent setup runs to retain it; running
-setup without it removes the managed Atuin guidance. Reload Pi afterward.
+Setup includes the [history-use guidance](../setup/templates/atuin.md) when `atuin`
+is executable on `PATH`, and removes it on a later run if absent. This checks
+installation only; it does not configure or verify MCP connectivity. Reload Pi
+after setup to load the updated guidance.
 
 ## MCP ownership
 

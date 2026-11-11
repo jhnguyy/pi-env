@@ -29,7 +29,10 @@ export function configurePiEffect(ctx) {
   return Effect.gen(function* () {
     section("Pi");
     yield* registerSettingsEffect(ctx);
-    for (const { path, blocks } of managedFiles(ctx.env.PI_ENV_ATUIN_GUIDANCE === "1")) {
+    const atuin = yield* ctx.command("/bin/sh", ["-c", "command -v atuin >/dev/null 2>&1"], {
+      check: false,
+    });
+    for (const { path, blocks } of managedFiles(atuin.status === 0)) {
       const target = join(ctx.agentDir, path);
       yield* managedFileEffect(
         target,

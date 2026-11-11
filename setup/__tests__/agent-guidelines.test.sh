@@ -8,7 +8,8 @@ START_MARKER='<!-- pi-env:agent-guidelines:start -->'
 END_MARKER='<!-- pi-env:agent-guidelines:end -->'
 
 configure_pi() {
-  PI_ENV_ATUIN_GUIDANCE="${2:-0}" run_configure pi "$ROOT" "$1" >/dev/null
+  mkdir -p "$1/test-bin"
+  PI_ENV_TEST_PATH="$1/test-bin" run_configure pi "$ROOT" "$1" >/dev/null
 }
 
 assert_managed_content() {
@@ -75,7 +76,7 @@ test_agent_guidelines_are_reconciled_idempotently() {
 
 }
 
-test_atuin_guidance_is_opt_in_and_reversible() {
+test_atuin_guidance_follows_executable_availability() {
   local tmp home agents_file before after
   tmp="$(with_temp_dir)"
   home="$tmp/home"
@@ -86,7 +87,14 @@ test_atuin_guidance_is_opt_in_and_reversible() {
   configure_pi "$home"
   assert_file_count "$agents_file" 'Search Atuin' 0
 
-  configure_pi "$home" 1
+  make_executable "$home/test-bin/atuin" "#!/bin/sh
+  : > '$home/atuin-was-executed'"
+  chmod -x "$home/test-bin/atuin"
+  configure_pi "$home"
+  assert_file_count "$agents_file" 'Search Atuin' 0
+  chmod +x "$home/test-bin/atuin"
+  configure_pi "$home"
+  [ ! -e "$home/atuin-was-executed" ] || fail 'setup must not execute Atuin'
   run_node -e '
     const fs = require("node:fs");
     const [target, source] = process.argv.slice(1);
@@ -98,10 +106,11 @@ test_atuin_guidance_is_opt_in_and_reversible() {
   assert_file_contains "$agents_file" 'Keep this local rule.'
   printf '%s\n' '' 'Keep this trailing rule.' >>"$agents_file"
   before="$(sha256sum "$agents_file")"
-  configure_pi "$home" 1
+  configure_pi "$home"
   after="$(sha256sum "$agents_file")"
-  assert_eq "$after" "$before" 'enabled Atuin guidance must reconcile idempotently'
+  assert_eq "$after" "$before" 'available Atuin guidance must reconcile idempotently'
 
+  rm "$home/test-bin/atuin"
   configure_pi "$home"
   assert_file_count "$agents_file" 'Search Atuin' 0
   assert_managed_content "$agents_file"
@@ -111,6 +120,6 @@ test_atuin_guidance_is_opt_in_and_reversible() {
 
 test_agent_guidelines_are_created_from_the_managed_source
 test_agent_guidelines_are_reconciled_idempotently
-test_atuin_guidance_is_opt_in_and_reversible
+test_atuin_guidance_follows_executable_availability
 
 echo "agent guideline tests passed"
