@@ -65,10 +65,5 @@ shell, daemon and MCP environment. If using Home Manager's daemon service instea
 of autostart, disable `settings.daemon.autostart` and explicitly pass the same
 environment to that service. Change managed TOML through Nix, not `atuin config set`.
 
-## MCP ownership
-
-Registration does not replace user `mcp.json`; `pi mcp add/remove` still manages
-other servers. A same-name file entry overrides the declaration; removing it
-reveals the declaration again. Inspect registered servers with `/mcp` inside Pi:
-shell-level `pi mcp list` does not load extensions. In-session preference edits
-are temporary unless persisted in the declaration or a user override.
+For registration precedence, configuration, and server management, use
+[Pi's MCP documentation](https://pi.dev/docs/mcp).
