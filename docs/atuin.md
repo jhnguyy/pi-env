@@ -11,13 +11,8 @@ the same user. History and thread text sync encrypted; terminal output stays loc
 omitted, including media: capture is context, not lossless archival. Continuing
 an existing session can capture its prior conversation.
 
-## Pi command hook
-
-Update declarative hooks through Home Manager; update a setup-created hook with
-`atuin hook install pi`. Disable either through `pi config`.
-
-History can include permission-denied attempts, not just executed commands.
-Collector failures can delay execution before failing open.
+See [hook setup](../setup/atuin-hook.mjs) for command-hook provisioning and
+[host integration](setup.md#declarative-host-integration) for declarative activation.
 
 ## Home Manager
 
