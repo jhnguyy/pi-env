@@ -1,6 +1,7 @@
-import { join } from "node:path";
+import { accessSync, constants, statSync } from "node:fs";
+import { delimiter, join, resolve } from "node:path";
 import { Effect } from "effect";
-import { managedFileEffect } from "./file-ops.mjs";
+import { fileEffect, managedFileEffect } from "./file-ops.mjs";
 import { changed, displayPath, ok, section } from "./report.mjs";
 
 const ManagedFiles = Object.freeze([
@@ -41,11 +42,18 @@ export function configurePiEffect(ctx) {
 }
 
 function commandAvailableEffect(ctx, command) {
-  return ctx
-    .command("/bin/sh", ["-c", 'command -v "$1" >/dev/null 2>&1', "sh", command], {
-      check: false,
-    })
-    .pipe(Effect.map((result) => result.status === 0));
+  return fileEffect("find executable", command, () =>
+    (ctx.env.PATH?.split(delimiter) ?? []).some((directory) => {
+      const candidate = resolve(ctx.repo, directory, command);
+      try {
+        accessSync(candidate, constants.X_OK);
+        return statSync(candidate).isFile();
+      } catch (error) {
+        if (["ENOENT", "ENOTDIR", "EACCES"].includes(error.code)) return false;
+        throw error;
+      }
+    }),
+  );
 }
 
 function registerSettingsEffect(ctx) {
