@@ -4,6 +4,8 @@ import * as TempDir from "../../../src/testing/temp-dir";
 import type {
   ExtensionAPI,
   ExtensionContext,
+  ExtensionCommandContext,
+  AgentEndEvent,
   SessionInfoChangedEvent,
   SessionShutdownEvent,
   SessionStartEvent,
@@ -15,7 +17,7 @@ import { registerSessionManager, type SessionManagerOptions } from "../index.js"
 import { createFileSessionCatalog } from "../storage.js";
 import { executor } from "./tmux-executor.js";
 
-type Event = SessionStartEvent | SessionInfoChangedEvent | SessionShutdownEvent;
+type Event = SessionStartEvent | SessionInfoChangedEvent | SessionShutdownEvent | AgentEndEvent;
 type EditorFactory = NonNullable<ReturnType<ExtensionContext["ui"]["getEditorComponent"]>>;
 type Editor = ReturnType<EditorFactory> & {
   actionHandlers: Map<string, () => void>;
@@ -44,6 +46,7 @@ export async function createExtensionFixture() {
   const catalog = createFileSessionCatalog(join(root, "agent"));
   const tmux = executor({}, {}, join(root, "tmux.sock"));
   const handlers = new Map<string, unknown>();
+  const commands = new Map<string, Parameters<ExtensionAPI["registerCommand"]>[1]>();
   const pending = new Set<Promise<void>>();
   const eventFailures: unknown[] = [];
   const releases = new Set<() => void>();
@@ -87,21 +90,17 @@ export async function createExtensionFixture() {
         handlers.delete(event);
       };
     },
-    registerCommand: () => {},
+    registerCommand: (name, command) => {
+      commands.set(name, command);
+    },
     getSessionName: () => native.session.name,
     setSessionName: (name: string) => {
       native.session.name = name.trim() || undefined;
     },
   };
   let registered = false;
-  function emit(event: Event, session = native.session): Promise<void> {
-    if (event.type === "session_start") native.session = session;
-    if (event.type === "session_info_changed") session.name = event.name;
-    const registeredHandler = handlers.get(event.type);
-    if (typeof registeredHandler !== "function")
-      throw new Error(`No registered handler for ${event.type}`);
-    const handler = registeredHandler as (event: Event, ctx: ExtensionContext) => unknown;
-    const ctx: NativeContext = {
+  function context(session = native.session): NativeContext {
+    return {
       mode: "tui",
       cwd,
       sessionManager: {
@@ -123,7 +122,17 @@ export async function createExtensionFixture() {
         native.shutdownCalls += 1;
       },
     };
-    const task = Promise.resolve(handler(event, ctx as ExtensionContext)).then(() => {});
+  }
+  function emit(event: Event, session = native.session): Promise<void> {
+    if (event.type === "session_start") native.session = session;
+    if (event.type === "session_info_changed") session.name = event.name;
+    const registeredHandler = handlers.get(event.type);
+    if (typeof registeredHandler !== "function")
+      throw new Error(`No registered handler for ${event.type}`);
+    const handler = registeredHandler as (event: Event, ctx: ExtensionContext) => unknown;
+    const task = Promise.resolve(handler(event, context(session) as ExtensionContext)).then(
+      () => {},
+    );
     pending.add(task);
     void task.then(
       () => pending.delete(task),
@@ -160,6 +169,11 @@ export async function createExtensionFixture() {
     notificationDelivered,
     tmux,
     emit,
+    command: async (name: string) => {
+      const command = commands.get(name);
+      if (!command) throw new Error(`No registered command ${name}`);
+      await command.handler("", context() as ExtensionCommandContext);
+    },
     readManifest: () => Effect.runPromise(catalog.read(cwd)),
     register: (options: Partial<SessionManagerOptions> = {}) => {
       if (registered) throw new Error("Session manager already registered");

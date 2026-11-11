@@ -534,13 +534,18 @@ describe("session-manager in real tmux", () => {
             rejected: true,
             ownerPreservedWhileLive: true,
             tagPreservedWhileLive: true,
-            renameRejected: true,
             namePreserved: true,
+            manifestPreserved: true,
             preservedAfterExit: true,
           },
           async () => {
             respawn();
             const incumbent = await bound();
+            const catalog = createFileSessionCatalog(join(root, "agent"));
+            const incumbentRecord = (
+              await Effect.runPromise(catalog.read(join(root, "work")))
+            )?.sessions.find((record) => record.sessionId === incumbent.sessionId);
+            expect(incumbentRecord?.desiredState).toBe("open");
             contender = tmux(
               "split-window",
               "-d",
@@ -566,10 +571,9 @@ describe("session-manager in real tmux", () => {
             tmux("send-keys", "-t", contender, "Enter");
             await until(
               contenderScreen,
-              (text) => text.includes("Tmux window rename failed"),
-              "same-ID contender rename rejection",
+              (text) => text.includes("Session name set: contender-label"),
+              "same-ID contender native rename completion",
             );
-            const renameRejected = contenderScreen().includes("WindowBindingConflict");
             const namePreserved = format("#{window_name}") === incumbent.name;
             const pid = tmux("display-message", "-p", "-t", contender, "#{pane_pid}");
             process.kill(positivePid(pid), "SIGTERM");
@@ -578,12 +582,16 @@ describe("session-manager in real tmux", () => {
               (dead) => dead === "1",
               "contender shutdown",
             );
+            const after = (
+              await Effect.runPromise(catalog.read(join(root, "work")))
+            )?.sessions.find((record) => record.sessionId === incumbent.sessionId);
             return {
               rejected,
               ownerPreservedWhileLive,
               tagPreservedWhileLive,
-              renameRejected,
               namePreserved,
+              manifestPreserved:
+                after?.desiredState === "open" && after.name === incumbentRecord?.name,
               preservedAfterExit:
                 option("@pi_session_pid") === incumbent.ownerPid &&
                 option("@pi_session_id") === incumbent.sessionId,

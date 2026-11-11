@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { writeFile } from "node:fs/promises";
 import type { EditorComponent } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -10,6 +11,45 @@ import { createExtensionFixture } from "./extension-fixture.js";
 
 // These workflows use real file commits and kernel locks while scripting only the tmux boundary.
 describe("session-manager extension", () => {
+  it.each(["startup", "adoption"] as const)(
+    "does not grant incumbent management authority after rejected %s",
+    async (route) => {
+      const f = await createExtensionFixture();
+      f.register();
+      await f.emit({ type: "session_start", reason: "startup" });
+      await f.emit({ type: "session_shutdown", reason: "quit" });
+      f.tmux.tags["@2"] = f.native.session.id;
+      f.tmux.owners["@2"] = String(process.pid);
+      const originalEditor = f.native.editorFactory;
+      const materialize = async (name: string) => {
+        f.native.session.file = join(f.root, name);
+        await writeFile(
+          f.native.session.file,
+          `${JSON.stringify({ type: "session", version: 3, id: f.native.session.id, cwd: f.cwd })}\n`,
+        );
+      };
+      if (route === "adoption") {
+        await materialize("adopted.jsonl");
+        await f.command("session-adopt");
+      } else await f.emit({ type: "session_start", reason: "startup" });
+      expect(f.native.notifications.at(-1)?.message).toContain("DuplicateWindowBinding");
+      const before = (await f.readManifest())!.sessions[0];
+
+      await f.emit({ type: "session_info_changed", name: "contender-label" });
+      await materialize("contender.jsonl");
+      await f.emit({ type: "agent_end", messages: [] });
+      f.renderEditor().onCtrlD();
+      await f.ctrlDCompleted;
+      await f.command("session-done");
+      await f.emit({ type: "session_shutdown", reason: "quit" });
+
+      expect((await f.readManifest())!.sessions[0]).toEqual(before);
+      expect(f.tmux.tags["@2"]).toBe(f.native.session.id);
+      expect(f.tmux.owners["@2"]).toBe(String(process.pid));
+      expect(f.native.editorFactory).toBe(originalEditor);
+    },
+  );
+
   it("rejects a partial managed launch before catalog or host effects", async () => {
     const f = await createExtensionFixture();
     const binding = f.pauseNextBind();

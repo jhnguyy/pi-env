@@ -349,11 +349,8 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     startGeneration: number,
     error: unknown,
   ): Promise<void> => {
-    if (startGeneration !== generation) {
-      await releaseInterruptedBinding(error);
-      return;
-    }
-    if (error instanceof SessionBindingFailed) activateManagedSession(ctx, error.session);
+    await releaseInterruptedBinding(error);
+    if (startGeneration !== generation) return;
     notifyError(ctx, "Session enrollment", error);
     if (launch.kind === "restored-work") ctx.shutdown();
   };
@@ -510,10 +507,7 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
           "info",
         );
       } catch (error) {
-        if (error instanceof SessionBindingFailed) {
-          managed = error.session;
-          if (!installedFactory && ctx.mode === "tui") installEditor(ctx, false);
-        }
+        await releaseInterruptedBinding(error);
         notifyError(ctx, "Session adoption", error);
       }
     },
