@@ -13,15 +13,11 @@ an existing session can capture its prior conversation.
 
 ## Pi command hook
 
-Setup installs the reviewed upstream hook when `atuin` is on `PATH` and
-`extensions/atuin.ts` is absent from the agent directory. Existing files and
-symlinks remain untouched. For declarative ownership, use the packaged hook file
-in the Home Manager example below. Reload Pi after installation or updates;
-disable the hook through `pi config`.
+Update declarative hooks through Home Manager; update a setup-created hook with
+`atuin hook install pi`. Disable either through `pi config`.
 
-The hook records Bash attempts, not proof of execution: a later permission denial
-can appear as a failed history entry. Collector failures fail open but can delay
-a call by ten seconds per collector invocation.
+History can include permission-denied attempts, not just executed commands.
+Collector failures can delay execution before failing open.
 
 ## Home Manager
 

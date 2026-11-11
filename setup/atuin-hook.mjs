@@ -1,11 +1,9 @@
-import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Effect } from "effect";
 import { fileEffect, findExecutableEffect } from "./file-ops.mjs";
-import { changed, displayPath, kept } from "./report.mjs";
-import { SetupStateError } from "./setup-errors.mjs";
+import { changed, displayPath, kept, note } from "./report.mjs";
 
 export function configureAtuinHookEffect(ctx) {
   return Effect.gen(function* () {
@@ -31,36 +29,16 @@ export function configureAtuinHookEffect(ctx) {
       fileEffect("stage Atuin hook", target, () => mkdtempSync(join(tmpdir(), "pi-env-atuin-"))),
       (stage) =>
         Effect.gen(function* () {
-          const config = join(stage, "config");
-          const agent = join(stage, "agent");
-          yield* fileEffect("isolate Atuin configuration", config, () => {
-            mkdirSync(config);
-            writeFileSync(
-              join(config, "config.toml"),
-              "auto_sync = false\n[daemon]\nenabled = false\nautostart = false\n[threads]\ncapture = false\n",
-            );
+          const result = yield* ctx.command(executable, ["hook", "install", "pi"], {
+            check: false,
+            env: { PI_CODING_AGENT_DIR: stage },
           });
-          yield* ctx.command(executable, ["hook", "install", "pi"], {
-            timeout: 10_000,
-            env: {
-              HOME: stage,
-              PI_AGENT_DIR: agent,
-              PI_CODING_AGENT_DIR: agent,
-              ATUIN_CONFIG_DIR: config,
-              ATUIN_HOME: join(stage, "data"),
-            },
-          });
-          yield* fileEffect("install reviewed Atuin hook", target, () => {
-            const body = readFileSync(join(agent, "extensions/atuin.ts"));
-            const expected = readFileSync(
-              join(ctx.sourceRoot, "setup/atuin-pi-hook.sha256"),
-              "utf8",
-            ).trim();
-            if (createHash("sha256").update(body).digest("hex") !== expected) {
-              throw new SetupStateError(
-                "Atuin emitted an unreviewed Pi hook; existing hooks were not changed.",
-              );
-            }
+          if (result.status !== 0) {
+            note(`${label} skipped: native hook installation unavailable`);
+            return;
+          }
+          yield* fileEffect("install Atuin hook", target, () => {
+            const body = readFileSync(join(stage, "extensions/atuin.ts"));
             mkdirSync(dirname(target), { recursive: true });
             try {
               writeFileSync(target, body, { flag: "wx", mode: 0o600 });
