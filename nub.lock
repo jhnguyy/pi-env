@@ -145,8 +145,6 @@ importers:
 
   extensions/general: {}
 
-  extensions/introspection: {}
-
   extensions/notes:
     dependencies:
       '@earendil-works/pi-ai':
