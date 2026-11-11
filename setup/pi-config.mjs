@@ -3,29 +3,40 @@ import { Effect } from "effect";
 import { managedFileEffect } from "./file-ops.mjs";
 import { changed, displayPath, ok, section } from "./report.mjs";
 
-const ManagedFiles = Object.freeze([
+const managedFiles = (atuinGuidance) => [
   {
     path: "APPEND_SYSTEM.md",
     blocks: [
-      { name: "append-system", source: "setup/templates/APPEND_SYSTEM.md" },
-      { name: "correspondence", source: "setup/templates/correspondence.md" },
+      { name: "append-system", sources: ["setup/templates/APPEND_SYSTEM.md"] },
+      { name: "correspondence", sources: ["setup/templates/correspondence.md"] },
     ],
   },
   {
     path: "AGENTS.md",
-    blocks: [{ name: "agent-guidelines", source: "setup/templates/AGENTS.md" }],
+    blocks: [
+      {
+        name: "agent-guidelines",
+        sources: [
+          "setup/templates/AGENTS.md",
+          ...(atuinGuidance ? ["setup/templates/atuin.md"] : []),
+        ],
+      },
+    ],
   },
-]);
+];
 
 export function configurePiEffect(ctx) {
   return Effect.gen(function* () {
     section("Pi");
     yield* registerSettingsEffect(ctx);
-    for (const { path, blocks } of ManagedFiles) {
+    for (const { path, blocks } of managedFiles(ctx.env.PI_ENV_ATUIN_GUIDANCE === "1")) {
       const target = join(ctx.agentDir, path);
       yield* managedFileEffect(
         target,
-        blocks.map(({ name, source }) => ({ name, source: join(ctx.sourceRoot, source) })),
+        blocks.map(({ name, sources }) => ({
+          name,
+          sources: sources.map((source) => join(ctx.sourceRoot, source)),
+        })),
         displayPath(target, ctx.home),
       );
     }

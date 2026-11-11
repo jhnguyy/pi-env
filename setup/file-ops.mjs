@@ -36,7 +36,10 @@ export function managedFileEffect(path, blocks, label) {
     const current = exists ? readFileSync(path, "utf8") : "";
     const { next, changed: names } = reconcileNamedBlocks(
       current,
-      blocks.map(({ name, source }) => ({ name, body: readFileSync(source, "utf8") })),
+      blocks.map(({ name, sources }) => ({
+        name,
+        body: sources.map((source) => readFileSync(source, "utf8").trim()).join("\n\n"),
+      })),
     );
     if (names.length === 0) {
       ok(`${label} (managed blocks current)`);
