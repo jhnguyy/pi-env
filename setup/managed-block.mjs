@@ -1,10 +1,10 @@
 export function reconcileManagedBlock(current, managed, startMarker, endMarker) {
-  const body = managed.trim();
-  const block = `${startMarker}\n${body}\n${endMarker}`;
+  const block = managed === null ? "" : `${startMarker}\n${managed.trim()}\n${endMarker}`;
   const start = current.indexOf(startMarker);
   const end = current.indexOf(endMarker);
 
   if (start === -1 && end === -1) {
+    if (managed === null) return current;
     if (current.length === 0) return `${block}\n`;
     const separator = current.endsWith("\n\n") ? "" : current.endsWith("\n") ? "\n" : "\n\n";
     return `${current}${separator}${block}\n`;
