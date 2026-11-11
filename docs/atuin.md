@@ -61,13 +61,6 @@ shell, daemon and MCP environment. If using Home Manager's daemon service instea
 of autostart, disable `settings.daemon.autostart` and explicitly pass the same
 environment to that service. Change managed TOML through Nix, not `atuin config set`.
 
-## Agent guidance
-
-Setup includes the [history-use guidance](../setup/templates/atuin.md) when `atuin`
-is executable on `PATH`, and removes it on a later run if absent. This checks
-installation only; it does not configure or verify MCP connectivity. Reload Pi
-after setup to load the updated guidance.
-
 ## MCP ownership
 
 Registration does not replace user `mcp.json`; `pi mcp add/remove` still manages

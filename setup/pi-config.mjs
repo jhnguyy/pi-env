@@ -3,47 +3,49 @@ import { Effect } from "effect";
 import { managedFileEffect } from "./file-ops.mjs";
 import { changed, displayPath, ok, section } from "./report.mjs";
 
-const managedFiles = (atuinGuidance) => [
+const ManagedFiles = Object.freeze([
   {
     path: "APPEND_SYSTEM.md",
     blocks: [
-      { name: "append-system", sources: ["setup/templates/APPEND_SYSTEM.md"] },
-      { name: "correspondence", sources: ["setup/templates/correspondence.md"] },
+      { name: "append-system", source: "setup/templates/APPEND_SYSTEM.md" },
+      { name: "correspondence", source: "setup/templates/correspondence.md" },
     ],
   },
   {
     path: "AGENTS.md",
     blocks: [
+      { name: "agent-guidelines", source: "setup/templates/AGENTS.md" },
       {
-        name: "agent-guidelines",
-        sources: [
-          "setup/templates/AGENTS.md",
-          ...(atuinGuidance ? ["setup/templates/atuin.md"] : []),
-        ],
+        name: "atuin-guidelines",
+        source: "setup/templates/atuin.md",
+        requiresCommand: "atuin",
       },
     ],
   },
-];
+]);
 
 export function configurePiEffect(ctx) {
   return Effect.gen(function* () {
     section("Pi");
     yield* registerSettingsEffect(ctx);
-    const atuin = yield* ctx.command("/bin/sh", ["-c", "command -v atuin >/dev/null 2>&1"], {
-      check: false,
-    });
-    for (const { path, blocks } of managedFiles(atuin.status === 0)) {
+    for (const { path, blocks } of ManagedFiles) {
+      const resolved = [];
+      for (const { name, source, requiresCommand } of blocks) {
+        const enabled = !requiresCommand || (yield* commandAvailableEffect(ctx, requiresCommand));
+        resolved.push({ name, source: join(ctx.sourceRoot, source), enabled });
+      }
       const target = join(ctx.agentDir, path);
-      yield* managedFileEffect(
-        target,
-        blocks.map(({ name, sources }) => ({
-          name,
-          sources: sources.map((source) => join(ctx.sourceRoot, source)),
-        })),
-        displayPath(target, ctx.home),
-      );
+      yield* managedFileEffect(target, resolved, displayPath(target, ctx.home));
     }
   });
+}
+
+function commandAvailableEffect(ctx, command) {
+  return ctx
+    .command("/bin/sh", ["-c", 'command -v "$1" >/dev/null 2>&1', "sh", command], {
+      check: false,
+    })
+    .pipe(Effect.map((result) => result.status === 0));
 }
 
 function registerSettingsEffect(ctx) {
