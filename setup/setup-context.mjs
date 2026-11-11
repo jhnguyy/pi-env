@@ -24,7 +24,7 @@ function makeCommands(repo, env) {
       try: () => {
         const result = spawnSync(executable, args, {
           cwd: options.cwd ?? repo,
-          env,
+          env: { ...env, ...options.env },
           stdio: options.stdio ?? "pipe",
           encoding: "utf8",
         });

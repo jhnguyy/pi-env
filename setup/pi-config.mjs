@@ -1,7 +1,7 @@
-import { accessSync, constants, statSync } from "node:fs";
-import { delimiter, join, resolve } from "node:path";
+import { join } from "node:path";
 import { Effect } from "effect";
-import { fileEffect, managedFileEffect } from "./file-ops.mjs";
+import { configureAtuinHookEffect } from "./atuin-hook.mjs";
+import { findExecutableEffect, managedFileEffect } from "./file-ops.mjs";
 import { changed, displayPath, ok, section } from "./report.mjs";
 
 const ManagedFiles = Object.freeze([
@@ -32,28 +32,15 @@ export function configurePiEffect(ctx) {
     for (const { path, blocks } of ManagedFiles) {
       const resolved = [];
       for (const { name, source, requiresCommand } of blocks) {
-        const enabled = !requiresCommand || (yield* commandAvailableEffect(ctx, requiresCommand));
+        const enabled =
+          !requiresCommand || Boolean(yield* findExecutableEffect(ctx, requiresCommand));
         resolved.push({ name, source: join(ctx.sourceRoot, source), enabled });
       }
       const target = join(ctx.agentDir, path);
       yield* managedFileEffect(target, resolved, displayPath(target, ctx.home));
     }
+    yield* configureAtuinHookEffect(ctx);
   });
-}
-
-function commandAvailableEffect(ctx, command) {
-  return fileEffect("find executable", command, () =>
-    (ctx.env.PATH?.split(delimiter) ?? []).some((directory) => {
-      const candidate = resolve(ctx.repo, directory, command);
-      try {
-        accessSync(candidate, constants.X_OK);
-        return statSync(candidate).isFile();
-      } catch (error) {
-        if (["ENOENT", "ENOTDIR", "EACCES"].includes(error.code)) return false;
-        throw error;
-      }
-    }),
-  );
 }
 
 function registerSettingsEffect(ctx) {

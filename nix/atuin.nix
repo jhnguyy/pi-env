@@ -39,6 +39,12 @@ pkgs.stdenvNoCC.mkDerivation {
     runHook preInstall
     install -Dm755 atuin "$out/bin/atuin"
     install -Dm644 LICENSE "$out/share/licenses/atuin/LICENSE"
+    env HOME="$TMPDIR/atuin-home" \
+      ATUIN_CONFIG_DIR="$TMPDIR/atuin-config" \
+      ATUIN_HOME="$TMPDIR/atuin-data" \
+      PI_CODING_AGENT_DIR="$TMPDIR/atuin-agent" \
+      "$out/bin/atuin" hook install pi
+    install -Dm644 "$TMPDIR/atuin-agent/extensions/atuin.ts" "$out/share/atuin/pi/atuin.ts"
     runHook postInstall
   '';
   meta = {
