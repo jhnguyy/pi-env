@@ -12,10 +12,15 @@ Personal defaults and explicit reset behavior are described in [setup](setup.md)
 
 Setup [reports](../setup/environment.sh) missing recommended tools, including Ghostty on GUI hosts, but does not install them. The [Ghostty config](../ghostty/config) selects its font. See [themes](themes.md#terminals) for terminal installation.
 
-## tmux session ownership
+## Local process ownership
 
-Session-manager binding mutations require `flock` on `PATH` (util-linux on Linux,
+Session-manager binding mutations and dev-tools daemon ownership/restarts require
+`flock` on `PATH` (util-linux on Linux,
 [discoteq/flock](https://github.com/discoteq/flock) on macOS). The Nix toolchain
 supplies the cross-platform implementation; the container supplies util-linux.
 Portable setups must supply it themselves. See
-[binding locks](session-manager.md#binding-locks) for lock behavior.
+[binding locks](session-manager.md#binding-locks) for session-manager behavior.
+The daemon holds its lock until shutdown releases its listener, backends, and artifacts.
+Clients never remove daemon artifacts, and install-time restart uses the shutdown
+protocol rather than signaling a PID read from a file. Busy or incomplete cleanup
+fails closed; it does not force a takeover.
