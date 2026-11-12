@@ -17,3 +17,11 @@ Setup [reports](../setup/environment.sh) missing recommended tools, including Gh
 Interactive Pi sessions inside tmux can label their windows through
 [session-manager](session-manager.md). Naming does not require a coordinator or a
 workspace manifest.
+
+## Dev-tools runtime
+
+Portable dev-tools setups require `flock` on `PATH`; Nix and container setups include it.
+
+Set `PI_ENV_LSP_DIR` to an existing absolute runtime directory to isolate a daemon
+from other checkouts or deployments. Leave it unset to share the default daemon
+for your user in `/tmp`.

@@ -11,16 +11,11 @@
  *   - handlers.ts  — LSP action handlers (diagnostics, hover, definition, etc.)
  *   - daemon-request.ts — parsed-request routing, execution, and telemetry
  *
- * Lifecycle:
- *   - Spawned by client.ts if socket not available
- *   - Writes PID to /tmp/pi-lsp-$UID.pid
- *   - Listens on /tmp/pi-lsp-$UID.sock
- *   - Auto-shuts down after inactivity (default: 10 min, PI_LSP_IDLE_TIMEOUT_MS overrides)
- *
  * Run directly after build: node dist/daemon.js
  */
 
-import { createServer, type Socket, type Server } from "node:net";
+import { connect, createServer, type Socket, type Server } from "node:net";
+import { acquireFileLock } from "../../src/process/file-lock";
 import { unlinkSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -31,7 +26,8 @@ import { BACKEND_CONFIGS } from "./backend-configs";
 import { FileCache } from "./file-cache";
 import type { HandlerBackend } from "./handlers";
 import { createDaemonRequestExecutor } from "./daemon-request";
-import { parseRequest, serializeResponse, errorResponse, SOCKET_PATH, PID_PATH } from "./protocol";
+import { parseRequest, serializeResponse, errorResponse } from "./protocol";
+import { daemonPaths } from "./paths.js";
 import type { DaemonRequest, DaemonResponse } from "./protocol";
 import { removeStaleArtifact } from "./socket-artifacts";
 import {
@@ -66,6 +62,26 @@ interface OwnedResources {
   listener: Server | null;
   pidPath: string | null;
   socketPath: string | null;
+  unlock: (() => Promise<void>) | null;
+}
+
+function socketIsListening(path: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(path);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("error", (error: NodeJS.ErrnoException) => {
+      socket.destroy();
+      if (error.code === "ENOENT" || error.code === "ECONNREFUSED") resolve(false);
+      else reject(error);
+    });
+    socket.setTimeout(1_000, () => {
+      socket.destroy();
+      reject(new Error("Daemon socket probe timed out"));
+    });
+  });
 }
 
 // ─── LspDaemon ───────────────────────────────────────────────────────────────
@@ -79,7 +95,12 @@ export class LspDaemon {
   private acquisition: Promise<void> | null = null;
   private startup: Promise<void> | null = null;
   private stopping: Promise<void> | null = null;
-  private readonly owned: OwnedResources = { listener: null, pidPath: null, socketPath: null };
+  private readonly owned: OwnedResources = {
+    listener: null,
+    pidPath: null,
+    socketPath: null,
+    unlock: null,
+  };
   private readonly tasks = new Set<Promise<void>>();
 
   /** Timestamp of the activity *before* the current request. Used for accurate idle reporting. */
@@ -88,8 +109,8 @@ export class LspDaemon {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
-    private socketPath = SOCKET_PATH,
-    private pidPath = PID_PATH,
+    private socketPath = daemonPaths().socketPath,
+    private pidPath = daemonPaths().pidPath,
     private idleTimeoutMs = lspIdleTimeoutMs(),
     private readonly telemetry: ToolingTelemetryRuntime = noopToolingTelemetryRuntime,
     deps?: LspDaemonDeps,
@@ -139,6 +160,11 @@ export class LspDaemon {
   }
 
   private async acquire(): Promise<void> {
+    if (this.stopping) throw new Error("Daemon startup stopped");
+    this.owned.unlock = await Effect.runPromise(acquireFileLock(`${this.socketPath}.lock`, 0));
+    // Also refuse a live daemon from before lifetime locking was introduced.
+    if (await socketIsListening(this.socketPath))
+      throw new Error("Daemon socket is already in use");
     if (this.stopping) throw new Error("Daemon startup stopped");
     writeFileSync(this.pidPath, String(process.pid), "utf8");
     this.owned.pidPath = this.pidPath;
@@ -206,6 +232,7 @@ export class LspDaemon {
     }
     await attempt(() => Effect.runPromise(this.telemetry.disposeEffect));
     await listenerClosed;
+    if (this.owned.unlock) await attempt(this.owned.unlock);
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) throw new AggregateError(errors, "Daemon cleanup failed");
   }

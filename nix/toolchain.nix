@@ -67,6 +67,7 @@ let
         nubPackage
         pkgs.coreutils
         pkgs.findutils
+        pkgs.flock
         pkgs.gawk
         pkgs.gh
         pkgs.git

@@ -7,12 +7,6 @@
 
 import type { DevToolsAction } from "./action-contract";
 
-// ─── Socket / PID paths ───────────────────────────────────────────────────────
-
-const UID = process.getuid?.() ?? 1000;
-export const SOCKET_PATH = `/tmp/pi-lsp-${UID}.sock`;
-export const PID_PATH = `/tmp/pi-lsp-${UID}.pid`;
-
 // ─── Actions ────────────────────────────────────────────────────────────────
 
 export type PublicLspAction = `${DevToolsAction}`;
