@@ -1,7 +1,6 @@
 import { join } from "node:path";
 import { Effect } from "effect";
-import { configureAtuinHookEffect } from "./atuin-hook.mjs";
-import { findExecutableEffect, managedFileEffect } from "./file-ops.mjs";
+import { managedFileEffect } from "./file-ops.mjs";
 import { changed, displayPath, ok, section } from "./report.mjs";
 
 const ManagedFiles = Object.freeze([
@@ -16,11 +15,8 @@ const ManagedFiles = Object.freeze([
     path: "AGENTS.md",
     blocks: [
       { name: "agent-guidelines", source: "setup/templates/AGENTS.md" },
-      {
-        name: "atuin-guidelines",
-        source: "setup/templates/atuin.md",
-        requiresCommand: "atuin",
-      },
+      // Retired: removes guidance from earlier setups now that pi-env.atuin.enable owns it.
+      { name: "atuin-guidelines" },
     ],
   },
 ]);
@@ -30,16 +26,14 @@ export function configurePiEffect(ctx) {
     section("Pi");
     yield* registerSettingsEffect(ctx);
     for (const { path, blocks } of ManagedFiles) {
-      const resolved = [];
-      for (const { name, source, requiresCommand } of blocks) {
-        const enabled =
-          !requiresCommand || Boolean(yield* findExecutableEffect(ctx, requiresCommand));
-        resolved.push({ name, source: join(ctx.sourceRoot, source), enabled });
-      }
+      const resolved = blocks.map(({ name, source }) => ({
+        name,
+        source: source && join(ctx.sourceRoot, source),
+        enabled: Boolean(source),
+      }));
       const target = join(ctx.agentDir, path);
       yield* managedFileEffect(target, resolved, displayPath(target, ctx.home));
     }
-    yield* configureAtuinHookEffect(ctx);
   });
 }
 

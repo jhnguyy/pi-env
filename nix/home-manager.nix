@@ -50,6 +50,13 @@ in
       description = "Enable Home Manager tmux and source the pi-env tmux config.";
     };
 
+    atuin.enable = lib.mkEnableOption ''
+      Atuin with Pi integration: the pinned client, shell integration, capture
+      defaults, the native Pi command hook, an `atuin` MCP server, and agent
+      guidance. Capture records shell history, terminal output, and agent
+      threads; MCP results can reach the model provider. See docs/atuin.md
+    '';
+
     ghostty.enable = lib.mkOption {
       type = lib.types.bool;
       default = false;
@@ -138,6 +145,43 @@ in
           '';
         };
       })
+
+      (lib.mkIf cfg.atuin.enable (
+        let
+          environment = {
+            ATUIN_CONFIG_DIR = "${config.xdg.configHome}/atuin";
+            ATUIN_HOME = "${config.xdg.dataHome}/atuin";
+            PI_CODING_AGENT_DIR = "${config.home.homeDirectory}/.pi/agent";
+          };
+        in
+        {
+          home.file.".pi/agent/extensions/atuin.ts".source =
+            "${packages.atuin}/share/atuin/pi/atuin.ts";
+          home.file.".pi/agent/extensions/pi-env-atuin.js".text = ''
+            export default function (pi) {
+              pi.registerMcpServer("atuin", ${
+                builtins.toJSON {
+                  args = [ "mcp" ];
+                  command = lib.getExe config.programs.atuin.package;
+                  env = environment;
+                }
+              });
+              pi.on("before_agent_start", (event) => {
+                event.systemPromptOptions.sections["historical-context"] = ${
+                  builtins.toJSON (builtins.readFile ./atuin-guidance.md)
+                };
+              });
+            }
+          '';
+          home.sessionVariables = environment;
+          programs.atuin = {
+            enable = true;
+            package = lib.mkDefault packages.atuin;
+            flags = lib.mkDefault [ "--disable-ai" ];
+            settings = lib.mapAttrsRecursive (_: lib.mkDefault) (import ./atuin-settings.nix);
+          };
+        }
+      ))
 
       (lib.mkIf cfg.ghostty.enable {
         home.file = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin {

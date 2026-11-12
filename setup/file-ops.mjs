@@ -1,17 +1,14 @@
 import {
-  accessSync,
-  constants,
   existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   readlinkSync,
   symlinkSync,
-  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { delimiter, dirname, resolve } from "node:path";
+import { dirname } from "node:path";
 import { Effect } from "effect";
 import { reconcileNamedBlocks } from "./managed-block.mjs";
 import { changed, kept, ok, relinked } from "./report.mjs";
@@ -30,21 +27,6 @@ export function fileEffect(operation, path, thunk) {
   return Effect.try({
     try: thunk,
     catch: (cause) => (isSetupError(cause) ? cause : new SetupFileError(operation, path, cause)),
-  });
-}
-
-export function findExecutableEffect(ctx, command) {
-  return fileEffect("find executable", command, () => {
-    for (const directory of ctx.env.PATH?.split(delimiter) ?? []) {
-      const candidate = resolve(ctx.repo, directory, command);
-      try {
-        accessSync(candidate, constants.X_OK);
-        if (statSync(candidate).isFile()) return candidate;
-      } catch (error) {
-        if (!["ENOENT", "ENOTDIR", "EACCES"].includes(error.code)) throw error;
-      }
-    }
-    return undefined;
   });
 }
 
