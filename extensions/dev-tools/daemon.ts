@@ -11,12 +11,6 @@
  *   - handlers.ts  — LSP action handlers (diagnostics, hover, definition, etc.)
  *   - daemon-request.ts — parsed-request routing, execution, and telemetry
  *
- * Lifecycle:
- *   - Spawned by client.ts if socket not available
- *   - Writes PID to /tmp/pi-lsp-$UID.pid
- *   - Listens on /tmp/pi-lsp-$UID.sock
- *   - Auto-shuts down after inactivity (default: 10 min, PI_LSP_IDLE_TIMEOUT_MS overrides)
- *
  * Run directly after build: node dist/daemon.js
  */
 
@@ -32,7 +26,8 @@ import { BACKEND_CONFIGS } from "./backend-configs";
 import { FileCache } from "./file-cache";
 import type { HandlerBackend } from "./handlers";
 import { createDaemonRequestExecutor } from "./daemon-request";
-import { parseRequest, serializeResponse, errorResponse, SOCKET_PATH, PID_PATH } from "./protocol";
+import { parseRequest, serializeResponse, errorResponse } from "./protocol";
+import { daemonPaths } from "./paths.js";
 import type { DaemonRequest, DaemonResponse } from "./protocol";
 import { removeStaleArtifact } from "./socket-artifacts";
 import {
@@ -114,8 +109,8 @@ export class LspDaemon {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
-    private socketPath = SOCKET_PATH,
-    private pidPath = PID_PATH,
+    private socketPath = daemonPaths().socketPath,
+    private pidPath = daemonPaths().pidPath,
     private idleTimeoutMs = lspIdleTimeoutMs(),
     private readonly telemetry: ToolingTelemetryRuntime = noopToolingTelemetryRuntime,
     deps?: LspDaemonDeps,

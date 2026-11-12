@@ -22,7 +22,11 @@ Follow the [extension conventions](docs/conventions/extensions.md) for package r
 nub run build
 ```
 
-Reload or restart that session afterward. For activated Nix artifacts, follow [host integration](docs/setup.md#declarative-host-integration) instead of assuming a checkout build replaces them.
+Reload or restart that session afterward. For dev-tools, run
+`nub run dev-tools:restart` in the same environment as Pi; the next request starts
+the updated daemon.
+
+For activated Nix artifacts, follow [host integration](docs/setup.md#declarative-host-integration) instead of assuming a checkout build replaces them.
 
 Keep tests and setup experiments isolated from personal homes, agent directories, settings, and sessions. Use the [dependency-update skill](skills/dependency-update/SKILL.md) when changing dependencies and the [documentation conventions](docs/conventions/documentation.md) when changing documentation.
 

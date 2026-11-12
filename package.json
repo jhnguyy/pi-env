@@ -21,6 +21,7 @@
   "scripts": {
     "check:node": "node scripts/check-node-version.mjs",
     "build": "node scripts/build-extensions.mjs",
+    "dev-tools:restart": "node scripts/restart-lsp-daemon.mjs",
     "clean:extensions": "node scripts/clean-extension-artifacts.mjs",
     "worktree:init": "bash scripts/init-worktree.sh",
     "test": "vitest --run",

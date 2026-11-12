@@ -18,13 +18,11 @@ Interactive Pi sessions inside tmux can label their windows through
 [session-manager](session-manager.md). Naming does not require a coordinator or a
 workspace manifest.
 
-## Dev-tools daemon ownership
+## Dev-tools runtime
 
-The dev-tools daemon requires `flock` on `PATH` for lifetime ownership of its socket
-and PID artifacts. Nix supplies the cross-platform implementation; the container
-supplies util-linux. Portable setups must supply `flock` themselves.
+Dev-tools requires `flock` on `PATH`. It is included in the Nix and container
+toolchains; portable setups must supply it.
 
-The daemon holds its lock until shutdown releases its listener, backends, and
-artifacts. Clients never remove daemon artifacts, and install-time restart uses
-the shutdown protocol rather than signaling a PID read from a file. Busy or
-incomplete cleanup fails closed; it does not force a takeover.
+Set `PI_ENV_LSP_DIR` to an existing absolute runtime directory to isolate a daemon
+from other checkouts or deployments. Leave it unset to share the default daemon
+for your user in `/tmp`.

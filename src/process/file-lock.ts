@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { Data, Effect } from "effect";
+import { resolveNodeCommand } from "./platform";
 
 class FileLockFailure extends Data.TaggedError("FileLockFailure")<{ message: string }> {}
 
@@ -16,7 +17,7 @@ export const acquireFileLock = (path: string, waitSeconds = 5) =>
             "--timeout",
             String(waitSeconds),
             path,
-            process.execPath,
+            resolveNodeCommand(),
             "-e",
             'process.stdin.resume(); process.stdin.on("end", () => process.exit(0)); process.stdout.write("ready");',
           ],

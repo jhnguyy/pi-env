@@ -18,12 +18,12 @@ import { resolveNodeCommand } from "../../src/process/platform.js";
 import {
   parseResponse,
   serializeRequest,
-  SOCKET_PATH,
   type DaemonRequest,
   type DaemonResponse,
   type LspResult,
 } from "./protocol";
 import { CLIENT_REQUEST_TIMEOUT_MS } from "./timeouts";
+import { daemonPaths } from "./paths.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -88,7 +88,7 @@ const defaultDependencies: LspClientDependencies = {
   spawnDaemon: (nodeBinary, daemonScript) =>
     spawn(nodeBinary, [daemonScript], {
       detached: true,
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "inherit"],
       env: { ...process.env },
     }),
 };
@@ -134,7 +134,7 @@ export class LspClient {
   private readonly dependencies: LspClientDependencies;
 
   constructor(
-    private socketPath = SOCKET_PATH,
+    private socketPath = daemonPaths().socketPath,
     private daemonScript = resolve(__dirname, "daemon.js"),
     dependencies: Partial<LspClientDependencies> = {},
   ) {
