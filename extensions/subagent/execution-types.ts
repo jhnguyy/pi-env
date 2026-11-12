@@ -8,6 +8,7 @@ import type * as Control from "./control";
 import type * as Types from "./types";
 import type * as Usage from "./usage";
 import type * as ChildTypes from "./child-types";
+import type { ChildUsageSnapshot } from "./usage-accounting";
 
 export type SubagentParentContext = Pick<
   ExtensionContext,
@@ -18,7 +19,7 @@ export interface RunSubagentOptions {
   onUpdate?: AgentToolUpdateCallback<Types.SubagentDetails>;
   onUsage?: (details: Types.SubagentDetails) => void;
   signal?: AbortSignal;
-  ledger?: Usage.SubagentUsageLedger;
+  onChildUsage?: (snapshot: ChildUsageSnapshot) => void;
   runId?: string;
   env?: Readonly<Record<string, string | undefined>>;
   telemetryExporter?: SpanExporter;

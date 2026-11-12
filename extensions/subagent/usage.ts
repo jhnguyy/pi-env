@@ -1,5 +1,5 @@
-import type { AgentEvent, AgentMessage, AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AgentEvent, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { SessionStats } from "@earendil-works/pi-coding-agent";
 
 import type * as Types from "./types";
 
@@ -11,6 +11,19 @@ export const zeroUsage = (): Types.UsageStats => ({
   cost: 0,
   turns: 0,
 });
+
+export function usageFromSessionStats(
+  stats: Pick<SessionStats, "tokens" | "cost" | "assistantMessages">,
+): Types.UsageStats {
+  return {
+    input: stats.tokens.input,
+    output: stats.tokens.output,
+    cacheRead: stats.tokens.cacheRead,
+    cacheWrite: stats.tokens.cacheWrite,
+    cost: stats.cost,
+    turns: stats.assistantMessages,
+  };
+}
 
 export function addUsage(
   target: Types.UsageStats,
@@ -35,19 +48,6 @@ export function formatUsageCompact(usage: Types.UsageStats): string {
   return `${usage.turns}t in:${usage.input} out:${usage.output} cache:${usage.cacheRead}/${usage.cacheWrite}${cost}`;
 }
 
-export function getFinalOutput(messages: AgentMessage[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i] as any;
-    if (msg.role !== "assistant") continue;
-    const textParts: string[] = [];
-    for (const part of msg.content) {
-      if (part.type === "text") textParts.push(part.text as string);
-    }
-    return textParts.join("\n");
-  }
-  return "";
-}
-
 export interface SubagentRunMetadata {
   name: string;
   task: string;
@@ -61,8 +61,9 @@ export interface SubagentRunMetadata {
 }
 
 export class SubagentRunAccumulator {
-  readonly usage = zeroUsage();
-  readonly transcript: AgentMessage[] = [];
+  private lastOutput = "";
+  // Run-local diagnostics, unlike cumulative native session usage (which includes follow-ups).
+  assistantTurnCount = 0;
   toolCallCount = 0;
   lastModelId: string | undefined;
   lastStopReason: string | undefined;
@@ -72,21 +73,34 @@ export class SubagentRunAccumulator {
   constructor(
     private readonly metadata: SubagentRunMetadata,
     private readonly hasReachedLimit: (turns: number) => boolean,
+    private readonly readUsage: () => Types.UsageStats,
   ) {}
 
-  acceptEvent(event: AgentEvent): AgentMessage | undefined {
-    if (event.type === "message_end") {
-      const message = event.message;
-      this.transcript.push(message);
-      this.acceptMessageUsage(message);
-      return message;
-    }
-    if (event.type === "tool_execution_start") this.toolCallCount++;
-    return undefined;
+  get usage(): Types.UsageStats {
+    return this.readUsage();
   }
 
-  output(messages: AgentMessage[] = this.transcript): string {
-    return getFinalOutput(messages);
+  acceptEvent(event: AgentEvent): void {
+    if (event.type === "message_end") {
+      const message = event.message;
+      if (message.role === "assistant") {
+        this.assistantTurnCount++;
+        this.lastOutput = message.content
+          .flatMap((part) => (part.type === "text" ? [part.text] : []))
+          .join("\n");
+        this.lastModelId = message.model;
+        this.lastStopReason = message.stopReason;
+        this.lastErrorMessage = message.errorMessage;
+        this.turnLimitExceeded =
+          this.hasReachedLimit(this.assistantTurnCount) && message.stopReason !== "stop";
+      }
+      return;
+    }
+    if (event.type === "tool_execution_start") this.toolCallCount++;
+  }
+
+  output(): string {
+    return this.lastOutput;
   }
 
   progressResult(): AgentToolResult<Types.SubagentDetails> {
@@ -102,8 +116,8 @@ export class SubagentRunAccumulator {
     return { content: [{ type: "text", text }], details: this.details(this.output(), true) };
   }
 
-  success(finalMessages: AgentMessage[]): AgentToolResult<Types.SubagentDetails> {
-    const output = this.output(finalMessages.length > 0 ? finalMessages : this.transcript);
+  success(): AgentToolResult<Types.SubagentDetails> {
+    const output = this.output();
     const isError =
       this.lastStopReason === "error" ||
       this.lastStopReason === "aborted" ||
@@ -127,34 +141,6 @@ export class SubagentRunAccumulator {
       turnLimitExceeded: this.turnLimitExceeded,
     };
   }
-
-  private acceptMessageUsage(message: AgentMessage): void {
-    if (message.role === "toolResult") {
-      addUsage(this.usage, {
-        input: message.usage?.input ?? 0,
-        output: message.usage?.output ?? 0,
-        cacheRead: message.usage?.cacheRead ?? 0,
-        cacheWrite: message.usage?.cacheWrite ?? 0,
-        cost: message.usage?.cost?.total ?? 0,
-      });
-      return;
-    }
-    const msg = message as AssistantMessage;
-    if (msg.role !== "assistant") return;
-    addUsage(this.usage, {
-      turns: 1,
-      input: msg.usage?.input ?? 0,
-      output: msg.usage?.output ?? 0,
-      cacheRead: msg.usage?.cacheRead ?? 0,
-      cacheWrite: msg.usage?.cacheWrite ?? 0,
-      cost: msg.usage?.cost?.total ?? 0,
-    });
-    this.lastModelId ??= msg.model;
-    this.lastStopReason = msg.stopReason;
-    this.lastErrorMessage = msg.errorMessage;
-    const completed = msg.stopReason === "stop";
-    this.turnLimitExceeded = this.hasReachedLimit(this.usage.turns) && !completed;
-  }
 }
 
 export const SubagentUsageMode = {
@@ -162,55 +148,3 @@ export const SubagentUsageMode = {
   Async: "async",
 } as const;
 export type SubagentUsageMode = (typeof SubagentUsageMode)[keyof typeof SubagentUsageMode];
-
-export interface SubagentUsageRecord {
-  id: string;
-  name: string;
-  mode: SubagentUsageMode;
-  usage: Types.UsageStats;
-}
-
-export function recordSubagentResult(
-  ledger: SubagentUsageLedger | undefined,
-  id: string | undefined,
-  mode: SubagentUsageMode,
-  result: AgentToolResult<Types.SubagentDetails>,
-): AgentToolResult<Types.SubagentDetails> {
-  if (ledger && id) ledger.record(id, mode, result.details);
-  return result;
-}
-
-export class SubagentUsageLedger {
-  private readonly records = new Map<string, SubagentUsageRecord>();
-
-  record(id: string, mode: SubagentUsageMode, details: Types.SubagentDetails): void {
-    if (this.records.has(id)) return;
-    this.records.set(id, {
-      id,
-      mode,
-      name: details.name,
-      usage: cloneUsage(details.usage),
-    });
-  }
-
-  clear(): void {
-    this.records.clear();
-  }
-
-  rows(): SubagentUsageRecord[] {
-    return [...this.records.values()];
-  }
-
-  total(): Types.UsageStats {
-    return this.rows().reduce((total, record) => addUsage(total, record.usage), zeroUsage());
-  }
-
-  render(): string {
-    const rows = this.rows();
-    if (rows.length === 0) return "No subagent usage recorded.";
-    return [
-      ...rows.map((row) => `${row.mode} ${row.id} ${row.name}: ${formatUsageCompact(row.usage)}`),
-      `total: ${formatUsageCompact(this.total())}`,
-    ].join("\n");
-  }
-}

@@ -1,3 +1,5 @@
+import type { SubagentUsageSummary } from "./usage-accounting";
+
 export const SubagentJobStatus = {
   Queued: "queued",
   Running: "running",
@@ -41,6 +43,7 @@ export interface UsageStats {
 }
 
 export interface SubagentJobRenderDetails {
+  usageSummary?: SubagentUsageSummary;
   jobId?: string;
   status?: SubagentJobRenderStatus;
   name?: string;

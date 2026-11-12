@@ -328,9 +328,6 @@ export default function(pi) {
         }),
       );
     expect(asyncChild.inspect().initialResult).toEqual(initial);
-    expect(supervisor.usage().turns).toBeGreaterThan(
-      initial.usage.turns + syncChild.inspect().initialResult!.usage.turns,
-    );
     editorInputs.push("next gated turn");
     browser!.handleInput("p");
     await vi.waitFor(() => expect(existsSync(join(root, "entered-2"))).toBe(true));

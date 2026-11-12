@@ -146,6 +146,7 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
       ({
         id,
         summary: () => ({ id }),
+        checkpointUsage: () => {},
         close: async () => {},
       }) as any;
 

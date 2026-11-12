@@ -44,7 +44,6 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
   private teardown?: Promise<void>;
   private unsubscribeChanges?: () => void;
   private readonly pendingInputs = new Set<Promise<ChildTypes.NativeInputResult>>();
-  private updateUsage?: (usage: Types.SubagentDetails["usage"]) => void;
 
   constructor(
     private readonly run: ExecutionTypes.ResolvedSubagentRun,
@@ -55,6 +54,22 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
   ) {
     this.id = manager.getSessionId();
     this.runId = options.runId ?? randomUUID();
+    this.publishUsage();
+  }
+
+  private publishUsage(): void {
+    this.options.onChildUsage?.({
+      childSessionId: this.id,
+      name: this.run.name,
+      sessionFile: this.manager.getSessionFile(),
+      usage: this.session
+        ? Usage.usageFromSessionStats(this.session.getSessionStats())
+        : Usage.zeroUsage(),
+    });
+  }
+
+  checkpointUsage(): void {
+    this.publishUsage();
   }
 
   private context<T>(operation: () => T): T {
@@ -199,8 +214,17 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
           this.supervisor.notifyChildrenChanged();
           break;
       }
+      if (
+        event.type === "tool_execution_start" ||
+        event.type === "turn_end" ||
+        event.type === "compaction_end" ||
+        event.type === "agent_settled"
+      ) {
+        this.publishUsage();
+      }
     });
     await this.session.bindExtensions({ mode: "print" });
+    this.publishUsage();
   }
 
   private checkSelection(): void {
@@ -265,7 +289,6 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
         signal,
       });
       this.activeSignal = lease.signal;
-      this.updateUsage = (usage) => lease.updateUsage(usage);
       const abort = () => {
         void this.context(() => this.session?.abort());
       };
@@ -293,9 +316,12 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
         await Promise.allSettled([...this.pendingInputs]);
         await this.session?.waitForIdle();
         lease.signal.removeEventListener("abort", abort);
-        this.updateUsage = undefined;
         this.activeSignal = undefined;
-        lease.release();
+        try {
+          this.publishUsage();
+        } finally {
+          lease.release();
+        }
       }
     });
     this.operation = pending;
@@ -328,21 +354,22 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
             sessionName: this.manager.getSessionName() ?? this.run.name,
           },
           (turns) => this.run.maxTurns !== undefined && turns >= this.run.maxTurns,
+          () => Usage.usageFromSessionStats(session.getSessionStats()),
         );
         const unsubscribe = session.subscribe((event) => {
           if (event.type === "message_end" || event.type === "tool_execution_start")
             accumulator.acceptEvent(event);
-          if (event.type === "message_end") {
-            this.updateUsage?.(accumulator.usage);
-            this.options.onUsage?.(accumulator.progressResult().details);
+          if (event.type === "turn_end" || event.type === "tool_execution_start") {
+            const progress = accumulator.progressResult();
+            this.options.onUsage?.(progress.details);
+            if (event.type === "turn_end") this.options.onUpdate?.(progress);
           }
-          if (event.type === "turn_end") this.options.onUpdate?.(accumulator.progressResult());
         });
         const finishTurn = session.agent.finishTurn;
         if (this.run.maxTurns !== undefined)
           session.agent.finishTurn = async (turn, signal) => {
             const decision = await finishTurn?.(turn, signal);
-            return accumulator.usage.turns >= this.run.maxTurns!
+            return accumulator.assistantTurnCount >= this.run.maxTurns!
               ? { action: "end" }
               : (decision ?? undefined);
           };
@@ -357,7 +384,7 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
           await session.waitForIdle();
           result = this.activeSignal?.aborted
             ? accumulator.failure(new Error("Child cancelled."), true)
-            : accumulator.success([...session.messages]);
+            : accumulator.success();
         } catch (error) {
           await session.abort();
           result = accumulator.failure(
@@ -416,37 +443,16 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
     }
     return this.schedule(false, async () => {
       this.record(text, mode, ChildTypes.InputProvenance.Human);
-      const usage = new Usage.SubagentRunAccumulator(
-        {
-          name: this.run.name,
-          task: text,
-          toolNames: this.session!.getActiveToolNames(),
-          modelOverride: this.run.modelOverride,
-          cwd: this.run.cwd,
-          sessionId: this.id,
-          sessionName: this.manager.getSessionName() ?? this.run.name,
-        },
-        () => false,
-      );
-      const unsubscribe = this.session!.subscribe((event) => {
-        if (event.type !== "message_end") return;
-        usage.acceptEvent(event);
-        this.updateUsage?.(usage.usage);
-      });
       let outcome: ChildTypes.NativeInputResult["outcome"] = ChildTypes.NativeInputOutcome.Started;
-      try {
-        await this.session!.prompt(text, {
-          source: "interactive",
-          preflightResult: (value) => {
-            outcome = value;
-          },
-        });
-        await this.session!.waitForIdle();
-        this.finishSelection();
-        return { outcome };
-      } finally {
-        unsubscribe();
-      }
+      await this.session!.prompt(text, {
+        source: "interactive",
+        preflightResult: (value) => {
+          outcome = value;
+        },
+      });
+      await this.session!.waitForIdle();
+      this.finishSelection();
+      return { outcome };
     });
   }
 
@@ -481,12 +487,16 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
           await startupRunner.emit({ type: "session_shutdown", reason: "quit" });
         }
       } finally {
-        startupRunner?.invalidate();
-        this.startupServices = undefined;
-        this.unsubscribeChanges?.();
-        this.unsubscribeChanges = undefined;
-        this.session?.dispose();
-        this.setState(ChildTypes.NativeChildState.Closed);
+        try {
+          this.publishUsage();
+        } finally {
+          startupRunner?.invalidate();
+          this.startupServices = undefined;
+          this.unsubscribeChanges?.();
+          this.unsubscribeChanges = undefined;
+          this.session?.dispose();
+          this.setState(ChildTypes.NativeChildState.Closed);
+        }
       }
     }));
   }

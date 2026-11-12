@@ -39,12 +39,12 @@ it.each(["on", "only"] as const)(
       repeat: "nub run build && nub run test:workflows",
       input: {
         mode,
-        actions: ["run", "start", "wait", "result"],
+        actions: ["run", "start", "wait", "result", "usage"],
         childTools: "target-native defaults",
         cancellation: "parent abort during a blocking run's nested child tool",
       },
       expected:
-        "Children use their own codemode without recursive delegation. Nested usage is reported once. Parent abort reaches the blocking run's child tool, which settles cooperatively.",
+        "Children use their own codemode without recursive delegation. Delegated usage is checkpointed without recharging result reads. Parent abort reaches the blocking run's child tool, which settles cooperatively.",
       verdict: "failed",
     };
     let parent: Awaited<ReturnType<typeof createAgentSessionFromServices>>["session"] | undefined;
@@ -67,7 +67,7 @@ it.each(["on", "only"] as const)(
       writeFileSync(join(root, "identity.txt"), "parent identity must not leak");
       writeFileSync(join(target, "identity.txt"), "child-native identity");
       const childCode = `text(await tools.read({path: "identity.txt"})); text({parentTool: ALL_TOOLS.some(t => t.name === "parent_only"), delegation: ALL_TOOLS.some(t => t.name === "subagent")}); let blocked = false; try { await tools.subagent({action:"run",name:"recursive",task:"must not run"}); } catch (error) { blocked = true; text("recursive call blocked: " + error.message); } if (!blocked) throw Error("recursive delegation was allowed");`;
-      const parentCode = `text(await tools.subagent({action:"run",name:"blocking",task:"child task",cwd:${JSON.stringify(target)}})); const started = await tools.subagent({action:"start",name:"background",task:"child task",cwd:${JSON.stringify(target)}}); const id = started.match(/Started subagent job ([\\w-]+)/)?.[1]; if (!id) throw Error(started); text(await tools.subagent({action:"wait",job_id:id})); text(await tools.subagent({action:"result",job_id:id}));`;
+      const parentCode = `text(await tools.subagent({action:"run",name:"blocking",task:"child task",cwd:${JSON.stringify(target)}})); const started = await tools.subagent({action:"start",name:"background",task:"child task",cwd:${JSON.stringify(target)}}); const id = started.match(/Started subagent job ([\\w-]+)/)?.[1]; if (!id) throw Error(started); text(await tools.subagent({action:"wait",job_id:id})); text(await tools.subagent({action:"result",job_id:id})); text(await tools.subagent({action:"usage"}));`;
       const cancelCode = `text(await tools.subagent({action:"run",name:"cancelled",task:"blocked task",cwd:${JSON.stringify(target)}}));`;
       const provider = join(agentDir, "provider.mjs");
       writeFileSync(
@@ -215,7 +215,10 @@ export default function(pi) {
         );
       }
       expect(Object.values(usage).reduce((total, count) => total + count, 0)).toBeGreaterThan(0);
-      expect(result.usage).toEqual(expect.objectContaining(usage));
+      expect(result.usage).toBeUndefined();
+      expect(JSON.stringify(result.content)).toContain(
+        `in:${usage.input} out:${usage.output} cache:${usage.cacheRead}/${usage.cacheWrite}`,
+      );
       const cancellationStarted = performance.now();
       const cancellationMessageStart = parent.messages.length;
       let cancellationFinished = false;

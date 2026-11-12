@@ -81,6 +81,7 @@ describe("shared subagent run supervisor", () => {
               ? ChildTypes.NativeChildState.Closed
               : ChildTypes.NativeChildState.Idle,
         }),
+        checkpointUsage: () => {},
         inspect: () => {
           throw new Error("unused inspection");
         },
@@ -195,17 +196,6 @@ describe("shared subagent run supervisor", () => {
     const secondWriteLease = await secondWrite;
     expect(secondWriteStarted).toBe(true);
     secondWriteLease.release();
-  });
-
-  it("aggregates usage from sibling leases", async () => {
-    const { supervisor, acquire } = fixture("usage");
-    const first = await acquire({ ...request("/first"), runId: "batch:first" });
-    const second = await acquire({ ...request("/second"), runId: "batch:second" });
-    first.updateUsage({ input: 40, output: 10, cacheRead: 0, cacheWrite: 0, cost: 2, turns: 2 });
-    second.updateUsage({ input: 41, output: 10, cacheRead: 0, cacheWrite: 0, cost: 2, turns: 2 });
-    expect(first.signal.aborted).toBe(false);
-    expect(second.signal.aborted).toBe(false);
-    expect(supervisor.usage("batch:")).toMatchObject({ input: 81, output: 20, cost: 4 });
   });
 
   it("aborts a run at its wall-time limit", async () => {
