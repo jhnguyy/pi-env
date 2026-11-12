@@ -15,8 +15,7 @@ import {
 import initSubagent, { type SubagentToolParams } from "../index";
 import { getSubagentRunSupervisor } from "../control";
 import { NativeInputMode } from "../child-types";
-import type { SubagentJobRenderDetails } from "../types";
-import type { SubagentUsageSummary } from "../usage-accounting";
+import type { SubagentJobRenderDetails, SubagentUsageSummary } from "../types";
 import { testCleanup } from "./cleanup";
 
 function expectCosts(
