@@ -369,6 +369,7 @@ function collectProcess(
     const removeListeners = (): void => {
       child?.stdout?.off("data", onStdout);
       child?.stderr?.off("data", onStderr);
+      child?.stdin?.off("error", onStdinError);
       child?.off("error", onError);
       child?.off("close", onClose);
     };
@@ -425,6 +426,15 @@ function collectProcess(
           kind: ProcessFailureKind.Spawn,
           command,
           message: cause.message,
+          ...output(),
+        }),
+      );
+    const onStdinError = (cause: Error): void =>
+      failAndTerminate(
+        new ProcessFailure({
+          kind: ProcessFailureKind.Exit,
+          command,
+          message: `Failed to deliver process stdin: ${cause.message}`,
           ...output(),
         }),
       );
@@ -498,7 +508,10 @@ function collectProcess(
       child.stderr?.on("data", onStderr);
       child.once("error", onError);
       child.once("close", onClose);
-      if (options.stdin !== undefined) child.stdin?.end(options.stdin);
+      if (options.stdin !== undefined) {
+        child.stdin?.on("error", onStdinError);
+        child.stdin?.end(options.stdin);
+      }
     } catch (cause) {
       settle(
         Effect.fail(

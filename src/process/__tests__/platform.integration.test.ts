@@ -41,6 +41,30 @@ describe("process platform streamProcess", () => {
     expect(out.stderr.trim()).toBe("warn");
   });
 
+  it.runIf(process.platform !== "win32").each(["run", "stream"])(
+    "reports early stdin closure as a typed failure for %s without crashing its caller",
+    async (mode) => {
+      const result = await Effect.runPromise(
+        runProcess(
+          node,
+          [fileURLToPath(new URL("./fixtures/stdin-failure.ts", import.meta.url)), mode],
+          { timeoutMs: 10_000 },
+        ),
+      );
+      expect(result).toMatchObject({ exitCode: 0, stdout: "exit\n", stderr: "" });
+    },
+  );
+
+  it("delivers stdin to a consuming child", async () => {
+    const result = await Effect.runPromise(
+      runProcess(node, ["-e", "process.stdin.pipe(process.stdout)"], {
+        stdin: "accepted",
+        timeoutMs: 5_000,
+      }),
+    );
+    expect(result).toMatchObject({ exitCode: 0, stdout: "accepted", stderr: "" });
+  });
+
   it("maps spawn errors", async () => {
     const result = await Effect.runPromise(
       Effect.result(streamProcess("/definitely/missing/pi-env-cmd", [], { timeoutMs: 1_000 })),
