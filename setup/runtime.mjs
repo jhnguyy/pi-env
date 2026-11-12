@@ -87,17 +87,11 @@ function readPiPackageEntry(piPackageDir) {
 
 function writePiWrapper(piPackageDir, piPackageEntry, piExecutable) {
   mkdirSync(piBinDir, { recursive: true });
-  const sessionManagerStart = join(repo, "extensions", "session-manager", "dist", "start.js");
-  const sessionManagerExtension = join(repo, "extensions", "session-manager", "dist", "index.js");
-  const installedWrapper = join(piBinDir, "pi");
   const wrapper = `#!/usr/bin/env sh
 set -eu
 DEFAULT_PI_PACKAGE_DIR='${shSingleQuote(piPackageDir)}'
 PI_PACKAGE_ENTRY='${shSingleQuote(piPackageEntry)}'
 PI_EXECUTABLE='${shSingleQuote(piExecutable)}'
-SESSION_MANAGER_START='${shSingleQuote(sessionManagerStart)}'
-SESSION_MANAGER_EXTENSION='${shSingleQuote(sessionManagerExtension)}'
-INSTALLED_PI_WRAPPER='${shSingleQuote(installedWrapper)}'
 NODE_BIN='${shSingleQuote(setupNodeBin)}'
 ${readFileSync(join(import.meta.dirname, "templates/pi-launcher.sh"), "utf8")}`;
   const piPath = join(piBinDir, "pi");

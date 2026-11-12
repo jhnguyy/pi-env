@@ -87,27 +87,21 @@ else
 fi
 
 write_repo '{ "name": "@test/active", "type": "module", "private": true, "pi": { "extensions": ["./dist/index.js"] } }'
-mkdir -p "$TMP_DIR/extensions/playwright-client/dist" "$TMP_DIR/extensions/work-tracker/dist"
-touch \
-  "$TMP_DIR/extensions/playwright-client/index.ts" "$TMP_DIR/extensions/playwright-client/dist/index.js" \
-  "$TMP_DIR/extensions/work-tracker/index.ts" "$TMP_DIR/extensions/work-tracker/dist/index.js"
+mkdir -p "$TMP_DIR/extensions/playwright-client/dist"
+touch "$TMP_DIR/extensions/playwright-client/index.ts" "$TMP_DIR/extensions/playwright-client/dist/index.js"
 cat > "$TMP_DIR/extensions/playwright-client/package.json" <<'JSON'
 { "name": "@test/playwright-client", "type": "module", "private": true, "pi": { "extensions": ["./dist/index.js"] } }
-JSON
-cat > "$TMP_DIR/extensions/work-tracker/package.json" <<'JSON'
-{ "name": "@test/work-tracker", "type": "module", "private": true, "pi": { "extensions": ["./dist/index.js"] } }
 JSON
 "$NODE_RUN" - "$TMP_DIR/package.json" <<'JS'
 const fs = require('node:fs');
 const path = process.argv[2];
 const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
-pkg.workspaces.push('extensions/playwright-client', 'extensions/work-tracker');
-pkg.pi.extensions.push('extensions/playwright-client', 'extensions/work-tracker');
+pkg.workspaces.push('extensions/playwright-client');
+pkg.pi.extensions.push('extensions/playwright-client');
 fs.writeFileSync(path, JSON.stringify(pkg));
 JS
 output="$(expect_verify_failure)"
-if grep -q 'playwright-client: extension must stay disabled by default' <<<"$output" && \
-  grep -q 'work-tracker: extension must stay disabled by default' <<<"$output"; then
+if grep -q 'playwright-client: extension must stay disabled by default' <<<"$output"; then
   echo 'ok: default-disabled extension registration is rejected'
 else
   echo 'missing default-disabled extension failure' >&2

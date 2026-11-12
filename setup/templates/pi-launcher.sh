@@ -23,15 +23,6 @@ if [ -z "$PI_EXECUTABLE" ] && { [ ! -f "$PI_PACKAGE_DIR/package.json" ] || [ ! -
   echo "pi-env: rerun setup.sh, or set PI_PACKAGE_DIR to a valid pi package directory." >&2
   exit 127
 fi
-if [ "$#" -eq 1 ] && [ "$1" = "--start" ] && [ "${PI_ENV_SESSION_MANAGER_BYPASS:-}" != "1" ]; then
-  if [ ! -f "$SESSION_MANAGER_START" ] || [ ! -f "$SESSION_MANAGER_EXTENSION" ]; then
-    echo "pi-env: session manager build is missing. Rerun setup." >&2
-    exit 127
-  fi
-  PI_ENV_PI_WRAPPER="$INSTALLED_PI_WRAPPER" \
-  PI_ENV_SESSION_MANAGER_EXTENSION="$SESSION_MANAGER_EXTENSION" \
-  PI_NODE_ARGV0=pi exec "$NODE_BIN" "$SESSION_MANAGER_START"
-fi
 if [ -n "$PI_EXECUTABLE" ]; then
   exec "$PI_EXECUTABLE" "$@"
 fi

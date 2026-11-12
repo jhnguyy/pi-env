@@ -22,7 +22,7 @@ create_stub_repo() {
   REPO="$1/repo"
   PI_BIN_DIR="$1/bin"
   mkdir -p "$REPO/node_modules/@earendil-works/pi-coding-agent/$(dirname "$pi_entry")" \
-    "$REPO/extensions/session-manager/dist" "$PI_BIN_DIR"
+    "$PI_BIN_DIR"
   cat > "$REPO/package.json" <<'JSON'
 {
   "devDependencies": {
@@ -42,10 +42,6 @@ JSON
   cat > "$REPO/node_modules/@earendil-works/pi-coding-agent/$pi_entry" <<'JS'
 console.log('stub pi', JSON.stringify(process.argv.slice(2)))
 JS
-  cat > "$REPO/extensions/session-manager/dist/start.js" <<'JS'
-console.log('stub session manager start')
-JS
-  : > "$REPO/extensions/session-manager/dist/index.js"
 }
 
 test_pi_cli_wrapper_uses_repo_locked_package() {
@@ -115,7 +111,7 @@ SH
   unset PI_ENV_NODE_BIN
 }
 
-test_pi_cli_wrapper_intercepts_only_exact_start() {
+test_pi_cli_wrapper_passes_arguments_unchanged() {
   local tmp output
   tmp="$(with_temp_dir)"
 
@@ -124,15 +120,8 @@ test_pi_cli_wrapper_intercepts_only_exact_start() {
   create_stub_repo "$tmp"
   run_pi_cli_setup
 
-  output=$(PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" --start)
-  [ "$output" = "stub session manager start" ] || fail "exact --start should use the session manager sidecar"
-
-  output=$(PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" --start --model "model with spaces")
-  printf '%s' "$output" | grep -qF 'stub pi ["--start","--model","model with spaces"]' || fail "mixed --start argv should pass through unchanged"
-  output=$(PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" value --start)
-  printf '%s' "$output" | grep -qF 'stub pi ["value","--start"]' || fail "positional --start should pass through unchanged"
-  output=$(PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" -- --start)
-  printf '%s' "$output" | grep -qF 'stub pi ["--","--start"]' || fail "post-separator --start should pass through unchanged"
+  output=$(PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" --model "model with spaces" -- "prompt with spaces")
+  assert_eq "$output" 'stub pi ["--model","model with spaces","--","prompt with spaces"]' 'wrapper preserves argument boundaries'
 
   unset PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_NODE_BIN
 }
@@ -184,7 +173,7 @@ exit 0'
 test_pi_cli_wrapper_uses_repo_locked_package
 test_pi_cli_wrapper_uses_declared_package_entry
 test_pi_cli_wrapper_pins_configured_node
-test_pi_cli_wrapper_intercepts_only_exact_start
+test_pi_cli_wrapper_passes_arguments_unchanged
 test_pi_cli_wrapper_skips_write_when_managed_by_nix
 test_pi_cli_wrapper_adds_path_profile_when_portable
 test_pi_cli_wrapper_adds_path_profile_when_portable local-nix

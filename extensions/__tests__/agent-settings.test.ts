@@ -23,19 +23,20 @@ function envWith(files: Record<string, string>, onRead?: (path: string) => void)
 describe("agent settings", () => {
   it.effect("parses shared settings from overlaid settings.json files", () =>
     Effect.gen(function* () {
-      const snapshot = yield* loadSettingsSnapshotEffect("/repo", envWith({
-        "/global/settings.json": JSON.stringify({
-          modelAnnotations: { "provider/model": ["preferred"] },
-          extensions: ["global-extension"],
-          workTracker: { repos: ["/repo"], protectedBranches: ["main"] },
+      const snapshot = yield* loadSettingsSnapshotEffect(
+        "/repo",
+        envWith({
+          "/global/settings.json": JSON.stringify({
+            modelAnnotations: { "provider/model": ["preferred"] },
+            extensions: ["global-extension"],
+          }),
+          "/repo/.pi/settings.json": JSON.stringify({ extensions: ["web-context"] }),
         }),
-        "/repo/.pi/settings.json": JSON.stringify({ extensions: ["web-context"] }),
-      }));
+      );
       const settings = yield* decodeAgentSettingsSnapshotEffect(snapshot);
 
       expect(settings).toEqual({
         modelAnnotations: { "provider/model": ["preferred"] },
-        workTracker: { repos: ["/repo"], protectedBranches: ["main"] },
         extensions: ["web-context"],
       });
     }),
@@ -43,29 +44,53 @@ describe("agent settings", () => {
 
   vitestIt("distinguishes both-missing from existing-empty for optional settings", () => {
     expect(readOptionalAgentSettings(envWith({}), "/repo")).toBeNull();
-    expect(readOptionalAgentSettings(envWith({ "/global/settings.json": "{}" }), "/repo")).toEqual({});
+    expect(readOptionalAgentSettings(envWith({ "/global/settings.json": "{}" }), "/repo")).toEqual(
+      {},
+    );
   });
 
   vitestIt("keeps malformed settings optional at extension call sites", () => {
-    expect(readOptionalAgentSettings(envWith({ "/global/settings.json": "not json" }), "/repo")).toBeNull();
+    expect(
+      readOptionalAgentSettings(envWith({ "/global/settings.json": "not json" }), "/repo"),
+    ).toBeNull();
   });
 
   it.effect("reports typed errors for required settings", () =>
     Effect.gen(function* () {
-      const malformed = yield* Effect.result(loadSettingsSnapshotEffect("/repo", envWith({ "/global/settings.json": "not json" })));
-      const invalidSnapshot = yield* loadSettingsSnapshotEffect("/repo", envWith({ "/global/settings.json": JSON.stringify({ modelAnnotations: { "test/model": [123] } }) }));
+      const malformed = yield* Effect.result(
+        loadSettingsSnapshotEffect("/repo", envWith({ "/global/settings.json": "not json" })),
+      );
+      const invalidSnapshot = yield* loadSettingsSnapshotEffect(
+        "/repo",
+        envWith({
+          "/global/settings.json": JSON.stringify({ modelAnnotations: { "test/model": [123] } }),
+        }),
+      );
       const invalid = yield* Effect.result(decodeAgentSettingsSnapshotEffect(invalidSnapshot));
 
       expect(malformed._tag).toBe("Failure");
-      if (malformed._tag === "Failure") expect(malformed.failure).toMatchObject({ _tag: "SettingsDecodeError", path: "/global/settings.json", source: "global" });
+      if (malformed._tag === "Failure")
+        expect(malformed.failure).toMatchObject({
+          _tag: "SettingsDecodeError",
+          path: "/global/settings.json",
+          source: "global",
+        });
       expect(invalid._tag).toBe("Failure");
-      if (invalid._tag === "Failure") expect(invalid.failure).toMatchObject({ _tag: "SettingsDecodeError", source: "overlay", paths: { global: "/global/settings.json", project: "/repo/.pi/settings.json" } });
+      if (invalid._tag === "Failure")
+        expect(invalid.failure).toMatchObject({
+          _tag: "SettingsDecodeError",
+          source: "overlay",
+          paths: { global: "/global/settings.json", project: "/repo/.pi/settings.json" },
+        });
     }),
   );
 
   vitestIt("loads optional settings with one snapshot and no duplicate reads", () => {
     const reads: string[] = [];
-    const settings = readOptionalAgentSettings(envWith({ "/global/settings.json": "{}" }, (path) => reads.push(path)), "/repo");
+    const settings = readOptionalAgentSettings(
+      envWith({ "/global/settings.json": "{}" }, (path) => reads.push(path)),
+      "/repo",
+    );
 
     expect(settings).toEqual({});
     expect(reads).toEqual(["/global/settings.json", "/repo/.pi/settings.json"]);

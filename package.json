@@ -30,7 +30,6 @@
     "test:e2e": "vitest --run --project e2e",
     "test:workflows": "vitest --run --project e2e",
     "test:canary": "vitest --run --project real-workspace-canary",
-    "test:e2e:session-manager:docker": "node scripts/dev.mjs test:docker",
     "typecheck": "effect-tsgo tsc --noEmit --project tsconfig.typecheck.json",
     "lint:type": "effect-tsgo oxlint . --type-aware --threads=1 --deny-warnings --ignore-pattern 'tests/**' --ignore-pattern '**/dist/**'",
     "check:dependencies": "depcruise . --output-type err --progress none",

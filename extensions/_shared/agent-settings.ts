@@ -10,21 +10,13 @@ import {
 
 const StringArraySchema = Schema.mutable(Schema.Array(Schema.String));
 
-export const WorkTrackerSettingsSchema = Schema.Struct({
-  repos: Schema.optionalKey(StringArraySchema),
-  protectedBranches: Schema.optionalKey(StringArraySchema),
-});
-
 export const AgentSettingsSchema = Schema.Struct({
   modelAnnotations: Schema.optionalKey(Schema.Record(Schema.String, StringArraySchema)),
-  workTracker: Schema.optionalKey(WorkTrackerSettingsSchema),
   extensions: Schema.optionalKey(StringArraySchema),
 });
 
 export type AgentSettings = typeof AgentSettingsSchema.Type;
-export type WorkTrackerSettings = typeof WorkTrackerSettingsSchema.Type;
 export type AgentSettingsEnv = SettingsEnv;
-
 
 function readOptionalAgentSettingsEffect(
   env: AgentSettingsEnv = defaultSettingsEnv,

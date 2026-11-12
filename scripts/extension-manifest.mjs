@@ -10,7 +10,7 @@ export const ExtensionRuntime = Object.freeze({
   PackageRuntimeEntry: "./dist/index.js",
 });
 
-export const DEFAULT_DISABLED_EXTENSIONS = Object.freeze(["playwright-client", "work-tracker"]);
+export const DEFAULT_DISABLED_EXTENSIONS = Object.freeze(["playwright-client"]);
 
 export function loadJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));

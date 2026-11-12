@@ -13,8 +13,6 @@ let
   packages = packagesFor pkgs;
   managedPiLauncher = import ./pi-launcher.nix {
     inherit pkgs packages;
-    inherit (cfg) checkoutPath;
-    installedWrapperPath = "${config.home.homeDirectory}/.local/bin/pi";
   };
 in
 {
@@ -33,8 +31,8 @@ in
       example = lib.literalExpression ''"''${config.home.homeDirectory}/src/pi-env"'';
       description = ''
         Absolute path to a writable pi-env checkout. When set, Home Manager owns
-        ~/.local/bin/pi, including pi --start dispatch into that checkout's built
-        Session Manager. The checkout and its dependencies are not installed by Nix.
+        ~/.local/bin/pi. Setup registers the checkout's Pi resources separately;
+        the checkout and its dependencies are not installed by Nix.
       '';
     };
 
