@@ -11,19 +11,26 @@ an existing session can capture its prior conversation.
 
 ## Home Manager
 
-`pi-env.atuin.enable` installs the [pinned client](../nix/atuin.nix) through
-`programs.atuin` with the [capture defaults](../nix/atuin-settings.nix) and
-`--disable-ai`. It also installs the native Pi command hook, an `atuin` MCP
-server, and [agent guidance](../nix/atuin-guidance.md). The module sets these
-values as defaults, so host `programs.atuin` options override them:
+Each toggle is off by default and widens what Atuin records or shares:
+
+| Option                        | Adds                                                                                                                                         |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pi-env.atuin.enable`         | The [pinned client](../nix/atuin.nix) with `--disable-ai`, local shell history, and the Pi command hook, which records bash commands Pi runs |
+| `pi-env.atuin.sync.enable`    | Automatic encrypted sync to the configured server                                                                                            |
+| `pi-env.atuin.capture.enable` | Terminal output capture through the PTY proxy, and agent thread capture                                                                      |
+| `pi-env.atuin.mcp.enable`     | An `atuin` MCP server for Pi with its [guidance](../nix/atuin-guidance.md)                                                                   |
+
+The toggles set `programs.atuin.settings` as defaults, so host values override
+them. They are configuration, not enforcement: block the sync endpoint on the
+network when sync must not happen.
 
 ```nix
 {
-  pi-env.atuin.enable = true;
-  programs.atuin.settings = {
-    auto_sync = false;
-    output.max_disk_usage = "1GB";
+  pi-env.atuin = {
+    enable = true;
+    mcp.enable = true;
   };
+  programs.atuin.settings.sync_address = "https://history.example.net";
 }
 ```
 

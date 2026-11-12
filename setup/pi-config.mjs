@@ -13,11 +13,7 @@ const ManagedFiles = Object.freeze([
   },
   {
     path: "AGENTS.md",
-    blocks: [
-      { name: "agent-guidelines", source: "setup/templates/AGENTS.md" },
-      // Retired: removes guidance from earlier setups now that pi-env.atuin.enable owns it.
-      { name: "atuin-guidelines" },
-    ],
+    blocks: [{ name: "agent-guidelines", source: "setup/templates/AGENTS.md" }],
   },
 ]);
 
@@ -28,8 +24,7 @@ export function configurePiEffect(ctx) {
     for (const { path, blocks } of ManagedFiles) {
       const resolved = blocks.map(({ name, source }) => ({
         name,
-        source: source && join(ctx.sourceRoot, source),
-        enabled: Boolean(source),
+        source: join(ctx.sourceRoot, source),
       }));
       const target = join(ctx.agentDir, path);
       yield* managedFileEffect(target, resolved, displayPath(target, ctx.home));
