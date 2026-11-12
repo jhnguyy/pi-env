@@ -1,5 +1,8 @@
 # Atuin
 
+Atuin is opt-in: the pi-env toolchain does not install it. Setup adds the Atuin
+guidance block and command hook only when `atuin` is on `PATH`.
+
 Use the [pinned package](../nix/atuin.nix) and [capture settings](../nix/atuin-settings.nix)
 with native Home Manager options. Hosts own the sync endpoint, writable state,
 credentials and activation. Without Nix, use [upstream installation](https://docs.atuin.sh/guide/installation/).
