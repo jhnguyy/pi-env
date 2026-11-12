@@ -62,7 +62,6 @@ let
       hunkPackage = hunk.packages.${pkgs.stdenv.hostPlatform.system}.hunk;
       atuin = import ./atuin.nix { inherit pkgs; };
       toolsPackages = [
-        atuin
         hunkPackage
         node
         nubPackage

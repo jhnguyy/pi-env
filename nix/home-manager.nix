@@ -50,6 +50,19 @@ in
       description = "Enable Home Manager tmux and source the pi-env tmux config.";
     };
 
+    atuin = {
+      enable = lib.mkEnableOption ''
+        local Atuin shell history through the pinned client, including bash
+        commands Pi runs. See docs/atuin.md
+      '';
+      sync.enable = lib.mkEnableOption "automatic encrypted sync of Atuin history to the configured server";
+      capture.enable = lib.mkEnableOption "Atuin terminal output and agent thread capture";
+      mcp.enable = lib.mkEnableOption ''
+        the `atuin` MCP server and its guidance in Pi. MCP results can reach the
+        model provider
+      '';
+    };
+
     ghostty.enable = lib.mkOption {
       type = lib.types.bool;
       default = false;
@@ -138,6 +151,71 @@ in
           '';
         };
       })
+
+      {
+        assertions = [
+          {
+            assertion =
+              cfg.atuin.enable
+              || !(cfg.atuin.sync.enable || cfg.atuin.capture.enable || cfg.atuin.mcp.enable);
+            message = "pi-env.atuin.{sync,capture,mcp}.enable require pi-env.atuin.enable.";
+          }
+        ];
+      }
+
+      (lib.mkIf cfg.atuin.enable (
+        let
+          environment = {
+            ATUIN_CONFIG_DIR = "${config.xdg.configHome}/atuin";
+            ATUIN_HOME = "${config.xdg.dataHome}/atuin";
+            PI_CODING_AGENT_DIR = "${config.home.homeDirectory}/.pi/agent";
+          };
+        in
+        {
+          home.file.".pi/agent/extensions/atuin.ts".source =
+            "${packages.atuin}/share/atuin/pi/atuin.ts";
+          home.file.".pi/agent/extensions/pi-env-atuin.js" = lib.mkIf cfg.atuin.mcp.enable {
+            text = ''
+              export default function (pi) {
+                pi.registerMcpServer("atuin", ${
+                  builtins.toJSON {
+                    args = [ "mcp" ];
+                    command = lib.getExe config.programs.atuin.package;
+                    env = environment;
+                  }
+                });
+                pi.on("before_agent_start", (event) => {
+                  event.systemPromptOptions.sections["historical-context"] = ${
+                    builtins.toJSON (builtins.readFile ./atuin-guidance.md)
+                  };
+                });
+              }
+            '';
+          };
+          home.sessionVariables = environment;
+          programs.atuin = {
+            enable = true;
+            package = lib.mkDefault packages.atuin;
+            flags = lib.mkDefault [ "--disable-ai" ];
+            settings = lib.mapAttrsRecursive (_: lib.mkDefault) (
+              {
+                auto_sync = cfg.atuin.sync.enable;
+                daemon = {
+                  autostart = true;
+                  enabled = true;
+                };
+                output.enabled = cfg.atuin.capture.enable;
+                pty_proxy.enabled = cfg.atuin.capture.enable;
+                threads = {
+                  capture = cfg.atuin.capture.enable;
+                  capture_tools = cfg.atuin.capture.enable;
+                };
+              }
+              // lib.optionalAttrs cfg.atuin.sync.enable { sync.records = true; }
+            );
+          };
+        }
+      ))
 
       (lib.mkIf cfg.ghostty.enable {
         home.file = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin {

@@ -43,7 +43,6 @@
         inherit self;
         inherit (toolchain) packagesFor;
       };
-      lib.atuin.captureSettings = import ./nix/atuin-settings.nix;
       lib.themes.gruvbox = {
         palettes = builtins.mapAttrs (_: file: (builtins.fromJSON (builtins.readFile file)).vars) {
           dark = ./themes/gruvbox-dark.json;
