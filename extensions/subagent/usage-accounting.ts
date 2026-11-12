@@ -68,10 +68,7 @@ export interface SubagentUsageSummary {
 
 export const CHILD_USAGE_ENTRY_TYPE = "subagent.child-usage";
 
-/** Mirrors native getSessionStats over raw history, not compacted/active context.
- * Pi 1.5.1 exports no standalone accounting helper. Only assistant messages are turns;
- * tool results (including legacy delegated costs) and summary operations are also billed.
- */
+// Compacted context omits recorded spending. Pi 1.5.1 exposes no standalone totals helper.
 export function usageFromEntries(
   entries: readonly (typeof AccountingEntrySchema.Type)[],
 ): UsageStats {
@@ -149,9 +146,6 @@ function recoverUsage(
   return Result.succeed(usage);
 }
 
-/** Compact child projections live only in the parent's native custom entries.
- * Child transcripts remain the financial source of truth; no child runtime is created.
- */
 export class SubagentUsageAccounting {
   private parent?: ReadonlySessionManager;
   private generation = 0;
