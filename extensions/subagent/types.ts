@@ -1,5 +1,3 @@
-import type { SubagentUsageSummary } from "./usage-accounting";
-
 export const SubagentJobStatus = {
   Queued: "queued",
   Running: "running",
@@ -40,6 +38,21 @@ export interface UsageStats {
   cacheWrite: number;
   cost: number;
   turns: number;
+}
+
+export interface UnavailableChildUsage {
+  childSessionId?: string;
+  name: string;
+  sessionFile?: string;
+  reason: string;
+}
+
+export interface SubagentUsageSummary {
+  parent: UsageStats;
+  children: UsageStats;
+  total: UsageStats;
+  childCount: number;
+  unavailableChildren: UnavailableChildUsage[];
 }
 
 export interface SubagentJobRenderDetails {

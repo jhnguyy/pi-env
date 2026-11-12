@@ -6,7 +6,7 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Data, Result, Schema } from "effect";
-import type { UsageStats } from "./types";
+import type { SubagentUsageSummary, UnavailableChildUsage, UsageStats } from "./types";
 import { addUsage, cloneUsage, zeroUsage } from "./usage";
 
 type ReadonlySessionManager = ExtensionContext["sessionManager"];
@@ -50,21 +50,6 @@ const ChildUsageCheckpointSchema = Schema.Struct({
   parentSessionId: Schema.String,
 });
 export type ChildUsageCheckpoint = typeof ChildUsageCheckpointSchema.Type;
-
-export interface UnavailableChildUsage {
-  childSessionId?: string;
-  name: string;
-  sessionFile?: string;
-  reason: string;
-}
-
-export interface SubagentUsageSummary {
-  parent: UsageStats;
-  children: UsageStats;
-  total: UsageStats;
-  childCount: number;
-  unavailableChildren: UnavailableChildUsage[];
-}
 
 export const CHILD_USAGE_ENTRY_TYPE = "subagent.child-usage";
 

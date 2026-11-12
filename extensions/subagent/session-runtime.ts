@@ -32,9 +32,10 @@ import {
   type SubagentDetails,
   type SubagentJobRenderDetails,
   type SubagentSessionState as SubagentSessionStateValue,
+  type SubagentUsageSummary,
 } from "./types";
 import { formatUsageCompact } from "./usage";
-import { SubagentUsageAccounting, type SubagentUsageSummary } from "./usage-accounting";
+import { SubagentUsageAccounting } from "./usage-accounting";
 
 export interface SubagentSessionRuntimeDependencies {
   readonly telemetryRuntimeFactory?: typeof createToolingTelemetryRuntime;
