@@ -164,15 +164,6 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: '*'
         version: 1.5.1
-      '@earendil-works/pi-tui':
-        specifier: '*'
-        version: 1.5.1
-      effect:
-        specifier: 4.1.2
-        version: 4.1.2
-      proper-lockfile:
-        specifier: 4.1.2
-        version: 4.1.2
 
   extensions/share: {}
 

@@ -13,8 +13,6 @@
 #
 # Targets (see docker-bake.hcl):
 #   pi-env                        published image; the default (last) stage
-#   session-manager-e2e-evidence  exports session-manager E2E evidence
-#   session-manager-e2e           fails when the session-manager E2E fails
 # Debian's tmux predates the 3.8 baseline that the tmux template and its tests need.
 FROM node:26-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e AS tmux-build
 COPY scripts/install-tmux.sh /tmp/install-tmux.sh
@@ -38,7 +36,6 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     git \
     libevent-core-2.1-7 \
     tini \
-    util-linux \
   && npm install --global --omit=dev "$(node -p 'JSON.parse(require("fs").readFileSync("/tmp/pi-env-package.json")).packageManager.replace("nub@", "@nubjs/nub@")')" \
   && nub --version \
   && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
@@ -87,32 +84,3 @@ RUN if [ -e /home/node/.cache/nub/node ]; then \
 USER node
 ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
 CMD ["nub", "run", "verify:install"]
-
-# Session-manager E2E: real Pi in an isolated tmux server. Build from the
-# toolchain stage so a failed image qualification cannot block evidence export.
-# The run stage always succeeds; session-manager-e2e is the pass/fail gate.
-FROM toolchain AS session-manager-e2e-run
-RUN chown node:node ${PI_ENV_HOME}
-COPY --chown=node:node . .
-USER node
-RUN --mount=type=cache,target=/home/node/.local/share/nub/store,uid=1000,gid=1000 \
-  nub install --frozen-lockfile \
-  && nub run build
-ARG PI_ENV_REVISION=unknown
-RUN mkdir -p /tmp/e2e-evidence \
-  && { PI_ENV_REVISION="$PI_ENV_REVISION" PI_ENV_E2E_ARTIFACT_DIR=/tmp/e2e-evidence \
-      tini -s -- nub run test --project session-manager-e2e; echo "$?" > /tmp/e2e-evidence/exit-code; } 2>&1 \
-    | tee /tmp/e2e-evidence/vitest.log \
-  && { cp /tmp/e2e-evidence/*/result.json /tmp/e2e-evidence/result.json 2>/dev/null \
-    || echo '{"status":"missing"}' > /tmp/e2e-evidence/result.json; }
-
-FROM scratch AS session-manager-e2e-evidence
-COPY --from=session-manager-e2e-run /tmp/e2e-evidence/exit-code /tmp/e2e-evidence/vitest.log \
-  /tmp/e2e-evidence/result.json /
-
-FROM session-manager-e2e-run AS session-manager-e2e
-RUN test "$(cat /tmp/e2e-evidence/exit-code)" = 0 \
-  || { cat /tmp/e2e-evidence/result.json; exit 1; }
-
-# Keep the published image as the default (last) build target.
-FROM pi-env

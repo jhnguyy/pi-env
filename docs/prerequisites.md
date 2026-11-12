@@ -12,10 +12,8 @@ Personal defaults and explicit reset behavior are described in [setup](setup.md)
 
 Setup [reports](../setup/environment.sh) missing recommended tools, including Ghostty on GUI hosts, but does not install them. The [Ghostty config](../ghostty/config) selects its font. See [themes](themes.md#terminals) for terminal installation.
 
-## tmux session ownership
+## tmux window naming
 
-Session-manager binding mutations require `flock` on `PATH` (util-linux on Linux,
-[discoteq/flock](https://github.com/discoteq/flock) on macOS). The Nix toolchain
-supplies the cross-platform implementation; the container supplies util-linux.
-Portable setups must supply it themselves. See
-[binding locks](session-manager.md#binding-locks) for lock behavior.
+Interactive Pi sessions inside tmux can label their windows through
+[session-manager](session-manager.md). Naming does not require a coordinator or a
+workspace manifest.

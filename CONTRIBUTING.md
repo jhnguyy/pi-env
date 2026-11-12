@@ -41,15 +41,14 @@ Use `--base <ref>` to choose the comparison and `--checks-only` to omit tests. R
 
 Local verification selects related unit tests. An integration-only edit may select no runnable unit tests, and generated artifacts or dynamic inputs can escape import-based selection. Choose qualification for the affected contracts:
 
-| Evidence                           | Command                                   |
-| ---------------------------------- | ----------------------------------------- |
-| Focused units                      | `nub run test:unit <file>`                |
-| Focused integration                | `nub run test:integration <file>`         |
-| Setup shell workflows              | `nub run test:setup`                      |
-| Regular native SDK and LSP E2Es    | `nub run test:workflows`                  |
-| Real-workspace canary              | `nub run test:canary`                     |
-| Isolated session-manager/tmux E2Es | `nub run test:e2e:session-manager:docker` |
-| Broader CI integration pipeline    | `nub run verify:full`                     |
+| Evidence                        | Command                           |
+| ------------------------------- | --------------------------------- |
+| Focused units                   | `nub run test:unit <file>`        |
+| Focused integration             | `nub run test:integration <file>` |
+| Setup shell workflows           | `nub run test:setup`              |
+| Regular native SDK and LSP E2Es | `nub run test:workflows`          |
+| Real-workspace canary           | `nub run test:canary`             |
+| Broader CI integration pipeline | `nub run verify:full`             |
 
 Vitest aliases invoke the runner directly; Vitest owns selection, workers, and test lifecycle. `typecheck` and `lint:type` invoke the upstream Effect compiler and Oxlint entrypoints. Standalone test, typecheck, and full-lint commands do not acquire the cross-worktree heavyweight lock or use the supervisor's command timeout and process-group cleanup. `verify` retains its outer lock, and `verify:full` retains both locking and command supervision. `PI_ENV_TEST_TIMEOUT_MS` and `PI_ENV_TEST_KILL_GRACE_MS` apply only to supervised commands.
 

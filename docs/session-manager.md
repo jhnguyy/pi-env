@@ -1,21 +1,37 @@
-# Session identity and display names
+# Session manager
 
-Session-manager identifies each session by its session ID. IDs must be unique in the workspace manifest, including the coordinator ID. A live owner retains exclusive ownership of its session binding.
+`session-manager` names the current tmux window for an interactive Pi session. It uses the native session name when present; otherwise it uses `pi-` followed by the session ID's last six characters. UUIDv7 IDs share a timestamp prefix, so the random tail distinguishes sessions started close together. The fallback is only a window label: it does not set a native session name.
 
-Names are optional, non-unique display labels. Active work sessions can start with the same explicit name, adopt that name, or rename to that name. A name does not select a session. Lookup, release, and restoration use session IDs.
+Native `/name` changes, including clearing the name, update the window. Names remain literal rather than evaluating tmux formats; tmux applies its usual visible escaping to backslashes and control characters.
 
-An explicit name must contain non-whitespace text, fit within 128 UTF-8 bytes, and contain no control or format characters. These constraints also apply to names in the manifest.
+## Window ownership
 
-`/session-status` and workspace restoration summaries show the full session ID beside a name. Tmux window labels retain explicit names, so multiple windows can have the same label. Unnamed windows use the existing `pi-<ID suffix>` label. Session-manager does not use window labels to select a binding.
+Naming starts only in TUI mode with `TMUX` and a valid `TMUX_PANE`. Native child sessions do not register naming handlers. Other modes and sessions outside tmux do nothing. General status reporting remains independent of naming.
 
-## Binding locks
+An unowned window with `automatic-rename off` is treated as manually named and left alone. Otherwise the extension uses two window-local tmux options, `@pi_naming_owner` and `@pi_naming_label`, to guard changes:
 
-The lock file beside the tmux socket serializes bind/reclaim, rename, release,
-and coordinator restore for that server, including cross-window session-ID
-checks. Do not unlink it while that server is in use: waiters must share an inode.
-Kernel locks survive pauses and are released on process exit; no stale lease can
-expire underneath a live owner. A short-lived helper holds the lock until the
-operation finishes or Pi closes its pipe (including after `kill -9`). Shutdown
-drains in-flight tmux operations before unlocking. Missing `flock` or lock
-contention past a bounded wait fails enrollment rather than mutating an unprotected
-binding. See [prerequisites](prerequisites.md#tmux-session-ownership) for `flock`.
+- The first Pi pane to claim a window owns its label. A Pi session in another split pane cannot steal it; ownership does not automatically transfer when the first exits.
+- A new runtime in the same pane can replace its predecessor's token. The old runtime cannot rename or release its successor's window.
+- A manual tmux rename that differs from the last applied label prevents subsequent Pi renames. Shutdown clears its own tags but leaves that manual name and its automatic-renaming setting alone.
+- Normal shutdown removes its own tags and re-enables automatic naming only when the window still has its last applied label. Session replacement and reload follow Pi's native shutdown/start lifecycle.
+
+A crash can leave tags behind. A later runtime in the same pane can reclaim them if the label has not changed. There is no cross-pane recovery or registry. To opt out, manually rename the window; to reuse a stranded window from another pane, clear both `@pi_naming_owner` and `@pi_naming_label` with tmux and enable `automatic-rename` before starting Pi. Changing a manual name back to the exact last-applied label is indistinguishable from retaining the extension's label.
+
+The extension creates no manifests, session catalog, sockets, sidecars, custom commands, or editor hooks. It does not enroll sessions, coordinate workspaces, mark completion, or restore runtimes. Naming failures produce a warning without blocking native session behavior.
+
+## Updating from coordinator-based session management
+
+Rerun setup after updating the registered checkout to replace the old launcher,
+then restart Pi or use `/reload` to load the new extension. Nix-owned launchers
+require activation through the consuming host configuration instead.
+`pi --start` and the `/session-*` commands are retired; use native session resume.
+Existing manifests, transcripts, handoffs, and retrospectives are left untouched.
+Windows with automatic naming disabled remain unchanged, including old labels.
+
+## Verification
+
+The focused integration suite uses real tmux on temporary private servers, an empty tmux configuration, and isolated agent directories. It invokes native lifecycle handlers with a small API adapter; it does not qualify loading a built bundle in Pi's interactive TUI.
+
+```bash
+nub run test:integration extensions/session-manager/__tests__/naming.integration.test.ts
+```

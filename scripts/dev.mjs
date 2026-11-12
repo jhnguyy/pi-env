@@ -1,19 +1,10 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
 import { constants as osConstants } from "node:os";
 import { parseArgs } from "node:util";
 import * as HeavyweightLock from "./heavyweight-lock.mjs";
 import { changedFiles } from "./changed-files.mjs";
 import { changedVerificationPlan, unqualifiedGlobalInputs } from "./verification-plan.mjs";
 import { listPlan, runPlan } from "./verification-runner.mjs";
-
-function capture(command, args, cwd = process.cwd()) {
-  return execFileSync(command, args, {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "inherit"],
-  }).trim();
-}
 
 async function verify(args) {
   const {
@@ -65,38 +56,16 @@ async function runSupervisedNode(args) {
   return supervisor.runSupervisedNode(args);
 }
 
-async function dockerTests(args) {
-  process.env.PI_ENV_REVISION = capture("git", ["describe", "--always", "--dirty", "--abbrev=40"]);
-  await runSupervisedNode([
-    "--command",
-    "docker",
-    "buildx",
-    "bake",
-    "session-manager-e2e-evidence",
-  ]);
-  if (!process.exitCode)
-    await runSupervisedNode([
-      "--command",
-      "docker",
-      "buildx",
-      "bake",
-      "session-manager-e2e",
-      ...args,
-    ]);
-}
-
 async function main([command, ...args]) {
   switch (command) {
     case "verify":
       return verify(args);
-    case "test:docker":
-      return dockerTests(args);
     case "full":
       // Reject obsolete inspection flags before a broad pipeline can allocate work.
       parseArgs({ args, options: {} });
       return runSupervisedNode(["--heavyweight", "--command", "nub", "run", "verify:integration"]);
     default:
-      throw new Error("usage: node scripts/dev.mjs <verify|full|test:docker> [args...]");
+      throw new Error("usage: node scripts/dev.mjs <verify|full> [args...]");
   }
 }
 

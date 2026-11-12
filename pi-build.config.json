@@ -39,12 +39,6 @@
         "outfile": "dist/daemon.js",
         "banner": false
       }
-    ],
-    "session-manager": [
-      {
-        "entry": "start.ts",
-        "outfile": "dist/start.js"
-      }
     ]
   }
 }

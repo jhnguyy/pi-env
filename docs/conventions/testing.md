@@ -10,7 +10,7 @@ Use verification commands to establish formatting, lint, type, and test-suite st
 
 Keep tests with their owning area under `__tests__`. The [Vitest configuration](../../vitest.config.ts) defines runnable roots and project selection: integration suites use `*.integration.test.ts` or `*.integration.test.mjs`, while E2E and real-workspace canary scenarios follow their configured filenames. Setup shell tests run separately using their [shared helpers](../../setup/__tests__/README.md).
 
-Place expensive native SDK, real LSP, Docker, and platform qualification in explicitly selected suites. Review import and startup costs when adding or reworking coverage; a unit label alone does not establish inexpensive execution. Choose the canary when the promise depends on the real workspace and Docker when it depends on session-manager's tmux environment.
+Place expensive native SDK, real LSP, Docker, and platform qualification in explicitly selected suites. Review import and startup costs when adding or reworking coverage; a unit label alone does not establish inexpensive execution. Choose the canary when the promise depends on the real workspace. Tmux naming and status tests use private tmux servers; never target the user's server.
 
 For native loading, use matching checkout dependencies and built artifacts, then exercise the rebuilt extension in a reloaded or restarted Pi session. Source imports establish a different claim from loaded bundles; [extension runtime conventions](extensions.md#runtime-shape) describe that boundary. A deterministic inference provider can accompany real SDK sessions and tools to establish local integration, leaving hosted-provider compatibility as a separate qualification.
 

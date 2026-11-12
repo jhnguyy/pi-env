@@ -51,14 +51,6 @@ export default defineConfig({
         test: {
           name: "e2e",
           include: ["extensions/**/__tests__/e2e.test.ts"],
-          exclude: ["extensions/session-manager/**"],
-        },
-      },
-      {
-        extends: true,
-        test: {
-          name: "session-manager-e2e",
-          include: ["extensions/session-manager/__tests__/e2e.test.ts"],
         },
       },
       {
