@@ -1,74 +1,41 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { SessionStats } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
 import * as Usage from "../usage";
-import type * as Types from "../types";
-import * as NativeUsage from "../../_shared/native-usage";
 
-function details(name: string, input: number, output: number): Types.SubagentDetails {
+type Stats = Pick<SessionStats, "tokens" | "cost" | "assistantMessages">;
+
+function assistant(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
   return {
-    name,
-    task: "x",
-    toolNames: [],
-    modelOverride: undefined,
-    finalOutput: "done",
-    toolCallCount: 0,
-    usage: { ...Usage.zeroUsage(), input, output, turns: 1 },
-    isError: false,
-    turnLimitExceeded: false,
+    role: "assistant",
+    content: [{ type: "text", text: "answer" }],
+    api: "openai-completions",
+    provider: "test",
+    model: "m",
+    stopReason: "stop",
+    timestamp: 1,
+    usage: {
+      input: 1,
+      output: 2,
+      cacheRead: 3,
+      cacheWrite: 4,
+      totalTokens: 10,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.5 },
+    },
+    ...overrides,
   };
 }
 
-describe("subagent usage accumulation", () => {
-  it("converts nested work into parent-session tool usage", () => {
-    expect(NativeUsage.toNestedToolUsage({
-      input: 2,
-      output: 3,
-      cacheRead: 5,
-      cacheWrite: 7,
-      cost: 1.25,
-    })).toEqual({
-      input: 2,
-      output: 3,
-      cacheRead: 5,
-      cacheWrite: 7,
-      totalTokens: 17,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 1.25 },
-    });
-  });
-
-  it("counts the first record for each run ID and clears the ledger", () => {
-    const ledger = new Usage.SubagentUsageLedger();
-    ledger.record("sync-1", "sync", details("scout", 2, 3));
-    ledger.record("job-1", "async", details("builder", 5, 7));
-    ledger.record("job-1", "async", details("builder", 50, 70));
-
-    expect(ledger.rows()).toHaveLength(2);
-    expect(ledger.total()).toMatchObject({ input: 7, output: 10, turns: 2 });
-    expect(ledger.render()).toContain("total: 2t in:7 out:10");
-
-    ledger.clear();
-    expect(ledger.render()).toBe("No subagent usage recorded.");
-  });
-
-  it("retains every text part from only the latest assistant message", () => {
-    expect(
-      Usage.getFinalOutput([
-        { role: "assistant", content: [{ type: "text", text: "earlier answer" }] },
-        { role: "user", content: [{ type: "text", text: "follow-up" }] },
-        {
-          role: "assistant",
-          content: [
-            { type: "text", text: "latest first" },
-            { type: "thinking", thinking: "not output" },
-            { type: "text", text: "latest second" },
-          ],
-        },
-      ] as any),
-    ).toBe("latest first\nlatest second");
-  });
-
-  it.each(["stop", "toolUse"] as const)("accumulates usage and formats final content at the turn limit: %s", (stopReason) => {
-    const accumulator = new Usage.SubagentRunAccumulator({
+function fixture(maxTurns = 2) {
+  let stats: Stats = {
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    cost: 0,
+    assistantMessages: 0,
+  };
+  const run = new Usage.SubagentRunAccumulator(
+    {
       name: "scout",
       task: "x",
       toolNames: [],
@@ -76,54 +43,197 @@ describe("subagent usage accumulation", () => {
       sessionId: "session-1",
       sessionName: "sub-scout",
       cwd: "/tmp/project",
-      maxTurns: 1,
-    }, (turns) => turns >= 1);
-    accumulator.acceptEvent({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "read", args: {} });
-    accumulator.acceptEvent({
-      type: "message_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "text", text: "answer" }],
-        api: "test",
-        provider: "test",
-        model: "m",
-        stopReason,
-        timestamp: 1,
-        usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, totalTokens: 3, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.5 } },
-      } as any,
-    });
+      maxTurns,
+    },
+    (turns) => turns >= maxTurns,
+    () => Usage.usageFromSessionStats(stats),
+  );
+  return {
+    run,
+    setStats: (snapshot: Stats) => {
+      stats = snapshot;
+    },
+  };
+}
 
-    accumulator.acceptEvent({
-      type: "message_end",
-      message: {
-        role: "toolResult",
-        toolCallId: "nested",
-        toolName: "subagent",
-        content: [],
-        details: {},
-        usage: {
-          input: 10,
-          output: 20,
-          cacheRead: 30,
-          cacheWrite: 40,
-          totalTokens: 100,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 1.5 },
-        },
-        isError: false,
-        timestamp: 2,
-      } as any,
-    });
+const billedStats: Stats = {
+  tokens: { input: 11, output: 22, cacheRead: 33, cacheWrite: 44, total: 110 },
+  cost: 2,
+  assistantMessages: 7,
+};
+const billedUsage = { input: 11, output: 22, cacheRead: 33, cacheWrite: 44, cost: 2, turns: 7 };
 
-    expect(accumulator.output()).toBe("answer");
-    expect(accumulator.toolCallCount).toBe(1);
-    expect(accumulator.usage).toMatchObject({ input: 11, output: 22, cacheRead: 33, cacheWrite: 44, cost: 2, turns: 1 });
-    const limited = stopReason !== "stop";
-    expect(accumulator.turnLimitExceeded).toBe(limited);
-    const finalOutput = limited
-      ? "answer\n\n[Note: Turn limit (1) reached. Output may be incomplete.]"
-      : "answer";
-    const result = accumulator.success([]);
-    expect(result.content).toEqual([{ type: "text", text: finalOutput }]);
-    expect(result.details).toMatchObject({ finalOutput, isError: false, turnLimitExceeded: limited, stopReason: limited ? "turn_limit" : "stop" });
+describe("native subagent usage", () => {
+  it("maps cumulative session totals without treating total tokens as input or cost", () => {
+    expect(Usage.usageFromSessionStats(billedStats)).toEqual(billedUsage);
+    expect(
+      Usage.usageFromSessionStats({
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        cost: 0,
+        assistantMessages: 0,
+      }),
+    ).toEqual(Usage.zeroUsage());
   });
+
+  it("reads financial snapshots independently of diagnostic assistant and tool events", () => {
+    const { run, setStats } = fixture();
+    const message = assistant();
+    expect(run.acceptEvent({ type: "message_end", message })).toBe(message);
+    const tool: AgentMessage = {
+      role: "toolResult",
+      toolCallId: "nested",
+      toolName: "subagent",
+      content: [],
+      details: {},
+      isError: false,
+      timestamp: 2,
+      usage: message.usage,
+    };
+    expect(run.acceptEvent({ type: "message_end", message: tool })).toBe(tool);
+    expect(run.usage).toEqual(Usage.zeroUsage());
+
+    setStats(billedStats);
+    const progress = run.progressResult();
+    expect(progress.details.usage).toEqual(billedUsage);
+    expect(run.assistantTurnCount).toBe(1);
+    expect(run.turnLimitExceeded).toBe(false);
+
+    // Native compaction/other usage can change financial totals without a message_end.
+    setStats({
+      ...billedStats,
+      cost: 3.25,
+      tokens: { ...billedStats.tokens, input: 16, total: 115 },
+    });
+    expect(run.usage).toEqual({ ...billedUsage, input: 16, cost: 3.25 });
+    expect(run.success().details.usage).toEqual(run.usage);
+    expect(progress.details.usage).toEqual(billedUsage);
+    expect(run.assistantTurnCount).toBe(1);
+  });
+});
+
+describe("subagent run summary", () => {
+  it("shows placeholders before any finalized assistant output", () => {
+    const { run } = fixture();
+    expect(run.acceptEvent({ type: "agent_start" })).toBeUndefined();
+    run.acceptEvent({ type: "message_start", message: assistant() });
+    expect(run.output()).toBe("");
+    expect(run.assistantTurnCount).toBe(0);
+    expect(run.progressResult().content).toEqual([{ type: "text", text: "(running...)" }]);
+    expect(run.success().content).toEqual([{ type: "text", text: "(no output)" }]);
+  });
+
+  it("keeps only the latest finalized assistant text and diagnostics", () => {
+    const { run } = fixture();
+    run.acceptEvent({
+      type: "message_end",
+      message: assistant({ stopReason: "error", errorMessage: "retry me" }),
+    });
+    const latest = assistant({
+      model: "new-model",
+      content: [
+        { type: "text", text: "latest first" },
+        { type: "thinking", thinking: "not output" },
+        { type: "text", text: "latest second" },
+      ],
+    });
+    run.acceptEvent({ type: "message_end", message: latest });
+    run.acceptEvent({
+      type: "message_end",
+      message: { role: "user", content: "follow-up", timestamp: 3 },
+    });
+    run.acceptEvent({ type: "tool_execution_start", toolCallId: "t1", toolName: "read", args: {} });
+    expect(run.output()).toBe("latest first\nlatest second");
+    expect(run.success().details).toMatchObject({
+      finalOutput: "latest first\nlatest second",
+      model: "new-model",
+      stopReason: "stop",
+      errorMessage: undefined,
+      isError: false,
+      toolCallCount: 1,
+      turnLimitExceeded: false,
+    });
+    // The summary owns text, not mutable assistant content.
+    latest.content.length = 0;
+    expect(run.output()).toBe("latest first\nlatest second");
+  });
+
+  it.each(["stop", "toolUse"] as const)(
+    "uses run-local finalized turns for the limit: %s",
+    (stopReason) => {
+      const { run, setStats } = fixture();
+      setStats(billedStats);
+      run.acceptEvent({ type: "message_end", message: assistant({ stopReason: "toolUse" }) });
+      expect(run.assistantTurnCount).toBe(1);
+      expect(run.turnLimitExceeded).toBe(false);
+      run.acceptEvent({ type: "message_end", message: assistant({ stopReason }) });
+      expect(run.assistantTurnCount).toBe(2);
+      const limited = stopReason === "toolUse";
+      expect(run.turnLimitExceeded).toBe(limited);
+      const output = limited
+        ? "answer\n\n[Note: Turn limit (2) reached. Output may be incomplete.]"
+        : "answer";
+      expect(run.success().content).toEqual([{ type: "text", text: output }]);
+      expect(run.success().details).toMatchObject({
+        finalOutput: output,
+        isError: false,
+        turnLimitExceeded: limited,
+        stopReason: limited ? "turn_limit" : "stop",
+        usage: billedUsage,
+      });
+    },
+  );
+
+  it.each(["error", "aborted"] as const)(
+    "retains incomplete finalized %s output and diagnostics",
+    (stopReason) => {
+      const { run, setStats } = fixture();
+      setStats(billedStats);
+      run.acceptEvent({
+        type: "message_end",
+        message: assistant({
+          stopReason,
+          errorMessage: stopReason === "error" ? "provider failed" : undefined,
+          content: [{ type: "text", text: "partial answer" }],
+        }),
+      });
+      expect(run.success().details).toMatchObject({
+        finalOutput: "partial answer",
+        isError: true,
+        stopReason,
+        errorMessage: stopReason === "error" ? "provider failed" : undefined,
+        usage: billedUsage,
+      });
+    },
+  );
+
+  it("does not reuse an earlier answer when the latest assistant has no output", () => {
+    const { run } = fixture(3);
+    run.acceptEvent({ type: "message_end", message: assistant() });
+    run.acceptEvent({
+      type: "message_end",
+      message: assistant({ stopReason: "aborted", content: [] }),
+    });
+    expect(run.output()).toBe("");
+    expect(run.success().details).toMatchObject({ finalOutput: "(no output)", isError: true });
+  });
+
+  it.each([false, true])(
+    "reports thrown failures without losing finalized output or native usage (aborted=%s)",
+    (aborted) => {
+      const { run, setStats } = fixture();
+      run.acceptEvent({ type: "message_end", message: assistant() });
+      setStats(billedStats);
+      const result = run.failure(new Error("connection lost"), aborted);
+      expect(result.content).toEqual([
+        { type: "text", text: aborted ? "Subagent aborted." : "Subagent error: connection lost" },
+      ]);
+      expect(result.details).toMatchObject({
+        finalOutput: "answer",
+        isError: true,
+        stopReason: aborted ? "aborted" : "error",
+        errorMessage: aborted ? undefined : "connection lost",
+        usage: billedUsage,
+      });
+    },
+  );
 });

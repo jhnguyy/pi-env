@@ -5,9 +5,7 @@ import { Data, Effect } from "effect";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
 
 import type { SubagentRuntimeConfig } from "./config";
-import type { UsageStats } from "./types";
 import * as ChildTypes from "./child-types";
-import { addUsage, zeroUsage } from "./usage";
 
 export const WorkspaceAccess = {
   Read: "read",
@@ -30,8 +28,7 @@ export interface SubagentAdmissionRequest {
 export interface SubagentRunLease {
   readonly runId: string;
   readonly signal: AbortSignal;
-  updateUsage(usage: UsageStats): void;
-  release(usage?: UsageStats): void;
+  release(): void;
 }
 
 interface PendingAdmission {
@@ -47,7 +44,6 @@ interface ActiveRun {
   readonly controller: AbortController;
   readonly done: Promise<void>;
   readonly finish: () => void;
-  usage: UsageStats;
   released: boolean;
   timeout?: ReturnType<typeof setTimeout>;
 }
@@ -64,10 +60,6 @@ function registry(): SupervisorRegistry {
   return root[SUPERVISOR_REGISTRY_KEY] as SupervisorRegistry;
 }
 
-function cloneUsage(usage: UsageStats): UsageStats {
-  return { ...usage };
-}
-
 function canonicalWorkspaceKey(cwd: string): string {
   let resolved = cwd;
   try {
@@ -82,21 +74,10 @@ function canonicalWorkspaceKey(cwd: string): string {
   }
 }
 
-function addUsageDelta(total: UsageStats, previous: UsageStats, next: UsageStats): void {
-  total.input += Math.max(0, next.input - previous.input);
-  total.output += Math.max(0, next.output - previous.output);
-  total.cacheRead += Math.max(0, next.cacheRead - previous.cacheRead);
-  total.cacheWrite += Math.max(0, next.cacheWrite - previous.cacheWrite);
-  total.cost += Math.max(0, next.cost - previous.cost);
-  total.turns += Math.max(0, next.turns - previous.turns);
-}
-
 export class SubagentRunSupervisor {
   private readonly active = new Map<string, ActiveRun>();
   private readonly pending: PendingAdmission[] = [];
   private readonly activeWorkspaceWriters = new Set<string>();
-  private readonly totalUsage = zeroUsage();
-  private readonly usageByRun = new Map<string, UsageStats>();
   readonly children = new Map<string, ChildTypes.NativeChildSession>();
   private readonly childChanges = createEventBus();
   private readonly evicting = new Set<string>();
@@ -155,14 +136,6 @@ export class SubagentRunSupervisor {
       this.pending.push(pending);
       this.drain();
     });
-  }
-
-  usage(prefix?: string): UsageStats {
-    if (!prefix) return cloneUsage(this.totalUsage);
-    return [...this.usageByRun.entries()].reduce(
-      (total, [runId, usage]) => (runId.startsWith(prefix) ? addUsage(total, usage) : total),
-      zeroUsage(),
-    );
   }
 
   subscribeChildren(listener: () => void): () => void {
@@ -321,7 +294,6 @@ export class SubagentRunSupervisor {
       controller,
       done,
       finish,
-      usage: zeroUsage(),
       released: false,
     };
     active.timeout = setTimeout(
@@ -336,23 +308,13 @@ export class SubagentRunSupervisor {
     return {
       runId,
       signal,
-      updateUsage: (usage) => this.updateUsage(runId, usage),
-      release: (usage) => this.release(runId, usage),
+      release: () => this.release(runId),
     };
   }
 
-  private updateUsage(runId: string, usage: UsageStats): void {
+  private release(runId: string): void {
     const active = this.active.get(runId);
     if (!active || active.released) return;
-    addUsageDelta(this.totalUsage, active.usage, usage);
-    active.usage = cloneUsage(usage);
-    this.usageByRun.set(runId, cloneUsage(usage));
-  }
-
-  private release(runId: string, usage?: UsageStats): void {
-    const active = this.active.get(runId);
-    if (!active || active.released) return;
-    if (usage) this.updateUsage(runId, usage);
     active.released = true;
     if (active.timeout) clearTimeout(active.timeout);
     this.active.delete(runId);

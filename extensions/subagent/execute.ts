@@ -181,13 +181,7 @@ export function runResolvedSubagentEffect(
           try {
             supervisor.retainChild(child);
             options.onChild?.(child);
-            const result = await child.runInitial();
-            return Usage.recordSubagentResult(
-              options.ledger,
-              options.runId,
-              options.executionMode ?? Usage.SubagentUsageMode.Sync,
-              result,
-            );
+            return await child.runInitial();
           } catch (error) {
             await child.close();
             throw error;

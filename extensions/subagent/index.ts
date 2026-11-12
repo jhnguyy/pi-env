@@ -11,7 +11,6 @@ import * as Discovery from "./discovery";
 import * as Render from "./render";
 import * as Types from "./types";
 import * as SessionRuntime from "./session-runtime";
-import * as NativeUsage from "../_shared/native-usage";
 import * as AgentTools from "../_shared/agent-tools";
 import * as ChildContext from "../_shared/child-context";
 import * as Transcript from "./transcript";
@@ -73,7 +72,7 @@ const SUBAGENT_PARAMETERS = Type.Object(
   { additionalProperties: false },
 );
 
-type SubagentToolParams = Static<typeof SUBAGENT_PARAMETERS>;
+export type SubagentToolParams = Static<typeof SUBAGENT_PARAMETERS>;
 
 function requireRunParams(params: SubagentToolParams): Resolver.SubagentParams {
   if (!params.name) throw new Error(`name is required for subagent ${params.action}.`);
@@ -86,19 +85,6 @@ function requireRunParams(params: SubagentToolParams): Resolver.SubagentParams {
     system_prompt: params.system_prompt,
     cwd: params.cwd,
   };
-}
-
-function completedJobUsageOnce(reportedJobUsage: Set<string>, job: Jobs.SubagentJob) {
-  if (
-    job.status === Types.SubagentJobStatus.Queued ||
-    job.status === Types.SubagentJobStatus.Running ||
-    job.status === Types.SubagentJobStatus.Cancelling ||
-    reportedJobUsage.has(job.id) ||
-    !job.latestDetails?.usage
-  )
-    return {};
-  reportedJobUsage.add(job.id);
-  return { usage: NativeUsage.toNestedToolUsage(job.latestDetails.usage) };
 }
 
 function getJobRenderDetails(job: Jobs.SubagentJob): Types.SubagentJobRenderDetails {
@@ -137,7 +123,6 @@ export default function (
 ) {
   if (ChildContext.getChildContext()) return;
   const runtime = new SessionRuntime.SubagentSessionRuntime(pi, dependencies);
-  const reportedJobUsage = new Set<string>();
   const browser: { current?: Browser.SubagentBrowser } = {};
   const disposeBrowser = () => {
     browser.current?.dispose();
@@ -226,9 +211,13 @@ export default function (
     signal?: AbortSignal,
   ): Promise<AgentToolResult<Types.SubagentJobRenderDetails>> => {
     if (params.action === SubagentAction.Usage) {
+      const usageSummary = runtime.usageSummary();
       return {
-        content: [{ type: "text", text: runtime.usageText() }],
-        details: { status: Types.SubagentJobToolStatus.Usage },
+        content: [{ type: "text", text: runtime.usageText(usageSummary) }],
+        details: {
+          status: Types.SubagentJobToolStatus.Usage,
+          usageSummary,
+        },
       };
     }
     if (params.action === SubagentAction.List) {
@@ -259,7 +248,6 @@ export default function (
       return {
         content: [{ type: "text", text: Jobs.formatJobResult(waited.job) }],
         details: getJobRenderDetails(waited.job),
-        ...completedJobUsageOnce(reportedJobUsage, waited.job),
       };
     }
     if (params.action === SubagentAction.Result) {
@@ -268,7 +256,6 @@ export default function (
       return {
         content: [{ type: "text", text: Jobs.formatJobResult(job) }],
         details: getJobRenderDetails(job),
-        ...completedJobUsageOnce(reportedJobUsage, job),
       };
     }
     const job =
@@ -297,7 +284,8 @@ export default function (
             onUpdate,
             ctx,
           );
-          return { ...result, usage: NativeUsage.toNestedToolUsage(result.details.usage) };
+          // Child checkpoints own delegated costs; attaching them here would bill them twice.
+          return result;
         }
         if (params.action === SubagentAction.Start) {
           if (signal?.aborted) throw new Error("Subagent start aborted.");

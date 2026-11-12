@@ -18,6 +18,39 @@ Run `/subagents` in terminal mode, search the roster, and select a child. The ch
 
 Closing the browser leaves children running. A completed job's initial result does not change when you continue the child; use the child's conversation for later messages. The browser is a bounded view, not the complete transcript. Inspect the native session file when you need retained history.
 
+## Usage and cost totals
+
+Call `subagent` with `action: "usage"` for recorded parent usage, delegated child usage,
+and their combined total. The result also carries the unrounded numbers in
+`details.usageSummary`. These are native recorded costs, not an invoice estimate
+recalculated from the currently selected model.
+
+Native child session statistics own financial totals, including tool usage,
+compaction, branch summaries, and other native usage entries. Follow-up prompts
+increase the same child's cumulative total. Parent sessions store compact cumulative
+child checkpoints as native custom entries, outside model context; repeated
+snapshots replace that child's contribution rather than adding it again. Job or
+runtime eviction does not erase accounted spending.
+
+The installed extension API cannot append standalone native aggregate usage.
+Consequently, built-in `/session`, footer, and RPC statistics retain native parent
+totals, while `subagent usage` adds delegated checkpoints. New `run`, `wait`, and
+`result` responses do not attach child costs as tool-result usage. Otherwise the
+same costs could be counted through both a result and its checkpoint, including
+when called through codemode.
+
+On reload/resume, accounting reads all parent entries, not just the active branch,
+and reconciles referenced saved children without starting a runtime or rewriting
+their history. Missing, mismatched, older-format, or unreadable child files retain
+their last recorded amounts and make the report explicitly incomplete. Forks
+inherit frozen child amounts; later work in the original parent's children is not
+charged to the fork. In-memory sessions have no restart-durability guarantee.
+
+Existing native tool-result charges remain in the parent baseline. Accounting does
+not discover or backfill historical children that have no checkpoint. A parent
+checkpoint and a child file are not one transaction: recovery can reconcile
+persisted child usage, but cannot recover spending absent from both native records.
+
 ## Lifetime and cancellation
 
 Blocking `run` calls follow caller cancellation. Accepted background jobs, including queued work, survive the launching turn finishing or being interrupted and survive later parent prompts. Interrupting `wait` only stops waiting; use `action: "cancel"` to cancel the job.

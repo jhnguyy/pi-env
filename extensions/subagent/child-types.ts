@@ -59,6 +59,7 @@ export type NativeChildSummary = Pick<
 
 export interface NativeChildSession {
   summary(): NativeChildSummary;
+  checkpointUsage(): void;
   readonly id: string;
   readonly runId: string;
   inspect(): NativeChildSnapshot;

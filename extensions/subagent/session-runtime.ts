@@ -33,7 +33,8 @@ import {
   type SubagentJobRenderDetails,
   type SubagentSessionState as SubagentSessionStateValue,
 } from "./types";
-import { formatUsageCompact, SubagentUsageLedger } from "./usage";
+import { formatUsageCompact } from "./usage";
+import { SubagentUsageAccounting, type SubagentUsageSummary } from "./usage-accounting";
 
 export interface SubagentSessionRuntimeDependencies {
   readonly telemetryRuntimeFactory?: typeof createToolingTelemetryRuntime;
@@ -83,7 +84,7 @@ export function renderActiveJobStatusSlot(
 }
 
 export class SubagentSessionRuntime {
-  private readonly ledger = new SubagentUsageLedger();
+  private readonly accounting: SubagentUsageAccounting;
   private telemetryRuntime: ToolingTelemetryRuntime | undefined;
   private supervisor: SubagentRunSupervisor | undefined;
   private supervisorSessionId: string | undefined;
@@ -99,7 +100,9 @@ export class SubagentSessionRuntime {
   constructor(
     private readonly pi: ExtensionAPI,
     private readonly dependencies: SubagentSessionRuntimeDependencies = {},
-  ) {}
+  ) {
+    this.accounting = new SubagentUsageAccounting((type, data) => pi.appendEntry(type, data));
+  }
 
   get state(): SubagentSessionStateValue {
     return this.sessionState;
@@ -125,7 +128,7 @@ export class SubagentSessionRuntime {
         runSubagentEffect(params, ctx, {
           signal,
           onUpdate,
-          ledger: this.ledger,
+          onChildUsage: this.accounting.childReporter(),
           runId: toolCallId,
           supervisor,
           sessionStorage:
@@ -205,15 +208,21 @@ export class SubagentSessionRuntime {
       const sessionId = ctx.sessionManager.getSessionId();
       const supervisor = getOrCreateSubagentRunSupervisor(sessionId, config);
 
+      let reportChildUsage;
+      try {
+        reportChildUsage = this.accounting.start(ctx.sessionManager);
+      } catch (error) {
+        await this.disposeTelemetry(nextRuntime);
+        throw error;
+      }
       const jobs = new SubagentJobManager(
         this.pi,
-        this.ledger,
+        reportChildUsage,
         nextRuntime,
         config,
         supervisor,
         (jobs) => this.updateJobStatusSlot(jobs, ctx),
       );
-      this.ledger.clear();
       this.telemetryRuntime = nextRuntime;
       this.supervisor = supervisor;
       this.unsubscribeChildren = supervisor.subscribeChildren(() => this.notifyChildrenChanged());
@@ -236,7 +245,6 @@ export class SubagentSessionRuntime {
         await this.disposeActiveResources();
       } finally {
         if (generation === this.lifecycleGeneration) {
-          this.ledger.clear();
           this.sessionState = SubagentSessionState.Inactive;
         }
       }
@@ -302,20 +310,33 @@ export class SubagentSessionRuntime {
     await this.jobs?.settle();
   }
 
-  usageText(): string {
-    if (!this.supervisor) return this.ledger.render();
-    const usage = this.supervisor.usage();
+  usageSummary(): SubagentUsageSummary {
+    for (const child of this.supervisor?.children.values() ?? []) child.checkpointUsage();
+    return this.accounting.summary();
+  }
+
+  usageText(summary = this.usageSummary()): string {
     if (
-      usage.input === 0 &&
-      usage.output === 0 &&
-      usage.cacheRead === 0 &&
-      usage.cacheWrite === 0 &&
-      usage.turns === 0 &&
-      usage.cost === 0
+      summary.childCount === 0 &&
+      summary.unavailableChildren.length === 0 &&
+      Object.values(summary.parent).every((value) => value === 0)
     ) {
       return "No subagent usage recorded.";
     }
-    return `session: ${formatUsageCompact(usage)}`;
+    const lines = [
+      `parent (native): ${formatUsageCompact(summary.parent)}`,
+      `children (${summary.childCount}): ${formatUsageCompact(summary.children)}`,
+      `total: ${formatUsageCompact(summary.total)}`,
+    ];
+    if (summary.unavailableChildren.length) {
+      lines.push("Incomplete: using last recorded usage for unavailable children.");
+      lines.push(
+        ...summary.unavailableChildren.map(
+          (child) => `${child.name} (${child.childSessionId ?? "unknown ID"}): ${child.reason}`,
+        ),
+      );
+    }
+    return lines.join("\n");
   }
 
   private updateJobStatusSlot(jobs: readonly SubagentJob[], ctx: ExtensionContext): void {

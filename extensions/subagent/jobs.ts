@@ -27,7 +27,6 @@ import {
   type SubagentDetails,
   type SubagentJobStatus as SubagentJobStatusValue,
 } from "./types";
-import type { SubagentUsageLedger } from "./usage";
 import { formatUsageCompact, SubagentUsageMode } from "./usage";
 
 export const MAX_CONCURRENT_SUBAGENT_JOBS = DEFAULT_SUBAGENT_LIMITS.maxConcurrentRuns;
@@ -125,7 +124,7 @@ export class SubagentJobManager {
 
   constructor(
     private readonly pi: ExtensionAPI,
-    private readonly ledger?: SubagentUsageLedger,
+    private readonly onChildUsage?: RunSubagentOptions["onChildUsage"],
     private readonly telemetryRuntime?: ToolingTelemetryRuntime,
     private readonly config: SubagentRuntimeConfig = { ...DEFAULT_SUBAGENT_CONFIG },
     supervisor?: SubagentRunSupervisor,
@@ -260,6 +259,7 @@ export class SubagentJobManager {
       sessionStorage: this.config.sessionStorage,
       onAdmitted,
       onUsage,
+      onChildUsage: this.onChildUsage,
     };
     const run = runSubagentEffect(params, ctx, options);
 
@@ -323,7 +323,6 @@ export class SubagentJobManager {
   }
 
   private finish(job: SubagentJob): void {
-    if (job.latestDetails) this.ledger?.record(job.id, SubagentUsageMode.Async, job.latestDetails);
     this.record(job);
     Effect.runSync(Deferred.succeed(job.done, undefined));
     this.pruneTerminalJobs();
@@ -337,7 +336,6 @@ export class SubagentJobManager {
       status: job.status,
       cwd: job.cwd,
       sessionFile: job.latestDetails?.sessionFile,
-      usage: job.latestDetails?.usage,
       errorMessage: job.errorMessage ?? job.latestDetails?.errorMessage,
       resultText: job.resultText,
       resultTruncated: job.resultTruncated,
