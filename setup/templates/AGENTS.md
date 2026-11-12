@@ -5,4 +5,4 @@
 
 ## Documentation
 
-Use documentation and comments to explain what code and tests cannot, rather than restating them.
+Use documentation and comments to explain what code and tests cannot. Before adding prose, identify the reader's unanswered question and its existing authority. Prefer improving that owner over maintaining a parallel description; a feature change does not inherently require documentation changes.
