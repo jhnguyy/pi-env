@@ -1,7 +1,7 @@
 type AvailableModel = { provider: string; id: string };
 
 export const STATIC_DESCRIPTION =
-  "Delegate tasks to native Pi children. Children load their target cwd/agent configuration. Explicit unavailable model/tool selections fail without substitution. Use action=usage for recorded parent, delegated child, and combined usage totals; result retrieval does not charge child usage again.";
+  "Delegate tasks to native Pi children. Children load their target cwd/agent configuration. Explicit unavailable model/tool selections fail without substitution.";
 
 const MODEL_TAG_GUIDANCE = {
   preferred: "Cost-effective gathering, summarization, and mechanical edits",
@@ -24,16 +24,9 @@ export function buildDynamicDescription(
       const tags = modelAnnotations?.[key] ?? [];
       lines.push(`  ${key}${tags.length ? ` [${tags.join(", ")}]` : ""}`);
     }
-    const tags = new Set(
-      availableModels.flatMap((model) => modelAnnotations?.[`${model.provider}/${model.id}`] ?? []),
-    );
+    const tags = new Set(availableModels.flatMap((model) => modelAnnotations?.[`${model.provider}/${model.id}`] ?? []));
     const guidance = Object.entries(MODEL_TAG_GUIDANCE).filter(([tag]) => tags.has(tag));
-    if (guidance.length)
-      lines.push(
-        "",
-        "Model tag guidance:",
-        ...guidance.map(([tag, intent]) => `  - [${tag}] ${intent}.`),
-      );
+    if (guidance.length) lines.push("", "Model tag guidance:", ...guidance.map(([tag, intent]) => `  - [${tag}] ${intent}.`));
   }
   return lines.join("\n");
 }

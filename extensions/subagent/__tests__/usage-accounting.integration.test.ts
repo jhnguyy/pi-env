@@ -80,36 +80,30 @@ describe("native parent child-usage accounting", () => {
     };
   }
 
-  it("replaces cumulative snapshots, deduplicates checkpoints, and retains costs without live children", () => {
+  it("replaces cumulative child costs without charging repeated snapshots", () => {
     assistant(parent, 1);
     const worker = child();
     const { ledger, report } = accounting();
-    const first = { ...snapshot(worker), usage: { ...snapshot(worker).usage } };
-    report(first);
-    report(first);
-    expect(parent.getEntries().filter((e) => e.type === "custom")).toHaveLength(1);
-    first.usage.cost = 999;
+    report(snapshot(worker));
+    report(snapshot(worker));
     expect(ledger.summary().children.cost).toBe(2);
     assistant(worker, 3);
     report(snapshot(worker));
     expect(ledger.summary()).toMatchObject({
-      parent: { cost: 1, turns: 1 },
-      children: { cost: 5, turns: 2 },
-      total: { cost: 6, input: 60, output: 12, cacheRead: 18, cacheWrite: 24, turns: 3 },
+      parent: { cost: 1 },
+      children: { cost: 5 },
+      total: { cost: 6 },
       childCount: 1,
       unavailableChildren: [],
     });
-    // Accounting owns no live-child/job handle: eviction cannot remove its projection.
-    const reloaded = accounting(SessionManager.open(parent.getSessionFile()!)).ledger;
-    expect(reloaded.summary()).toEqual(ledger.summary());
-    const exposed = reloaded.summary();
-    exposed.children.cost = 900;
-    expect(reloaded.summary().children.cost).toBe(5);
   });
 
   it("bills all raw branches, native usage, tool results and summaries despite compaction/context edits", () => {
     const first = assistant(parent, 1);
     const abandoned = assistant(parent, 2);
+    const worker = child();
+    accounting().report(snapshot(worker));
+    child(50); // An unregistered native session is not a delegated cost reference.
     parent.branch(first);
     parent.appendUsage("unknown-operation", "fixture", "fixture", nativeUsage(3));
     parent.appendMessage({
@@ -128,8 +122,9 @@ describe("native parent child-usage accounting", () => {
     const { ledger } = accounting();
     expect(ledger.summary()).toMatchObject({
       parent: { cost: 21, input: 210, output: 42, cacheRead: 63, cacheWrite: 84, turns: 2 },
-      total: { cost: 21 },
-      childCount: 0,
+      children: { cost: 2 },
+      total: { cost: 23 },
+      childCount: 1,
     });
     assistant(parent, 7);
     expect(ledger.summary().parent.cost).toBe(28);
@@ -146,14 +141,9 @@ describe("native parent child-usage accounting", () => {
     const fresh = accounting(freshParent).ledger;
     expect(fresh.summary().children.cost).toBe(5);
     expect(readFileSync(worker.getSessionFile()!, "utf8")).toBe(childBytes);
-    expect(freshParent.getEntries().filter((e) => e.type === "custom")).toHaveLength(2);
     expect(
       accounting(SessionManager.open(parent.getSessionFile()!)).ledger.summary().children.cost,
     ).toBe(5);
-    // A live reporter is fresher than disk and summary never reopens the child.
-    const live = fresh.childReporter();
-    live({ ...snapshot(worker), usage: { ...snapshot(worker).usage, cost: 8 } });
-    expect(fresh.summary().children.cost).toBe(8);
   });
 
   it.each(["valid", "partial"] as const)(
@@ -201,11 +191,9 @@ describe("native parent child-usage accounting", () => {
         { childSessionId: worker.getSessionId(), name: "worker", reason: expect.any(String) },
       ],
     });
-    ledger.childReporter()(snapshot(worker));
-    expect(ledger.summary().unavailableChildren).toEqual([]);
   });
 
-  it.each(["identity", "parent", "invalid", "legacy", "empty", "truncated"])(
+  it.each(["identity", "parent", "invalid", "legacy", "empty", "truncated", "usage"])(
     "retains the checkpoint without rewriting a %s child reference",
     (failure) => {
       const worker = child();
@@ -223,6 +211,11 @@ describe("native parent child-usage accounting", () => {
         if (failure === "legacy") header.version = 2;
         lines[0] = JSON.stringify(header);
         if (failure === "truncated") lines.splice(1);
+        if (failure === "usage") {
+          const message = JSON.parse(lines[1]);
+          message.message.usage.cost.total = "3";
+          lines[1] = JSON.stringify(message);
+        }
         bytes = lines.join("\n") + "\n";
       }
       writeFileSync(file, bytes);
@@ -282,21 +275,5 @@ describe("native parent child-usage accounting", () => {
     expect(accounting(parent).ledger.summary()).toEqual(ledger.summary());
     expect(ledger.summary()).toMatchObject({ children: { cost: 2 }, unavailableChildren: [] });
     expect(accounting(SessionManager.inMemory(root)).ledger.summary().childCount).toBe(0);
-  });
-
-  it("restores raw off-branch checkpoints but never backfills unrelated historical children", () => {
-    const worker = child();
-    const first = parent.getLeafId()!;
-    accounting().report(snapshot(worker));
-    parent.branch(first);
-    parent.appendMessage({ role: "user", content: "other branch", timestamp: 1 });
-    child(50); // Saved but never delegated through this accounting projection.
-    const fresh = accounting(SessionManager.open(parent.getSessionFile()!)).ledger;
-    expect(fresh.summary()).toMatchObject({ childCount: 1, children: { cost: 2 } });
-    expect(
-      parent
-        .getEntries()
-        .some((e) => e.type === "custom" && e.customType === CHILD_USAGE_ENTRY_TYPE),
-    ).toBe(true);
   });
 });

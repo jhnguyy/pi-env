@@ -34,7 +34,7 @@ const SUBAGENT_PARAMETERS = Type.Object(
     action: Type.Enum(Object.values(SubagentAction), {
       type: "string",
       description:
-        "run waits for the initial answer. start returns a background job ID. list shows retained jobs. usage totals child usage.",
+        "run waits for the initial answer. start returns a background job ID. list shows retained jobs. usage reports parent, child, and combined recorded usage; built-in session totals remain parent-only.",
     }),
     name: Type.Optional(
       Type.String({

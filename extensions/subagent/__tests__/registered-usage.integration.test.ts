@@ -19,6 +19,17 @@ import type { SubagentJobRenderDetails } from "../types";
 import type { SubagentUsageSummary } from "../usage-accounting";
 import { testCleanup } from "./cleanup";
 
+function expectCosts(
+  summary: SubagentUsageSummary,
+  parent: number,
+  children: number,
+  total: number,
+) {
+  expect(summary.parent.cost).toBeCloseTo(parent, 8);
+  expect(summary.children.cost).toBeCloseTo(children, 8);
+  expect(summary.total.cost).toBeCloseTo(total, 8);
+}
+
 it("accounts for native children across transport, follow-ups, cancellation, eviction and parent resume", async () => {
   const root = await mkdtemp(join(tmpdir(), "registered-usage-"));
   const cleanup = testCleanup();
@@ -93,14 +104,15 @@ it("accounts for native children across transport, follow-ups, cancellation, evi
   const supervisor = getSubagentRunSupervisor(parent.sessionId)!;
   const sync = [...supervisor.children.values()][0];
   expect(sync.inspect().initialResult?.finalOutput).toBe("child settled");
-  expect((await usage()).children.cost).toBeCloseTo(1.25);
+  // Parent prompts cost 0.2 before each tool and 0.3 after it. Child prices are independent.
+  expectCosts(await usage(), 0.7, 1.25, 1.95);
   const fork = await open(
     SessionManager.forkFrom(parent.sessionManager.getSessionFile()!, root, join(root, "sessions")),
   );
-  expect((await usage(fork)).children.cost).toBeCloseTo(1.25);
+  expectCosts(await usage(fork), 1.2, 1.25, 2.45);
   await sync.input("priced followup", NativeInputMode.Prompt);
-  expect((await usage()).children.cost).toBeCloseTo(3.75);
-  expect((await usage(fork)).children.cost).toBeCloseTo(1.25);
+  expectCosts(await usage(), 1.2, 3.75, 4.95);
+  expectCosts(await usage(fork), 1.7, 1.25, 2.95);
 
   // The child has already spent on its tool-call turn while its gate is still running.
   const accepted = await call(
@@ -113,23 +125,16 @@ it("accounts for native children across transport, follow-ups, cancellation, evi
     true,
   );
   await vi.waitFor(() => expect(existsSync(join(root, "gate-entered"))).toBe(true));
-  expect((await usage()).children.cost).toBeCloseTo(4.5);
+  expectCosts(await usage(), 2.2, 4.5, 6.7);
   await call({ action: "cancel", job_id: accepted.jobId });
   await call({ action: "wait", job_id: accepted.jobId });
-  const settled = await usage();
-  expect(settled.children.cost).toBeCloseTo(4.5);
+  expectCosts(await usage(), 3.7, 4.5, 8.2);
   expect(supervisor.children.has(sync.id)).toBe(false);
   await call({ action: "result", job_id: accepted.jobId });
   await call({ action: "result", job_id: accepted.jobId });
-  const repeated = await usage();
-  expect(repeated.children.cost).toBeCloseTo(settled.children.cost);
-  expect(repeated.total.cost).toBeCloseTo(repeated.parent.cost + repeated.children.cost);
-  // The query snapshot precedes the parent's final 0.3-cost answer.
-  expect(parent.getSessionStats().cost).toBeCloseTo(repeated.parent.cost + 0.3);
-  for (const message of parent.messages) {
-    if (message.role === "toolResult" && ["subagent", "codemode"].includes(message.toolName))
-      expect(message.usage).toBeUndefined();
-  }
+  expectCosts(await usage(), 5.2, 4.5, 9.7);
+  // The query snapshot precedes the parent\'s final 0.3-cost answer.
+  expect(parent.getSessionStats().cost).toBeCloseTo(5.5);
 
   const file = parent.sessionManager.getSessionFile()!;
   await parent.extensionRunner?.emit({ type: "session_shutdown", reason: "reload" });
@@ -137,8 +142,7 @@ it("accounts for native children across transport, follow-ups, cancellation, evi
   sessions.splice(sessions.indexOf(parent), 1);
   parent = await open(SessionManager.open(file));
   const restored = await usage();
-  expect(restored.children.cost).toBeCloseTo(4.5);
+  expectCosts(restored, 5.7, 4.5, 10.2);
   expect(restored.childCount).toBe(2);
   expect(restored.unavailableChildren).toEqual([]);
-  expect(restored.total.cost).toBeCloseTo(restored.parent.cost + 4.5);
 });

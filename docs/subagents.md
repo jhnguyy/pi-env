@@ -30,7 +30,9 @@ compaction, branch summaries, and other native usage entries. Follow-up prompts
 increase the same child's cumulative total. Parent sessions store compact cumulative
 child checkpoints as native custom entries, outside model context; repeated
 snapshots replace that child's contribution rather than adding it again. Job or
-runtime eviction does not erase accounted spending.
+runtime eviction does not erase accounted spending. Runtime maps are disposable projections:
+restart recovery requires the native session files to remain on durable storage, not an
+ephemeral container filesystem.
 
 The installed extension API cannot append standalone native aggregate usage.
 Consequently, built-in `/session`, footer, and RPC statistics retain native parent

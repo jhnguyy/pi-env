@@ -4,22 +4,38 @@ import {
   CURRENT_SESSION_VERSION,
   parseSessionEntries,
   type ExtensionContext,
-  type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import type { Usage } from "@earendil-works/pi-ai";
-import { Result, Schema } from "effect";
+import { Data, Result, Schema } from "effect";
 import type { UsageStats } from "./types";
 import { addUsage, cloneUsage, zeroUsage } from "./usage";
 
 type ReadonlySessionManager = ExtensionContext["sessionManager"];
 
-const UsageStatsSchema = Schema.Struct({
+const TokenFields = {
   input: Schema.Finite,
   output: Schema.Finite,
   cacheRead: Schema.Finite,
   cacheWrite: Schema.Finite,
+};
+const UsageStatsSchema = Schema.Struct({
+  ...TokenFields,
   cost: Schema.Finite,
   turns: Schema.Finite,
+});
+const RecordedUsageSchema = Schema.Struct({
+  ...TokenFields,
+  cost: Schema.Struct({ total: Schema.Finite }),
+});
+// Only the financial projection is decoded; native conversation content stays opaque.
+const AccountingEntrySchema = Schema.Struct({
+  type: Schema.String,
+  message: Schema.optionalKey(
+    Schema.Struct({
+      role: Schema.String,
+      usage: Schema.optionalKey(RecordedUsageSchema),
+    }),
+  ),
+  usage: Schema.optionalKey(RecordedUsageSchema),
 });
 const ChildUsageSnapshotSchema = Schema.Struct({
   childSessionId: Schema.String,
@@ -56,18 +72,20 @@ export const CHILD_USAGE_ENTRY_TYPE = "subagent.child-usage";
  * Pi 1.5.1 exports no standalone accounting helper. Only assistant messages are turns;
  * tool results (including legacy delegated costs) and summary operations are also billed.
  */
-export function usageFromEntries(entries: readonly SessionEntry[]): UsageStats {
+export function usageFromEntries(
+  entries: readonly (typeof AccountingEntrySchema.Type)[],
+): UsageStats {
   const total = zeroUsage();
-  const include = (usage: Usage | undefined) => {
+  const include = (usage: typeof RecordedUsageSchema.Type | undefined) => {
     if (!usage) return;
     addUsage(total, { ...usage, cost: usage.cost.total });
   };
   for (const entry of entries) {
     if (entry.type === "message") {
-      if (entry.message.role === "assistant") {
+      if (entry.message?.role === "assistant") {
         total.turns++;
         include(entry.message.usage);
-      } else if (entry.message.role === "toolResult") include(entry.message.usage);
+      } else if (entry.message?.role === "toolResult") include(entry.message.usage);
     } else if (
       entry.type === "usage" ||
       entry.type === "compaction" ||
@@ -78,33 +96,57 @@ export function usageFromEntries(entries: readonly SessionEntry[]): UsageStats {
   return total;
 }
 
-function recoverUsage(checkpoint: ChildUsageCheckpoint, parentFile: string): UsageStats {
-  if (!checkpoint.sessionFile) throw new Error("No saved child session reference");
+class UsageRecoveryFailed extends Data.TaggedError("UsageRecoveryFailed")<{ reason: string }> {}
+
+const recoveryFailed = (reason: string) => Result.fail(new UsageRecoveryFailed({ reason }));
+
+function recoverUsage(
+  checkpoint: ChildUsageCheckpoint,
+  parentFile: string,
+): Result.Result<UsageStats, UsageRecoveryFailed> {
+  const sessionFile = checkpoint.sessionFile;
+  if (!sessionFile) return recoveryFailed("No saved child session reference");
   // Opening a native manager can repair or migrate its file. Parse without a writer.
-  const content = readFileSync(checkpoint.sessionFile, "utf8");
-  const entries = parseSessionEntries(content);
+  const content = Result.try({
+    try: () => readFileSync(sessionFile, "utf8"),
+    catch: (cause) =>
+      new UsageRecoveryFailed({
+        reason: cause instanceof Error ? cause.message : "Cannot read saved child history",
+      }),
+  });
+  if (Result.isFailure(content)) return Result.fail(content.failure);
+  const entries = parseSessionEntries(content.success);
   const header = entries[0];
   if (
     header?.type !== "session" ||
     header.version !== CURRENT_SESSION_VERSION ||
     header.id !== checkpoint.childSessionId ||
-    !header.parentSession ||
+    typeof header.parentSession !== "string" ||
     resolve(header.parentSession) !== resolve(parentFile)
-  ) {
-    throw new Error("Child session identity or parent reference mismatch");
+  )
+    return recoveryFailed("Child session identity or parent reference mismatch");
+  if (entries.length !== content.success.split("\n").filter((line) => line.trim()).length) {
+    return recoveryFailed("Malformed child history");
   }
-  if (entries.length !== content.split("\n").filter((line) => line.trim()).length) {
-    throw new Error("Malformed child history");
-  }
-  const usage = usageFromEntries(entries.filter((entry) => entry.type !== "session"));
+  const financial = Schema.decodeUnknownResult(Schema.Array(AccountingEntrySchema))(entries);
+  if (
+    Result.isFailure(financial) ||
+    financial.success.some(
+      (entry) =>
+        (entry.type === "message" &&
+          (!entry.message || (entry.message.role === "assistant" && !entry.message.usage))) ||
+        (entry.type === "usage" && !entry.usage),
+    )
+  )
+    return recoveryFailed("Invalid recorded usage in child history");
+  const usage = usageFromEntries(financial.success);
   if (
     Object.keys(checkpoint.usage).some(
       (key) => usage[key as keyof UsageStats] < checkpoint.usage[key as keyof UsageStats],
     )
-  ) {
-    throw new Error("Saved child usage is behind its last known checkpoint");
-  }
-  return usage;
+  )
+    return recoveryFailed("Saved child usage is behind its last known checkpoint");
+  return Result.succeed(usage);
 }
 
 /** Compact child projections live only in the parent's native custom entries.
@@ -146,19 +188,17 @@ export class SubagentUsageAccounting {
       for (const checkpoint of this.children.values()) {
         // Forks inherit a frozen projection, never a claim on the continuing child.
         if (checkpoint.parentSessionId !== parent.getSessionId()) continue;
-        let usage: UsageStats;
-        try {
-          usage = recoverUsage(checkpoint, parentFile);
-        } catch (error) {
+        const recovered = recoverUsage(checkpoint, parentFile);
+        if (Result.isFailure(recovered)) {
           this.unavailable.set(checkpoint.childSessionId, {
             childSessionId: checkpoint.childSessionId,
             name: checkpoint.name,
             sessionFile: checkpoint.sessionFile,
-            reason: error instanceof Error ? error.message : String(error),
+            reason: recovered.failure.reason,
           });
           continue;
         }
-        this.save({ ...checkpoint, usage });
+        this.save({ ...checkpoint, usage: recovered.success });
       }
     }
     return this.childReporter();

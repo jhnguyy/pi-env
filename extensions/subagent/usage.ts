@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentMessage, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { AgentEvent, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { SessionStats } from "@earendil-works/pi-coding-agent";
 
 import type * as Types from "./types";
@@ -80,7 +80,7 @@ export class SubagentRunAccumulator {
     return this.readUsage();
   }
 
-  acceptEvent(event: AgentEvent): AgentMessage | undefined {
+  acceptEvent(event: AgentEvent): void {
     if (event.type === "message_end") {
       const message = event.message;
       if (message.role === "assistant") {
@@ -94,10 +94,9 @@ export class SubagentRunAccumulator {
         this.turnLimitExceeded =
           this.hasReachedLimit(this.assistantTurnCount) && message.stopReason !== "stop";
       }
-      return message;
+      return;
     }
     if (event.type === "tool_execution_start") this.toolCallCount++;
-    return undefined;
   }
 
   output(): string {
