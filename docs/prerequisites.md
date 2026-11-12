@@ -20,8 +20,7 @@ workspace manifest.
 
 ## Dev-tools runtime
 
-Dev-tools requires `flock` on `PATH`. It is included in the Nix and container
-toolchains; portable setups must supply it.
+Portable dev-tools setups require `flock` on `PATH`; Nix and container setups include it.
 
 Set `PI_ENV_LSP_DIR` to an existing absolute runtime directory to isolate a daemon
 from other checkouts or deployments. Leave it unset to share the default daemon
