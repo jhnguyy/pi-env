@@ -54,8 +54,6 @@ export function changedVerificationPlan(change, { checksOnly = false, cwd = proc
         script(
           "test:unit",
           "related",
-          "--maxWorkers=1",
-          "--no-file-parallelism",
           "--bail=1",
           "--passWithNoTests",
           ...inputs.map((file) => `./${file}`),
