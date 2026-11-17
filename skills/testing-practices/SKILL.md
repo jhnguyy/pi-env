@@ -38,7 +38,7 @@ Work through one meaningful behavior at a time. Establish a failing expectation 
 
 Start from existing coverage and consider rewriting, consolidation, and removal before addition. Assign each behavioral promise an authoritative test boundary. Consumers should test their own decisions, relying on established dependency contracts rather than repeating their tests. Add another test only when it detects a distinct failure that retained coverage cannot detect.
 
-Remove assertions that protect no requirement and retire obsolete requirements explicitly.
+Existing behavior is not automatically a requirement. Remove assertions that protect only incidental wording, layout, or sequencing, and retire obsolete requirements explicitly. Keep ordering checks when order affects a dependency or lifecycle contract. When simplifying tests, identify the meaningful failure each retained scenario detects.
 
 Deliberately break the relevant behavior when that would resolve consequential uncertainty about whether a test detects failure. Do not require this for every edit.
 

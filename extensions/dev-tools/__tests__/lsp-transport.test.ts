@@ -5,33 +5,18 @@ describe("LspTransport", () => {
   // ─── serializeMessage ─────────────────────────────────────────────────────
 
   describe("serializeMessage", () => {
-    it("Content-Length matches body byte length", () => {
-      const msg: LspMessage = { jsonrpc: "2.0", id: 2, method: "textDocument/hover", params: { position: { line: 4, character: 10 } } };
+    it("preserves a Unicode payload with byte-correct Content-Length framing", () => {
+      const msg: LspMessage = { jsonrpc: "2.0", id: 3, result: { contents: "こんにちは" } };
       const buf = serializeMessage(msg);
-      const str = buf.toString("ascii", 0, buf.indexOf("\r\n\r\n") + 4);
-      const headerMatch = str.match(/Content-Length: (\d+)/);
-      expect(headerMatch).not.toBeNull();
-      const bodyStart = buf.indexOf("\r\n\r\n") + 4;
-      const body = buf.subarray(bodyStart);
-      expect(body.length).toBe(parseInt(headerMatch![1], 10));
-    });
+      const headerEnd = buf.indexOf("\r\n\r\n");
+      expect(headerEnd).toBeGreaterThan(0);
+      const body = buf.subarray(headerEnd + 4);
 
-    it("body is valid JSON matching the original message", () => {
-      const msg: LspMessage = { jsonrpc: "2.0", id: 3, result: { contents: "string: foo" } };
-      const buf = serializeMessage(msg);
-      const bodyStart = buf.indexOf("\r\n\r\n") + 4;
-      const parsed = JSON.parse(buf.subarray(bodyStart).toString("utf8"));
-      expect(parsed).toEqual(msg);
-    });
-
-    it("handles multibyte UTF-8 correctly", () => {
-      const msg: LspMessage = { jsonrpc: "2.0", method: "test", params: { text: "こんにちは" } };
-      const buf = serializeMessage(msg);
-      const headerStr = buf.toString("ascii", 0, buf.indexOf("\r\n\r\n"));
-      const declared = parseInt(headerStr.match(/Content-Length: (\d+)/)![1], 10);
-      const bodyStart = buf.indexOf("\r\n\r\n") + 4;
-      const actualBodyLen = buf.length - bodyStart;
-      expect(actualBodyLen).toBe(declared);
+      const declaredLength = buf
+        .toString("ascii", 0, headerEnd)
+        .match(/Content-Length: (\d+)/)?.[1];
+      expect(declaredLength).toBe(String(body.length));
+      expect(JSON.parse(body.toString("utf8"))).toEqual(msg);
     });
   });
 
@@ -96,5 +81,4 @@ describe("LspTransport", () => {
       expect(msgs[0]).toEqual(good);
     });
   });
-
 });

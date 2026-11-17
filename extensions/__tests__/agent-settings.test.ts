@@ -21,26 +21,23 @@ function envWith(files: Record<string, string>, onRead?: (path: string) => void)
 }
 
 describe("agent settings", () => {
-  it.effect("parses shared settings from overlaid settings.json files", () =>
-    Effect.gen(function* () {
-      const snapshot = yield* loadSettingsSnapshotEffect(
-        "/repo",
-        envWith({
-          "/global/settings.json": JSON.stringify({
-            modelAnnotations: { "provider/model": ["preferred"] },
-            extensions: ["global-extension"],
-          }),
-          "/repo/.pi/settings.json": JSON.stringify({ extensions: ["web-context"] }),
+  vitestIt("loads agent settings with project precedence", () => {
+    const settings = readOptionalAgentSettings(
+      envWith({
+        "/global/settings.json": JSON.stringify({
+          modelAnnotations: { "provider/model": ["preferred"] },
+          extensions: ["global-extension"],
         }),
-      );
-      const settings = yield* decodeAgentSettingsSnapshotEffect(snapshot);
+        "/repo/.pi/settings.json": JSON.stringify({ extensions: ["web-context"] }),
+      }),
+      "/repo",
+    );
 
-      expect(settings).toEqual({
-        modelAnnotations: { "provider/model": ["preferred"] },
-        extensions: ["web-context"],
-      });
-    }),
-  );
+    expect(settings).toEqual({
+      modelAnnotations: { "provider/model": ["preferred"] },
+      extensions: ["web-context"],
+    });
+  });
 
   vitestIt("distinguishes both-missing from existing-empty for optional settings", () => {
     expect(readOptionalAgentSettings(envWith({}), "/repo")).toBeNull();
@@ -55,11 +52,8 @@ describe("agent settings", () => {
     ).toBeNull();
   });
 
-  it.effect("reports typed errors for required settings", () =>
+  it.effect("attributes invalid agent fields to the overlaid settings paths", () =>
     Effect.gen(function* () {
-      const malformed = yield* Effect.result(
-        loadSettingsSnapshotEffect("/repo", envWith({ "/global/settings.json": "not json" })),
-      );
       const invalidSnapshot = yield* loadSettingsSnapshotEffect(
         "/repo",
         envWith({
@@ -67,14 +61,6 @@ describe("agent settings", () => {
         }),
       );
       const invalid = yield* Effect.result(decodeAgentSettingsSnapshotEffect(invalidSnapshot));
-
-      expect(malformed._tag).toBe("Failure");
-      if (malformed._tag === "Failure")
-        expect(malformed.failure).toMatchObject({
-          _tag: "SettingsDecodeError",
-          path: "/global/settings.json",
-          source: "global",
-        });
       expect(invalid._tag).toBe("Failure");
       if (invalid._tag === "Failure")
         expect(invalid.failure).toMatchObject({

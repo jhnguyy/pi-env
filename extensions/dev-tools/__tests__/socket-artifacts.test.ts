@@ -1,17 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { removeStaleArtifact, removeStaleArtifacts, type SocketArtifactFs } from "../socket-artifacts";
-
-describe("removeStaleArtifact", () => {
-  it("removes existing artifacts", () => {
-    const fs: SocketArtifactFs = {
-      existsSync: vi.fn(() => true),
-      unlinkSync: vi.fn(),
-    };
-
-    expect(removeStaleArtifact("/tmp/stale.sock", fs)).toBe(true);
-    expect(fs.unlinkSync).toHaveBeenCalledWith("/tmp/stale.sock");
-  });
-});
+import { removeStaleArtifacts, type SocketArtifactFs } from "../socket-artifacts";
 
 describe("removeStaleArtifacts", () => {
   it("removes all existing artifacts and returns the removal count", () => {
@@ -20,11 +8,9 @@ describe("removeStaleArtifacts", () => {
       unlinkSync: vi.fn(),
     };
 
-    expect(removeStaleArtifacts([
-      "/tmp/stale.sock",
-      "/tmp/missing.pid",
-      "/tmp/stale.pid",
-    ], fs)).toBe(2);
+    expect(
+      removeStaleArtifacts(["/tmp/stale.sock", "/tmp/missing.pid", "/tmp/stale.pid"], fs),
+    ).toBe(2);
     expect(fs.unlinkSync).toHaveBeenCalledTimes(2);
     expect(fs.unlinkSync).toHaveBeenCalledWith("/tmp/stale.sock");
     expect(fs.unlinkSync).toHaveBeenCalledWith("/tmp/stale.pid");

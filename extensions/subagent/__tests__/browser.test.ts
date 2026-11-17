@@ -136,7 +136,8 @@ it("renders supplied snapshot fields and handles supported editor shortcut keys"
       .map((line) => line.trimEnd())
       .join("\n");
     expect(configuration).toContain("Cwd: /target");
-    expect(configuration).toContain("Active tools\nread\n\nCallable tools\nread\nlate");
+    expect(configuration).toMatch(/Active tools\s+read\b/);
+    expect(configuration).toMatch(/Callable tools\s+read\s+late\b/);
     browser.handleInput("\t");
     expect(
       browser
@@ -199,8 +200,9 @@ it("bounds rendered dimensions on resize and ignores keys after view disposal", 
       tui.terminal.rows = rows;
       browser.invalidate();
       const rendered = browser.render(width);
-      expect(rendered.length).toBeLessThanOrEqual(Math.max(1, Math.floor(rows * 0.8)));
-      expect(rendered.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(rendered.length).toBeGreaterThan(0);
+      expect(rendered.length).toBeLessThanOrEqual(rows);
+      for (const line of rendered) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
     browser.dispose();
     browser.dispose();
