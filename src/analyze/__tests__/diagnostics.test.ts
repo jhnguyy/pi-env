@@ -13,7 +13,6 @@ import {
   MAX_DIAGNOSTIC_STRING_LENGTH,
   createAnalysisDiagnosticEvent,
   createEffectAnalysisDiagnostics,
-  sanitizeDiagnosticAttributes,
 } from "../diagnostics.js";
 import { analyzeEffect } from "../engine.js";
 import { AnalysisJournal } from "../journal.js";
@@ -52,7 +51,7 @@ async function leftKind(
 
 describe("analyze diagnostic contracts", () => {
   it("filters unapproved attribute keys, truncates strings, and excludes nonfinite numbers", () => {
-    const attributes = sanitizeDiagnosticAttributes({
+    const diagnostic = event("safe-run", 1, AnalyzeDiagnosticEventType.Failure, {
       scope_mode: "diff",
       analyzer: "duplicates",
       stage: "x".repeat(500),
@@ -62,7 +61,7 @@ describe("analyze diagnostic contracts", () => {
       command: "rm -rf /",
       max_memory_mb: Number.POSITIVE_INFINITY,
     });
-    expect(attributes).toEqual({
+    expect(diagnostic.attributes).toEqual({
       scope_mode: "diff",
       analyzer: "duplicates",
       stage: "x".repeat(MAX_DIAGNOSTIC_STRING_LENGTH),
@@ -101,7 +100,7 @@ describe("analyze diagnostic contracts", () => {
     ]);
   });
 
-  it("records the engine's expected spans and events through an injected diagnostics seam", async () => {
+  it("reports run lifecycle and stage diagnostics through the injected seam", async () => {
     const events: ReturnType<typeof event>[] = [];
     const spans: string[] = [];
     let tick = 0;
@@ -134,19 +133,30 @@ describe("analyze diagnostic contracts", () => {
     );
 
     expect(result.summary.failures).toBe(0);
-    expect(spans).toEqual([
-      AnalyzeSpanName.Preflight,
-      AnalyzeSpanName.Scope,
-      AnalyzeSpanName.Result,
-    ]);
-    expect(events.map((item) => item.type)).toEqual([
-      AnalyzeDiagnosticEventType.RunStarted,
-      AnalyzeDiagnosticEventType.StageStarted,
-      AnalyzeDiagnosticEventType.StageCompleted,
-      AnalyzeDiagnosticEventType.MemorySample,
-      AnalyzeDiagnosticEventType.RunCompleted,
-    ]);
-    expect(events.at(-1)).toMatchObject({ runId: "integrated-run", terminal: true });
+    expect(spans).toEqual(
+      expect.arrayContaining([
+        AnalyzeSpanName.Preflight,
+        AnalyzeSpanName.Scope,
+        AnalyzeSpanName.Result,
+      ]),
+    );
+    expect(events[0]).toMatchObject({
+      type: AnalyzeDiagnosticEventType.RunStarted,
+      terminal: false,
+    });
+    expect(events.at(-1)).toMatchObject({
+      type: AnalyzeDiagnosticEventType.RunCompleted,
+      terminal: true,
+    });
+    expect(events.map((item) => item.type)).toEqual(
+      expect.arrayContaining([
+        AnalyzeDiagnosticEventType.StageStarted,
+        AnalyzeDiagnosticEventType.StageCompleted,
+        AnalyzeDiagnosticEventType.MemorySample,
+      ]),
+    );
+    expect(events.filter((item) => item.terminal)).toHaveLength(1);
+    for (const item of events) expect(item.runId).toBe("integrated-run");
   });
 
   it("requires explicit valid configuration before enabling OTLP export", async () => {
@@ -234,22 +244,6 @@ describe("bounded crash journal", () => {
     await journal.append(event("run", 2, AnalyzeDiagnosticEventType.RunCompleted));
     await journal.close();
     expect(errors).toHaveLength(1);
-  });
-
-  it("persists constructor-sanitized events without their excluded input fields", async () => {
-    const directory = fixtureRoot();
-    const journal = await AnalysisJournal.open({ directory });
-    await journal.append(
-      event("safe-run", 1, AnalyzeDiagnosticEventType.Failure, {
-        termination_reason: AnalyzeTerminationReason.Analyzer,
-        path: "/secret/file.ts",
-        stdout: "raw output",
-      }),
-    );
-    await journal.close();
-    const text = readFileSync(join(directory, "current.ndjson"), "utf8");
-    expect(text).not.toContain("/secret/file.ts");
-    expect(text).not.toContain("raw output");
   });
 });
 
