@@ -1,15 +1,16 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   ModelRegistry,
   ModelRuntime,
-  type ExtensionAPI,
   type ExtensionToolContext,
 } from "@earendil-works/pi-coding-agent";
 import * as TempDir from "../../../src/testing/temp-dir";
-import webContext from "../index";
+import { registerWebSearch } from "../search";
+import { toolResultText } from "../../_shared/tool-render";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -19,6 +20,24 @@ it.each(["openai-responses", "anthropic-messages"] as const)(
     const root = TempDir.forTestSync("native-web-search-");
     vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
     const modelId = "gpt-5.5";
+    mkdirSync(join(root, ".pi"));
+    writeFileSync(
+      join(root, ".pi", "settings.json"),
+      JSON.stringify({
+        webContext: {
+          openaiHostedTools: {
+            enabled: false,
+            searchContextSize: "high",
+            externalWebAccess: false,
+          },
+          anthropicHostedTools: { enabled: false, tools: ["web_search", "web_fetch"], maxUses: 3 },
+        },
+      }),
+    );
+    vi.stubEnv(
+      api === "openai-responses" ? "PI_OPENAI_WEB_TOOLS" : "PI_ANTHROPIC_WEB_TOOLS",
+      "true",
+    );
     const source = {
       type: "web_search_result",
       title: "Release notes",
@@ -121,7 +140,7 @@ it.each(["openai-responses", "anthropic-messages"] as const)(
     let receivedPath = "";
     let authenticated = false;
     let request: Record<string, unknown> | undefined;
-    await using server = createServer(async (req, res) => {
+    async function respond(req: IncomingMessage, res: ServerResponse) {
       receivedPath = req.url ?? "";
       authenticated =
         api === "openai-responses"
@@ -134,6 +153,9 @@ it.each(["openai-responses", "anthropic-messages"] as const)(
       res.end(
         events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""),
       );
+    }
+    await using server = createServer((req, res) => {
+      void respond(req, res).catch((error: Error) => res.destroy(error));
     });
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
@@ -162,22 +184,20 @@ it.each(["openai-responses", "anthropic-messages"] as const)(
     });
     const registry = new ModelRegistry(runtime);
     const model = registry.find("search-fixture", modelId);
-    expect(model).toBeDefined();
-    const registerTool = vi.fn();
-    webContext({ registerTool, events: { emit: vi.fn(), on: vi.fn() } } as unknown as ExtensionAPI);
-    const tool = registerTool.mock.calls
-      .map(([definition]) => definition)
-      .find((definition) => definition.name === "web_search");
+    if (!model) throw new Error("Missing fixture model");
+    const tool = registerWebSearch({ registerTool() {} });
+    const current = { ...model, provider: "other", api: "other" };
+    const ctx = { cwd: root, model: current, modelRegistry: registry } as ExtensionToolContext;
     const result = await tool.execute(
       "search-1",
-      { query: "latest release" },
+      { query: "latest release", model: "search-fixture/gpt-5.5" },
       undefined,
       undefined,
-      { cwd: root, model, modelRegistry: registry } as ExtensionToolContext,
+      ctx,
     );
     expect(result.isError).not.toBe(true);
-    expect(result.content[0].text).toContain("Release 42 is available.");
-    expect(result.content[0].text).toContain(source.url);
+    expect(toolResultText(result)).toContain("Release 42 is available.");
+    expect(toolResultText(result)).toContain(source.url);
     expect(JSON.stringify(result)).not.toContain(source.encrypted_content);
     expect(result.usage).toMatchObject({ input: 20, output: 30, totalTokens: 50 });
     expect(authenticated).toBe(true);
@@ -185,10 +205,15 @@ it.each(["openai-responses", "anthropic-messages"] as const)(
       api === "openai-responses" ? "/v1/responses" : "/v1/messages",
     );
     expect(request?.tools).toEqual([
-      expect.objectContaining({
-        type: api === "openai-responses" ? "web_search" : "web_search_20250305",
-      }),
+      api === "openai-responses"
+        ? { type: "web_search", search_context_size: "high", external_web_access: false }
+        : { type: "web_search_20250305", name: "web_search", max_uses: 3 },
     ]);
+    expect(ctx.model).toBe(current);
+    const messages = api === "openai-responses" ? request?.input : request?.messages;
+    expect(messages).toEqual(expect.arrayContaining([expect.objectContaining({ role: "user" })]));
+    if (!Array.isArray(messages)) throw new Error("Missing query messages");
+    expect(messages.filter((message) => message.role === "user")).toHaveLength(1);
     expect(JSON.stringify(request)).toContain("latest release");
   },
 );

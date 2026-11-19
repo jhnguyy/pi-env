@@ -1,9 +1,5 @@
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
-import {
-  truncateHead,
-  type ExtensionAPI,
-  type ExtensionToolContext,
-} from "@earendil-works/pi-coding-agent";
+import { truncateHead, type ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { isObject } from "../_shared/settings";
@@ -13,17 +9,9 @@ import {
   shortDescription,
   toolExpandHint,
   toolResultText,
+  type PublicPiToolHost,
 } from "../_shared/tool-render";
-import {
-  injectAnthropicHostedWebTools,
-  isAnthropicHostedWebToolsModel,
-  loadAnthropicWebToolSettings,
-} from "./anthropic-tools";
-import {
-  injectOpenAIHostedWebTools,
-  isOpenAIHostedWebToolsModel,
-  loadOpenAIWebToolSettings,
-} from "./openai-tools";
+import { searchPayload } from "./providers";
 
 interface SearchSource {
   title: string;
@@ -95,39 +83,6 @@ class SearchEvidence {
   }
 }
 
-function searchPayload(model: Model<Api>, cwd: string): (payload: unknown) => unknown {
-  if (isAnthropicHostedWebToolsModel(model)) {
-    const settings = loadAnthropicWebToolSettings(cwd);
-    if (!settings.enabled || !settings.tools.includes("web_search")) {
-      throw new Error(
-        "Anthropic web search is disabled in webContext settings or PI_ANTHROPIC_WEB_TOOLS.",
-      );
-    }
-    return (payload) =>
-      injectAnthropicHostedWebTools(payload, { ...settings, tools: ["web_search"] });
-  }
-  if (isOpenAIHostedWebToolsModel(model)) {
-    const settings = loadOpenAIWebToolSettings(cwd);
-    if (!settings.enabled)
-      throw new Error(
-        "OpenAI web search is disabled in webContext settings or PI_OPENAI_WEB_TOOLS.",
-      );
-    return (payload) => {
-      const injected = injectOpenAIHostedWebTools(payload, settings);
-      if (!isObject(injected)) throw new Error("Invalid provider search payload");
-      const include = Array.isArray(injected.include) ? injected.include : [];
-      return {
-        ...injected,
-        tool_choice: { type: "web_search" },
-        include: [...new Set([...include, "web_search_call.action.sources"])],
-      };
-    };
-  }
-  throw new Error(
-    `Web search is not supported for ${model.provider}/${model.id}. Choose a search-capable OpenAI Responses or Anthropic model with the model parameter.`,
-  );
-}
-
 function resolveSearchModel(ctx: ExtensionToolContext, requested?: string): Model<Api> {
   let model = ctx.model;
   if (requested) {
@@ -160,8 +115,8 @@ function searchError(
   return undefined;
 }
 
-export function registerWebSearch(pi: ExtensionAPI) {
-  registerPublicTool(
+export function registerWebSearch(pi: PublicPiToolHost) {
+  return registerPublicTool(
     pi,
     definePublicTool({
       name: "web_search",
@@ -171,7 +126,7 @@ export function registerWebSearch(pi: ExtensionAPI) {
       description: [
         "Search the public web using a separate search-enabled provider request and return an answer with source URLs.",
         "Uses the current model and Pi's configured authentication unless model='provider/model-id' is supplied.",
-        "Requires a search-capable OpenAI Responses or Anthropic model; provider search and model charges apply.",
+        "Requires web search support for the selected model; provider search and model charges apply.",
         "Only the query is sent, not conversation history. Do not include secrets or private information.",
         "Output is bounded to 50 KB/2000 lines; requests time out after two minutes. Use web_fetch to inspect a source.",
       ].join("\n"),
