@@ -1,1 +1,11 @@
-vulnerabilities: []
+vulnerabilities:
+  - id: CVE-2026-56851
+    paths:
+      - "**/@effect+tsgo-linux-x64@0.68.1/node_modules/@effect/tsgo-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "Accept the crafted-input panic risk temporarily for local CLI checking. The affected nickname profile appears unused. Remove when compiler packages bundle fixed x/text."
+  - id: CVE-2026-56852
+    paths:
+      - "**/@effect+tsgo-linux-x64@0.68.1/node_modules/@effect/tsgo-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "Accept the malformed-UTF-8 normalization hang risk temporarily for local CLI checking. Do not expose this compiler as an untrusted-input service. Remove when compiler packages bundle fixed x/text."
