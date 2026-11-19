@@ -2,7 +2,6 @@ import { formatSize, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Data, Effect } from "effect";
 import { Type } from "typebox";
-import { PiEvent } from "../_shared/agent-tools";
 import { txt } from "../_shared/result";
 import {
   definePublicTool,
@@ -10,20 +9,7 @@ import {
   toolExpandHint,
   toolResultText,
 } from "../_shared/tool-render";
-import {
-  injectAnthropicHostedWebTools,
-  isAnthropicHostedWebToolsModel,
-  loadAnthropicWebToolSettings,
-  shouldInjectAnthropicHostedWebTools,
-  type AnthropicWebToolSettings,
-} from "./anthropic-tools";
-import {
-  injectOpenAIHostedWebTools,
-  isOpenAIHostedWebToolsModel,
-  loadOpenAIWebToolSettings,
-  shouldInjectOpenAIHostedWebTools,
-  type OpenAIWebToolSettings,
-} from "./openai-tools";
+import { registerWebSearch } from "./search";
 
 export const WebFetchMode = {
   Raw: "raw",
@@ -422,26 +408,7 @@ function webFetchPreview(text: string): { text: string; truncated: boolean } {
 }
 
 export default function webContext(pi: ExtensionAPI) {
-  let anthropicSettings: AnthropicWebToolSettings | undefined;
-  let openAISettings: OpenAIWebToolSettings | undefined;
-
-  pi.on(PiEvent.BeforeProviderRequest, (event, ctx) => {
-    if (isAnthropicHostedWebToolsModel(ctx.model)) {
-      anthropicSettings ??= loadAnthropicWebToolSettings(ctx.cwd);
-      return shouldInjectAnthropicHostedWebTools(ctx.model, anthropicSettings)
-        ? injectAnthropicHostedWebTools(event.payload, anthropicSettings)
-        : undefined;
-    }
-
-    if (isOpenAIHostedWebToolsModel(ctx.model)) {
-      openAISettings ??= loadOpenAIWebToolSettings(ctx.cwd);
-      return shouldInjectOpenAIHostedWebTools(ctx.model, openAISettings)
-        ? injectOpenAIHostedWebTools(event.payload, openAISettings)
-        : undefined;
-    }
-
-    return undefined;
-  });
+  registerWebSearch(pi);
 
   const webFetchTool = definePublicTool({
     name: "web_fetch",
