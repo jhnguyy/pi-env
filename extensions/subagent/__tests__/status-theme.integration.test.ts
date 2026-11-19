@@ -85,15 +85,15 @@ it("recolors the same mounted native widget without a job event, then updates an
     expect(plain()).toEqual(first.map((line: string) => stripAnsi(line).trim()));
     expect(below.render(12).every((line) => visibleWidth(line) <= 12)).toBe(true);
 
-    renderActiveJobStatusSlot([{ ...jobs[1]!, status: "running" }], ctx);
+    renderActiveJobStatusSlot([{ ...jobs[1], status: "running" }], ctx);
     expect(plain()).toEqual(["subagent tests [running]"]);
     renderActiveJobStatusSlot(
-      Array.from({ length: 12 }, (_, index) => ({ ...jobs[0]!, name: `child-${index}` })),
+      Array.from({ length: 12 }, (_, index) => ({ ...jobs[0], name: `child-${index}` })),
       ctx,
     );
     expect(plain()).toHaveLength(11);
     expect(plain().at(-1)).toBe("... (widget truncated)");
-    renderActiveJobStatusSlot([{ ...jobs[1]!, status: "completed" }], ctx);
+    renderActiveJobStatusSlot([{ ...jobs[1], status: "completed" }], ctx);
     expect(host.extensionWidgetsBelow.has("subagents")).toBe(false);
     expect(below.render(100)).toEqual([]);
     renderActiveJobStatusSlot([], ctx);
