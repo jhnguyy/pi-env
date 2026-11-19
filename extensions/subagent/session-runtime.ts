@@ -4,6 +4,7 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Effect, Result } from "effect";
 
 import {
@@ -78,10 +79,38 @@ export function renderActiveJobStatusSlot(
   ctx: ExtensionContext,
 ): void {
   if (!ctx.hasUI) return;
-  const lines = formatActiveJobStatusLines(jobs, ctx.ui.theme);
-  ctx.ui.setWidget("subagents", lines.length > 0 ? lines : undefined, {
-    placement: "belowEditor",
-  });
+  const options = { placement: "belowEditor" } as const;
+  if (!jobs.some((job) => ACTIVE_JOB_STATUSES.has(job.status))) {
+    ctx.ui.setWidget("subagents", undefined, options);
+    return;
+  }
+  if (ctx.mode !== "tui") {
+    ctx.ui.setWidget("subagents", formatActiveJobStatusLines(jobs, ctx.ui.theme), options);
+    return;
+  }
+  ctx.ui.setWidget(
+    "subagents",
+    (_tui, theme) => {
+      const text = new Text("", 1, 0);
+      return {
+        render(width) {
+          // Rebuild themed strings on every render through the SDK's live theme proxy.
+          const lines = formatActiveJobStatusLines(jobs, theme);
+          // Component widgets own the padding and row limit that Pi applies to string-array widgets.
+          const visible = lines.slice(0, 10);
+          if (lines.length > 10) {
+            visible.push(theme.fg("muted", "... (widget truncated)"));
+          }
+          text.setText(visible.join("\n"));
+          return text.render(width);
+        },
+        invalidate() {
+          text.invalidate();
+        },
+      };
+    },
+    options,
+  );
 }
 
 export class SubagentSessionRuntime {
