@@ -1,0 +1,194 @@
+import { createServer } from "node:http";
+import { once } from "node:events";
+import { join } from "node:path";
+import { afterEach, expect, it, vi } from "vitest";
+import {
+  ModelRegistry,
+  ModelRuntime,
+  type ExtensionAPI,
+  type ExtensionToolContext,
+} from "@earendil-works/pi-coding-agent";
+import * as TempDir from "../../../src/testing/temp-dir";
+import webContext from "../index";
+
+afterEach(() => vi.unstubAllEnvs());
+
+it.each(["openai-responses", "anthropic-messages"] as const)(
+  "uses native %s transport/auth and preserves source metadata omitted from normalized messages",
+  async (api) => {
+    const root = TempDir.forTestSync("native-web-search-");
+    vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
+    const modelId = "gpt-5.5";
+    const source = {
+      type: "web_search_result",
+      title: "Release notes",
+      url: "https://example.com/release",
+      encrypted_content: "must-not-be-returned",
+    };
+    const outputText = {
+      type: "output_text",
+      text: "Release 42 is available.",
+      annotations: [
+        {
+          type: "url_citation",
+          title: source.title,
+          url: source.url,
+          start_index: 0,
+          end_index: 10,
+        },
+      ],
+    };
+    const message = {
+      type: "message",
+      id: "msg_1",
+      role: "assistant",
+      status: "completed",
+      content: [outputText],
+    };
+    const search = {
+      type: "web_search_call",
+      id: "ws_1",
+      status: "completed",
+      action: { type: "search", query: "latest release" },
+    };
+    const events =
+      api === "openai-responses"
+        ? [
+            { type: "response.output_item.done", output_index: 0, item: search },
+            {
+              type: "response.output_item.added",
+              output_index: 1,
+              item: { ...message, content: [] },
+            },
+            { type: "response.output_item.done", output_index: 1, item: message },
+            {
+              type: "response.completed",
+              response: {
+                id: "resp_1",
+                model: modelId,
+                status: "completed",
+                output: [search, message],
+                usage: { input_tokens: 20, output_tokens: 30, total_tokens: 50 },
+              },
+            },
+          ]
+        : [
+            {
+              type: "message_start",
+              message: {
+                id: "msg_1",
+                type: "message",
+                role: "assistant",
+                model: modelId,
+                content: [],
+                usage: { input_tokens: 20, output_tokens: 0 },
+              },
+            },
+            {
+              type: "content_block_start",
+              index: 0,
+              content_block: {
+                type: "server_tool_use",
+                id: "srv_1",
+                name: "web_search",
+                input: { query: "latest release" },
+              },
+            },
+            { type: "content_block_stop", index: 0 },
+            {
+              type: "content_block_start",
+              index: 1,
+              content_block: {
+                type: "web_search_tool_result",
+                tool_use_id: "srv_1",
+                content: [source],
+              },
+            },
+            { type: "content_block_stop", index: 1 },
+            {
+              type: "content_block_start",
+              index: 2,
+              content_block: { type: "text", text: "Release 42 is available." },
+            },
+            { type: "content_block_stop", index: 2 },
+            {
+              type: "message_delta",
+              delta: { stop_reason: "end_turn" },
+              usage: { output_tokens: 30 },
+            },
+            { type: "message_stop" },
+          ];
+    let receivedPath = "";
+    let authenticated = false;
+    let request: Record<string, unknown> | undefined;
+    await using server = createServer(async (req, res) => {
+      receivedPath = req.url ?? "";
+      authenticated =
+        api === "openai-responses"
+          ? req.headers.authorization === "Bearer fixture-key"
+          : req.headers["x-api-key"] === "fixture-key";
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      request = JSON.parse(Buffer.concat(chunks).toString());
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(
+        events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""),
+      );
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing server address");
+    const runtime = await ModelRuntime.create({
+      authPath: join(root, "auth.json"),
+      modelsPath: null,
+      refreshOnCreate: false,
+    });
+    runtime.registerProvider("search-fixture", {
+      baseUrl: `http://127.0.0.1:${address.port}${api === "openai-responses" ? "/v1" : ""}`,
+      apiKey: "fixture-key",
+      api,
+      models: [
+        {
+          id: modelId,
+          name: "Search fixture",
+          reasoning: false,
+          input: ["text"],
+          contextWindow: 100_000,
+          maxTokens: 4096,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        },
+      ],
+    });
+    const registry = new ModelRegistry(runtime);
+    const model = registry.find("search-fixture", modelId);
+    expect(model).toBeDefined();
+    const registerTool = vi.fn();
+    webContext({ registerTool, events: { emit: vi.fn(), on: vi.fn() } } as unknown as ExtensionAPI);
+    const tool = registerTool.mock.calls
+      .map(([definition]) => definition)
+      .find((definition) => definition.name === "web_search");
+    const result = await tool.execute(
+      "search-1",
+      { query: "latest release" },
+      undefined,
+      undefined,
+      { cwd: root, model, modelRegistry: registry } as ExtensionToolContext,
+    );
+    expect(result.isError).not.toBe(true);
+    expect(result.content[0].text).toContain("Release 42 is available.");
+    expect(result.content[0].text).toContain(source.url);
+    expect(JSON.stringify(result)).not.toContain(source.encrypted_content);
+    expect(result.usage).toMatchObject({ input: 20, output: 30, totalTokens: 50 });
+    expect(authenticated).toBe(true);
+    expect(new URL(receivedPath, "http://fixture").pathname).toBe(
+      api === "openai-responses" ? "/v1/responses" : "/v1/messages",
+    );
+    expect(request?.tools).toEqual([
+      expect.objectContaining({
+        type: api === "openai-responses" ? "web_search" : "web_search_20250305",
+      }),
+    ]);
+    expect(JSON.stringify(request)).toContain("latest release");
+  },
+);

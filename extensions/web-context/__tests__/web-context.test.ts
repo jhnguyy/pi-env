@@ -373,7 +373,7 @@ describe("openai hosted web tools", () => {
     ]);
   });
 
-  it("only enables hosted search for OpenAI GPT-5.5 responses models", () => {
+  it("enables search for Responses APIs and leaves model capability checks to the provider", () => {
     expect(
       shouldInjectOpenAIHostedWebTools(
         { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" },
@@ -403,7 +403,7 @@ describe("openai hosted web tools", () => {
         { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.4" },
         settings,
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       shouldInjectOpenAIHostedWebTools(
         { provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" },
