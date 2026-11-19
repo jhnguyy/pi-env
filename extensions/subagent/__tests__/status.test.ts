@@ -38,13 +38,14 @@ describe("active subagent status", () => {
     ]);
   });
 
-  it("places active lines below the editor and clears the slot at terminal state", () => {
+  it("sends RPC status lines below the editor and clears the slot at terminal state", () => {
     const widgetCalls: Array<{
       key: string;
       content: string[] | undefined;
       options: { placement: string };
     }> = [];
     const ctx = {
+      mode: "rpc",
       hasUI: true,
       ui: {
         theme,
@@ -96,10 +97,7 @@ describe("active subagent status", () => {
     } as any;
     const harness = createSubagentHarness();
 
-    renderActiveJobStatusSlot(
-      [job("1", "audit", "running", "2026-01-01T00:00:00.000Z")],
-      ctx,
-    );
+    renderActiveJobStatusSlot([job("1", "audit", "running", "2026-01-01T00:00:00.000Z")], ctx);
     await harness.handlers.get("session_shutdown")?.({}, ctx);
 
     expect(widgetCalls.filter((call) => call.key === "subagents").at(-1)).toEqual({
