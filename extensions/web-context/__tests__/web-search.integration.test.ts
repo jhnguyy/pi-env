@@ -44,16 +44,23 @@ it.each(["openai-responses", "anthropic-messages"] as const)(
       url: "https://example.com/release",
       encrypted_content: "must-not-be-returned",
     };
+    const claim = "Release 42 is available.";
+    const continuation = " Support ends tomorrow.";
+    const consulted = Array.from({ length: 35 }, (_, index) => ({
+      type: "web_search_result",
+      title: `Consulted ${index}`,
+      url: `https://example.com/consulted/${index}`,
+    }));
     const outputText = {
       type: "output_text",
-      text: "Release 42 is available.",
+      text: claim + continuation,
       annotations: [
         {
           type: "url_citation",
           title: source.title,
           url: source.url,
           start_index: 0,
-          end_index: 10,
+          end_index: claim.length,
         },
       ],
     };
@@ -68,7 +75,7 @@ it.each(["openai-responses", "anthropic-messages"] as const)(
       type: "web_search_call",
       id: "ws_1",
       status: "completed",
-      action: { type: "search", query: "latest release" },
+      action: { type: "search", query: "latest release", sources: consulted },
     };
     const events =
       api === "openai-responses"
@@ -120,14 +127,33 @@ it.each(["openai-responses", "anthropic-messages"] as const)(
               content_block: {
                 type: "web_search_tool_result",
                 tool_use_id: "srv_1",
-                content: [source],
+                content: [...consulted, source],
               },
             },
             { type: "content_block_stop", index: 1 },
             {
               type: "content_block_start",
               index: 2,
-              content_block: { type: "text", text: "Release 42 is available." },
+              content_block: { type: "text", text: claim },
+            },
+            {
+              type: "content_block_delta",
+              index: 2,
+              delta: {
+                type: "citations_delta",
+                citation: {
+                  type: "web_search_result_location",
+                  url: source.url,
+                  title: source.title,
+                  cited_text: "Release 42",
+                  encrypted_index: "must-not-be-returned",
+                },
+              },
+            },
+            {
+              type: "content_block_delta",
+              index: 2,
+              delta: { type: "text_delta", text: continuation },
             },
             { type: "content_block_stop", index: 2 },
             {
@@ -177,7 +203,7 @@ it.each(["openai-responses", "anthropic-messages"] as const)(
           reasoning: false,
           input: ["text"],
           contextWindow: 100_000,
-          maxTokens: 4096,
+          maxTokens: 16384,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         },
       ],
@@ -196,8 +222,12 @@ it.each(["openai-responses", "anthropic-messages"] as const)(
       ctx,
     );
     expect(result.isError).not.toBe(true);
-    expect(toolResultText(result)).toContain("Release 42 is available.");
-    expect(toolResultText(result)).toContain(source.url);
+    expect(toolResultText(result)).toContain(`${claim} [source](<${source.url}>)${continuation}`);
+    expect(result.details).toHaveProperty("sources.0.url", source.url);
+    expect(result.details).toHaveProperty("truncated", true);
+    expect(api === "openai-responses" ? request?.max_output_tokens : request?.max_tokens).toBe(
+      api === "openai-responses" ? undefined : 16384,
+    );
     expect(JSON.stringify(result)).not.toContain(source.encrypted_content);
     expect(result.usage).toMatchObject({ input: 20, output: 30, totalTokens: 50 });
     expect(authenticated).toBe(true);

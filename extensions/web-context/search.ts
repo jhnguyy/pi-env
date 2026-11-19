@@ -1,6 +1,10 @@
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
-import { truncateHead, type ExtensionToolContext } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import {
+  getMarkdownTheme,
+  truncateHead,
+  type ExtensionToolContext,
+} from "@earendil-works/pi-coding-agent";
+import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { isObject } from "../_shared/settings";
 import {
@@ -24,20 +28,69 @@ class SearchEvidence {
   searched = false;
   truncated = false;
   error: string | undefined;
-  readonly sources = new Map<string, SearchSource>();
+  private readonly cited = new Map<string, SearchSource>();
+  private readonly consulted = new Map<string, SearchSource>();
+  private readonly answers: string[] = [];
+  private readonly anthropicText = new Map<number, number>();
 
-  private source(value: unknown) {
+  get sources(): SearchSource[] {
+    const sources = new Map([...this.cited, ...this.consulted]);
+    if (sources.size > 30) this.truncated = true;
+    return [...sources.values()].slice(0, 30);
+  }
+
+  private source(value: unknown, cited = false): SearchSource | undefined {
     if (!isObject(value) || typeof value.url !== "string" || !/^https?:\/\//i.test(value.url))
       return;
-    if ((!this.sources.has(value.url) && this.sources.size >= 30) || value.url.length > 2048) {
+    if (value.url.length > 2048) {
+      this.truncated = true;
+      return;
+    }
+    let url: string;
+    try {
+      url = new URL(value.url).href;
+    } catch {
+      return;
+    }
+    const sources = cited ? this.cited : this.consulted;
+    if (!sources.has(url) && sources.size >= 30) {
       this.truncated = true;
       return;
     }
     if (typeof value.title === "string" && value.title.length > 300) this.truncated = true;
-    this.sources.set(value.url, {
-      url: value.url,
-      title: typeof value.title === "string" ? value.title.slice(0, 300) : value.url,
-    });
+    const source = {
+      url,
+      title: typeof value.title === "string" ? value.title.slice(0, 300) : url,
+    };
+    sources.set(url, source);
+    return source;
+  }
+
+  private link(citation: unknown): string {
+    const source = this.source(citation, true);
+    return source ? ` [source](<${source.url}>)` : "";
+  }
+
+  private openAIText(block: Record<string, unknown>) {
+    const original = block.type === "refusal" ? block.refusal : block.text;
+    if (typeof original !== "string") return;
+    let text = original;
+    const annotations = Array.isArray(block.annotations) ? block.annotations.filter(isObject) : [];
+    for (const annotation of annotations.sort(
+      (a, b) => Number(b.end_index) - Number(a.end_index),
+    )) {
+      const offset = annotation.end_index;
+      const link = this.link(annotation);
+      if (
+        typeof offset === "number" &&
+        Number.isInteger(offset) &&
+        offset >= 0 &&
+        offset <= original.length
+      ) {
+        text = text.slice(0, offset) + link + text.slice(offset);
+      }
+    }
+    this.answers.push(text);
   }
 
   private openAIItem(item: Record<string, unknown>) {
@@ -50,20 +103,35 @@ class SearchEvidence {
     }
     if (item.type === "message" && Array.isArray(item.content)) {
       for (const block of item.content) {
-        if (isObject(block) && Array.isArray(block.annotations)) {
-          for (const annotation of block.annotations) this.source(annotation);
-        }
+        if (isObject(block)) this.openAIText(block);
       }
     }
   }
 
-  private anthropicBlock(block: Record<string, unknown>) {
-    if (block.type !== "web_search_tool_result") return;
-    if (Array.isArray(block.content)) {
-      this.searched = true;
-      for (const source of block.content) this.source(source);
-    } else if (isObject(block.content)) {
-      this.error = `Provider search failed: ${String(block.content.error_code)}`;
+  private anthropicBlock(index: unknown, block: Record<string, unknown>) {
+    if (block.type === "web_search_tool_result") {
+      if (Array.isArray(block.content)) {
+        this.searched = true;
+        for (const source of block.content) this.source(source);
+      } else if (isObject(block.content)) {
+        this.error = `Provider search failed: ${String(block.content.error_code)}`;
+      }
+    } else if (block.type === "text" && typeof index === "number") {
+      this.anthropicText.set(index, this.answers.length);
+      const citations = Array.isArray(block.citations) ? block.citations : [];
+      this.answers.push(
+        String(block.text ?? "") + citations.map((citation) => this.link(citation)).join(""),
+      );
+    }
+  }
+
+  private anthropicDelta(index: unknown, delta: Record<string, unknown>) {
+    const block = typeof index === "number" ? this.anthropicText.get(index) : undefined;
+    if (block === undefined) return;
+    if (delta.type === "text_delta" && typeof delta.text === "string") {
+      this.answers[block] += delta.text;
+    } else if (delta.type === "citations_delta") {
+      this.answers[block] += this.link(delta.citation);
     }
   }
 
@@ -72,14 +140,19 @@ class SearchEvidence {
     if (event.type === "response.output_item.done" && isObject(event.item)) {
       this.openAIItem(event.item);
     } else if (event.type === "content_block_start" && isObject(event.content_block)) {
-      this.anthropicBlock(event.content_block);
-    } else if (
-      event.type === "content_block_delta" &&
-      isObject(event.delta) &&
-      event.delta.type === "citations_delta"
-    ) {
-      this.source(event.delta.citation);
+      this.anthropicBlock(event.index, event.content_block);
+    } else if (event.type === "content_block_delta" && isObject(event.delta)) {
+      this.anthropicDelta(event.index, event.delta);
     }
+  }
+
+  answer(response: AssistantMessage): string {
+    return this.answers.length
+      ? this.answers.join("\n")
+      : response.content
+          .filter((block) => block.type === "text")
+          .map((block) => block.text)
+          .join("\n");
   }
 }
 
@@ -122,6 +195,7 @@ export function registerWebSearch(pi: PublicPiToolHost) {
       name: "web_search",
       label: "Web Search",
       exposure: "deferred",
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       namespace: { name: "pi-env", description: "Local analysis, session, web, and issue tools" },
       description: [
         "Search the public web using a separate search-enabled provider request and return an answer with source URLs.",
@@ -165,7 +239,6 @@ export function registerWebSearch(pi: PublicPiToolHost) {
           },
           {
             signal: requestSignal,
-            maxTokens: 4096,
             maxRetries: 0,
             onPayload,
             onProviderStreamEvent: (event: unknown) => evidence.observe(event),
@@ -173,12 +246,9 @@ export function registerWebSearch(pi: PublicPiToolHost) {
         );
         signal?.throwIfAborted();
         const error = searchError(response, evidence, deadline.aborted);
-        const answer = response.content
-          .filter((block) => block.type === "text")
-          .map((block) => block.text)
-          .join("\n");
+        const answer = evidence.answer(response);
         const body = truncateHead(error ?? answer, { maxBytes: 36_000, maxLines: 1500 });
-        const sources = [...evidence.sources.values()];
+        const sources = evidence.sources;
         const sourceText = truncateHead(
           sources.map((source) => `- ${source.title}: ${source.url}`).join("\n"),
           { maxBytes: 12_000, maxLines: 400 },
@@ -186,6 +256,7 @@ export function registerWebSearch(pi: PublicPiToolHost) {
         const truncated = body.truncated || sourceText.truncated || evidence.truncated;
         const text = [
           `Model: ${model.provider}/${model.id}`,
+          "Reported usage excludes hosted-search fees.",
           body.content,
           sourceText.content ? `Sources:\n${sourceText.content}` : "",
           truncated ? "[Search output truncated]" : "",
@@ -208,7 +279,7 @@ export function registerWebSearch(pi: PublicPiToolHost) {
       },
       renderResult(result, { expanded }, theme, context) {
         const output = toolResultText(result);
-        if (expanded) return new Text(output, 0, 0);
+        if (expanded) return new Markdown(output, 0, 0, getMarkdownTheme());
         const preview = truncateHead(output, { maxBytes: 1200, maxLines: 10 });
         const hint = toolExpandHint(theme, context);
         return new Text(
