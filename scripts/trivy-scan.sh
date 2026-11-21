@@ -55,27 +55,29 @@ sandbox=("$RUNTIME" run --rm
   -e TRIVY_CACHE_DIR=/cache
   -v "$CACHE_DIR:/cache:rw"
   -v "$SCAN_TEMP/raw:/output:rw"
+  -v "$ROOT/scripts:/templates:ro"
 )
 
 case "${1:-filesystem}" in
+  check-report)
+    "${sandbox[@]}" --network none --entrypoint sh "$IMAGE" \
+      /templates/__tests__/trivy-template.test.sh
+    exit
+    ;;
   image)
     if [[ "$#" -ne 2 || ! -f "$2" ]]; then
       echo "usage: scripts/trivy-scan.sh image <docker-archive>" >&2
       exit 2
     fi
     archive="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
-    "${sandbox[@]}" -v "$archive:/image.tar:ro" \
-      -v "$ROOT/.trivyignore.yaml:/etc/trivy/ignore.yaml:ro" "$IMAGE" image \
-      --input /image.tar --quiet --scanners vuln,secret,misconfig \
-      --file-patterns pnpm:nub.lock --severity HIGH,CRITICAL \
-      --ignorefile /etc/trivy/ignore.yaml --skip-version-check \
-      --format json --output /output/image.json
-    node "$ROOT/scripts/trivy-image-summary.mjs" "$SCAN_TEMP/raw/image.json" \
-      "$REPORT_DIR/trivy-image-results.json"
+    sandbox+=(-v "$archive:/image.tar:ro"
+      -v "$ROOT/.trivyignore.yaml:/etc/trivy/ignore.yaml:ro")
+    scan=(image --input /image.tar --ignorefile /etc/trivy/ignore.yaml)
+    target=()
     ;;
   filesystem)
     if [[ "$#" -gt 1 ]]; then
-      echo "usage: scripts/trivy-scan.sh [filesystem | image <docker-archive>]" >&2
+      echo "usage: scripts/trivy-scan.sh [filesystem | image <docker-archive> | check-report]" >&2
       exit 2
     fi
     SCAN_ROOT="$SCAN_TEMP/source"
@@ -83,36 +85,61 @@ case "${1:-filesystem}" in
     git -C "$ROOT" archive --format=tar HEAD | tar -xf - -C "$SCAN_ROOT"
     test -f "$SCAN_ROOT/package.json"
     test -f "$SCAN_ROOT/nub.lock"
-    fs_args=(fs --quiet --file-patterns "${TRIVY_FILE_PATTERNS:-pnpm:nub.lock}"
-      --include-dev-deps --skip-dirs node_modules --skip-dirs .git --skip-version-check)
     sandbox+=(-v "$SCAN_ROOT:/work:ro" --workdir /work)
-    "${sandbox[@]}" "$IMAGE" "${fs_args[@]}" --scanners vuln --list-all-pkgs \
-      --format json --output /output/inventory.json .
-    # Require a populated lockfile target, not incidental packages from other files.
-    node --input-type=module - "$SCAN_TEMP/raw/inventory.json" "$REPORT_DIR/trivy-dependency-inventory.json" <<'JS'
-import { readFileSync, writeFileSync } from "node:fs";
-const [input, output] = process.argv.slice(2);
-const report = JSON.parse(readFileSync(input, "utf8"));
-const packages = (report.Results ?? []).filter((result) => result.Target === "nub.lock")
-  .reduce((count, result) => count + (result.Packages?.length ?? 0), 0);
-if (packages < 10) throw new Error("Trivy did not report a populated nub.lock inventory.");
-const inventory = report.Results.filter((result) => result.Target === "nub.lock")
-  .flatMap((result) => result.Packages ?? [])
-  .map(({ Name, Version }) => ({ name: Name, version: Version }));
-writeFileSync(output, `${JSON.stringify({ target: "nub.lock", packages: inventory })}\n`);
-console.log(`Trivy dependency inventory: nub.lock (${packages} packages).`);
-JS
-    status=0
-    "${sandbox[@]}" "$IMAGE" "${fs_args[@]}" \
-      --scanners "${TRIVY_SCANNERS:-vuln,secret,misconfig}" \
-      --severity "${TRIVY_SEVERITY:-HIGH,CRITICAL}" --ignore-unfixed \
-      --ignorefile .trivyignore.yaml --exit-code 1 --format template \
-      --template @scripts/trivy-actionable.tpl --output /output/policy.txt . || status=$?
-    bash "$ROOT/scripts/trivy-filesystem-summary.sh" "$SCAN_TEMP/raw/policy.txt" "$status" \
-      "$REPORT_DIR/trivy-policy-results.txt"
+    scan=(fs --include-dev-deps --skip-dirs node_modules --skip-dirs .git
+      --ignorefile .trivyignore.yaml)
+    target=(.)
     ;;
   *)
-    echo "usage: scripts/trivy-scan.sh [filesystem | image <docker-archive>]" >&2
+    echo "usage: scripts/trivy-scan.sh [filesystem | image <docker-archive> | check-report]" >&2
     exit 2
     ;;
 esac
+
+scan+=(--quiet --file-patterns "${TRIVY_FILE_PATTERNS:-pnpm:nub.lock}" --skip-version-check)
+
+# Inventory includes unfixed vulnerabilities; only the policy scan checks secrets.
+# Keep raw scanner data private and retain only the template's safe projection.
+"${sandbox[@]}" "$IMAGE" "${scan[@]}" --scanners vuln --list-all-pkgs \
+  --format json --output /output/complete.json "${target[@]}"
+"${sandbox[@]}" "$IMAGE" convert --quiet --format template \
+  --template @/templates/trivy-actionable.tpl --output /output/complete.txt /output/complete.json
+cp "$SCAN_TEMP/raw/complete.txt" "$REPORT_DIR/trivy-complete-results.txt"
+
+if [[ "${1:-filesystem}" == filesystem ]]; then
+  "${sandbox[@]}" "$IMAGE" convert --quiet --format template \
+    --template @/templates/trivy-inventory.tpl --output /output/inventory.txt /output/complete.json
+  packages="$(< "$SCAN_TEMP/raw/inventory.txt")"
+  # Count only the actual nub.lock target, never incidental packages elsewhere.
+  if [[ ! "$packages" =~ ^[0-9]+$ ]] || (( packages < 10 )); then
+    echo "Trivy did not report a populated nub.lock inventory." >&2
+    exit 2
+  fi
+  printf 'Trivy dependency inventory: nub.lock (%s packages).\n' "$packages"
+  cp "$SCAN_TEMP/raw/inventory.txt" "$REPORT_DIR/trivy-dependency-inventory.txt"
+fi
+
+# v0.72.0 convert lacks --ignore-unfixed. A second native scan keeps Trivy's
+# vulnerability-status policy authoritative rather than reimplementing it.
+status=0
+"${sandbox[@]}" "$IMAGE" "${scan[@]}" --scanners vuln,secret,misconfig \
+  --severity HIGH,CRITICAL --ignore-unfixed \
+  --exit-code 1 --format template --template @/templates/trivy-actionable.tpl \
+  --output /output/policy.txt "${target[@]}" || status=$?
+if [[ -f "$SCAN_TEMP/raw/policy.txt" ]]; then
+  cp "$SCAN_TEMP/raw/policy.txt" "$REPORT_DIR/trivy-policy-results.txt"
+  head -n 60 "$SCAN_TEMP/raw/policy.txt"
+fi
+
+summary="Trivy ${1:-filesystem} policy exit status: $status.
+Vulnerability inventory — $(head -n 1 "$SCAN_TEMP/raw/complete.txt")
+Only fixable HIGH/CRITICAL vulnerabilities and HIGH/CRITICAL secrets or misconfigurations block.
+A passing policy does not mean no vulnerabilities. Unfixed vulnerabilities remain informational.
+The inventory retains all unsuppressed vulnerability severities, including unfixed vulnerabilities; the policy report contains blocking findings.
+Retained reports contain safe metadata, not secret matches or source snippets."
+printf '%s\n' "$summary"
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+  printf '%s\n' "$summary" >> "$GITHUB_STEP_SUMMARY" ||
+    echo "Could not append Trivy step summary." >&2
+fi
+exit "$status"

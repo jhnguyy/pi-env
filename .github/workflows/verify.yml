@@ -21,8 +21,13 @@ jobs:
   nub-setup:
     name: Portable setup and install
     runs-on: ubuntu-latest
+    container:
+      image: node:26-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e
     timeout-minutes: 30
     steps:
+      - name: Prepare clean provisioning environment
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates git zstd
+
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
@@ -53,7 +58,7 @@ jobs:
       - name: Verify changed-file policy
         run: nub run verify --checks-only
 
-      # Exercise provisioning on a stock runner, not only our container toolchain.
+      # This container starts without Nub or project dependencies.
       - name: Verify portable setup
         run: nub run test:setup
 
@@ -66,8 +71,13 @@ jobs:
   nix-flake-check:
     name: Nix flake check
     runs-on: ubuntu-latest
+    container:
+      image: node:26-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e
     timeout-minutes: 30
     steps:
+      - name: Prepare clean provisioning environment
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git sudo xz-utils
+
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
@@ -75,6 +85,11 @@ jobs:
 
       - name: Install Nix
         uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+        with:
+          enable_kvm: false
+          install_options: --no-daemon
+          # Docker is the outer sandbox; this container cannot create Nix sandboxes.
+          extra_nix_config: sandbox = false
 
       - name: Check flake
         run: nix flake check --print-build-logs

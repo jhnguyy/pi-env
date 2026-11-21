@@ -60,6 +60,9 @@ jobs:
       - name: Archive image candidate
         run: docker save "$CANDIDATE_TAG" --output "$RUNNER_TEMP/pi-env-image.tar"
 
+      - name: Verify safe scanner reporting
+        run: bash scripts/trivy-scan.sh check-report
+
       - name: Scan image candidate
         env:
           TRIVY_REPORT_DIR: ${{ runner.temp }}/pi-env-reports
@@ -118,7 +121,7 @@ jobs:
           docker tag "$CANDIDATE_TAG" "$main_tag"
           docker push "$commit_tag"
           docker push "$main_tag"
-          digest="$(docker buildx imagetools inspect "$commit_tag" --format '{{json .Manifest}}' | jq -er '.digest')"
+          digest="$(docker buildx imagetools inspect "$commit_tag" --format '{{ printf "%s" .Manifest.Digest }}')"
           cat >> "$GITHUB_STEP_SUMMARY" <<EOF
           ## Published image
 
