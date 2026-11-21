@@ -1,158 +1,102 @@
 #!/usr/bin/env node
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
-function appendSummary(body) {
-  if (!process.env.GITHUB_STEP_SUMMARY) return;
-  try {
-    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n## Trivy built-image scan\n\n${body}\n`);
-  } catch {
-    console.error("Could not append Trivy image step summary.");
-  }
+const text = (value) => (typeof value === "string" ? value : "");
+const highCritical = (severity) => ["HIGH", "CRITICAL"].includes(severity);
+
+function safeFinding(entry, kind, id, target) {
+  if (!entry || typeof entry !== "object") throw new Error("Invalid finding.");
+  const severity = text(entry.Severity).toUpperCase() || "UNKNOWN";
+  const vulnerability = kind === "vulnerability";
+  const fixed = vulnerability ? text(entry.FixedVersion) : "";
+  return {
+    kind,
+    id: text(entry[id]),
+    title: text(entry.Title),
+    severity,
+    target: text(target),
+    package: vulnerability ? text(entry.PkgName) : "",
+    installed: vulnerability ? text(entry.InstalledVersion) : "",
+    fixed,
+    blocking: highCritical(severity) && (!vulnerability || Boolean(fixed.trim())),
+  };
 }
 
-function markdown(value) {
-  return String(value ?? "unknown")
-    .replace(/[\x00-\x1f\x7f-\x9f]/g, " ")
-    .replace(/[^a-zA-Z0-9 ]/g, (character) => `&#${character.codePointAt(0)};`);
-}
-
-const [jsonPath] = process.argv.slice(2);
-if (!jsonPath) {
-  console.error("usage: scripts/trivy-image-summary.mjs <trivy-results.json>");
-  process.exit(2);
-}
-
-let report;
-try {
-  report = JSON.parse(readFileSync(jsonPath, "utf8"));
-} catch {
-  appendSummary(
-    "Scanner/report error: image report is unreadable or invalid JSON. Policy result unavailable.",
-  );
-  console.error("Trivy image scan returned invalid JSON.");
-  process.exit(2);
-}
-
-if (!Array.isArray(report?.Results) || report.Results.length === 0) {
-  appendSummary("Scanner/report error: no scanned targets reported. Policy result unavailable.");
-  console.error("Trivy image scan did not report any targets.");
-  process.exit(2);
-}
-
-const severityOrder = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
-const severityCounts = Object.fromEntries(severityOrder.map((severity) => [severity, 0]));
-const policyFindings = [];
-let vulnerabilityCount = 0;
-let ignoredUnfixedHighCritical = 0;
-let secretCount = 0;
-let misconfigCount = 0;
-let targetCount = 0;
-
-for (const result of report.Results ?? []) {
-  targetCount += 1;
-  for (const vuln of result.Vulnerabilities ?? []) {
-    vulnerabilityCount += 1;
-    const severity = String(vuln.Severity ?? "UNKNOWN").toUpperCase();
-    severityCounts[severity] = (severityCounts[severity] ?? 0) + 1;
-    if (severity === "HIGH" || severity === "CRITICAL") {
-      if (vuln.FixedVersion) {
-        policyFindings.push({
-          kind: "vuln",
-          severity,
-          id: vuln.VulnerabilityID,
-          package: vuln.PkgName,
-          installed: vuln.InstalledVersion,
-          fixed: vuln.FixedVersion,
-          target: result.Target,
-        });
-      } else {
-        ignoredUnfixedHighCritical += 1;
+// Retain scanner identities, rule metadata, and remediation—not matches or source code.
+export function analyzeReport(report) {
+  if (!Array.isArray(report?.Results) || !report.Results.length)
+    throw new Error("No scanned targets reported.");
+  const findings = [];
+  for (const result of report.Results) {
+    if (!result || typeof result !== "object") throw new Error("Invalid target.");
+    for (const [key, kind, id] of [
+      ["Vulnerabilities", "vulnerability", "VulnerabilityID"],
+      ["Secrets", "secret", "RuleID"],
+      ["Misconfigurations", "misconfiguration", "ID"],
+    ]) {
+      const entries = result[key] ?? [];
+      if (!Array.isArray(entries)) throw new Error("Invalid findings.");
+      for (const entry of entries) {
+        findings.push(safeFinding(entry, kind, id, result.Target));
       }
     }
   }
+  return {
+    targets: report.Results.length,
+    findings,
+    policyFailures: findings.filter((finding) => finding.blocking).length,
+    unfixedHighCritical: findings.filter(
+      (finding) =>
+        finding.kind === "vulnerability" && !finding.fixed.trim() && highCritical(finding.severity),
+    ).length,
+  };
+}
 
-  for (const secret of result.Secrets ?? []) {
-    secretCount += 1;
-    const severity = String(secret.Severity ?? "UNKNOWN").toUpperCase();
-    if (severity === "HIGH" || severity === "CRITICAL") {
-      policyFindings.push({
-        kind: "secret",
-        severity,
-        id: secret.RuleID,
-        package: secret.Category ?? "secret",
-        installed: "-",
-        fixed: "-",
-        target: result.Target,
-      });
+const markdown = (value) =>
+  value
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, " ")
+    .replace(/[^a-zA-Z0-9 ]/g, (character) => `&#${character.codePointAt(0)};`);
+
+function run() {
+  const [input, output, ...extra] = process.argv.slice(2);
+  if (!input || extra.length) {
+    console.error("usage: scripts/trivy-image-summary.mjs <raw-json> [safe-output-json]");
+    return 2;
+  }
+  let analysis;
+  try {
+    analysis = analyzeReport(JSON.parse(readFileSync(input, "utf8")));
+    if (output) writeFileSync(output, `${JSON.stringify(analysis, null, 2)}\n`);
+  } catch {
+    console.error("Trivy image policy report could not be evaluated or retained.");
+    return 2;
+  }
+  const blocking = analysis.findings.filter((finding) => finding.blocking);
+  const displayed = blocking.slice(0, 50);
+  const body = `## Trivy built-image findings
+
+Targets scanned: ${analysis.targets}
+Reported findings: ${analysis.findings.length}
+Unfixed HIGH/CRITICAL vulnerabilities (informational): ${analysis.unfixedHighCritical}
+Actionable HIGH/CRITICAL findings: ${analysis.policyFailures}
+
+Only fixable HIGH/CRITICAL vulnerabilities and HIGH/CRITICAL secrets or misconfigurations block. A passing policy does not mean a vulnerability-free image.
+
+${displayed.map((finding) => `- ${finding.kind} ${finding.severity}: ${markdown(finding.id)}${finding.title ? ` — ${markdown(finding.title)}` : ""}`).join("\n")}
+${blocking.length > displayed.length ? `\n${blocking.length - displayed.length} more actionable findings.` : ""}
+${output ? "\nThe retained report includes all finding identities and remediation data, without secret matches or code context." : ""}
+`;
+  console.log(body);
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    try {
+      appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n${body}`);
+    } catch {
+      console.error("Could not append Trivy image step summary.");
     }
   }
-
-  for (const misconfig of result.Misconfigurations ?? []) {
-    misconfigCount += 1;
-    const severity = String(misconfig.Severity ?? "UNKNOWN").toUpperCase();
-    if (severity === "HIGH" || severity === "CRITICAL") {
-      policyFindings.push({
-        kind: "misconfig",
-        severity,
-        id: misconfig.ID,
-        package: misconfig.Type ?? "misconfig",
-        installed: "-",
-        fixed: "-",
-        target: result.Target,
-      });
-    }
-  }
+  return analysis.policyFailures ? 1 : 0;
 }
 
-console.log("Trivy built-image scan summary");
-console.log(`Targets scanned: ${targetCount}`);
-console.log(`HIGH/CRITICAL vulnerabilities: ${vulnerabilityCount}`);
-console.log(`  Critical: ${severityCounts.CRITICAL ?? 0}`);
-console.log(`  High: ${severityCounts.HIGH ?? 0}`);
-console.log(`  Medium: ${severityCounts.MEDIUM ?? 0}`);
-console.log(`  Low: ${severityCounts.LOW ?? 0}`);
-console.log(`  Unknown: ${severityCounts.UNKNOWN ?? 0}`);
-console.log(`Secrets: ${secretCount}`);
-console.log(`Misconfigurations: ${misconfigCount}`);
-console.log(`Ignored unfixed HIGH/CRITICAL vulnerabilities: ${ignoredUnfixedHighCritical}`);
-console.log(`Policy findings: ${policyFindings.length}`);
-
-const actionableVulnerabilities = policyFindings.filter(
-  (finding) => finding.kind === "vuln",
-).length;
-const summary = [
-  policyFindings.length > 0
-    ? "Policy failed: actionable HIGH/CRITICAL findings."
-    : "Policy passed: no actionable HIGH/CRITICAL findings (not a vulnerability-free image).",
-  "",
-  "| Metric | Count |",
-  "| --- | ---: |",
-  `| Targets scanned | ${targetCount} |`,
-  `| Total vulnerabilities (all reported severities) | ${vulnerabilityCount} |`,
-  `| Critical vulnerabilities | ${severityCounts.CRITICAL} |`,
-  `| High vulnerabilities | ${severityCounts.HIGH} |`,
-  `| Actionable fixable HIGH/CRITICAL vulnerabilities | ${actionableVulnerabilities} |`,
-  `| Unfixed HIGH/CRITICAL vulnerabilities (informational, not blocking) | ${ignoredUnfixedHighCritical} |`,
-  `| Secrets (all reported severities) | ${secretCount} |`,
-  `| Misconfigurations (all reported severities) | ${misconfigCount} |`,
-  `| Policy findings (including HIGH/CRITICAL secrets and misconfigurations) | ${policyFindings.length} |`,
-];
-if (policyFindings.length > 0) {
-  summary.push("", "Policy finding IDs (first 50; no secret matches or report context):", "");
-  for (const finding of policyFindings.slice(0, 50)) {
-    summary.push(`- ${finding.kind.toUpperCase()} ${finding.severity}: ${markdown(finding.id)}`);
-  }
-  if (policyFindings.length > 50)
-    summary.push(`\n${policyFindings.length - 50} additional finding(s) omitted.`);
-}
-appendSummary(summary.join("\n"));
-
-if (policyFindings.length > 0) {
-  console.log("\nPolicy findings (first 50):");
-  for (const finding of policyFindings.slice(0, 50)) {
-    console.log(
-      `${finding.kind.toUpperCase()} ${finding.severity} ${finding.id} ${finding.package} ${finding.installed} -> ${finding.fixed} (${finding.target})`,
-    );
-  }
-  process.exit(1);
-}
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  process.exitCode = run();

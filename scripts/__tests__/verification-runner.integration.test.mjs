@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
@@ -31,7 +31,7 @@ function markerStep(id, marker, exitCode) {
   };
 }
 
-it("stops sequential verification at failure and preserves its exit status", async ({
+it("stops at failure, preserves its exit status, and distinguishes unrun checks", async ({
   directory,
 }) => {
   const marker = join(directory, "completed-steps");
@@ -41,32 +41,23 @@ it("stops sequential verification at failure and preserves its exit status", asy
     }),
   ).toBe(7);
   expect(await readFile(marker, "utf8")).toBe("first\n");
-  const report = JSON.parse(await readFile(join(directory, "verification.json"), "utf8"));
-  expect(report.status).toBe("failed");
-  expect(report.phases).toEqual([
-    { label: "first", status: "failed", exitCode: 7, elapsedMs: expect.any(Number) },
-    { label: "second", status: "not-run" },
-  ]);
+  const summary = await readFile(join(directory, "verification.md"), "utf8");
+  expect(summary).toMatch(/first.*failed/);
+  expect(summary).toMatch(/second.*not run/);
 });
 
 it("stops when a step cannot start", async ({ directory }) => {
   const marker = join(directory, "completed-steps");
   expect(
-    runPlan(
-      [
-        { label: "missing", command: join(directory, "missing"), args: [] },
-        markerStep("later", marker, 0),
-      ],
-      { reportDirectory: directory },
-    ),
+    runPlan([
+      { label: "missing", command: join(directory, "missing"), args: [] },
+      markerStep("later", marker, 0),
+    ]),
   ).toBe(1);
   expect(existsSync(marker)).toBe(false);
-  const report = JSON.parse(await readFile(join(directory, "verification.json"), "utf8"));
-  expect(report.status).toBe("failed");
-  expect(report.phases.map(({ status }) => status)).toEqual(["failed", "not-run"]);
 });
 
-it("gives test phases a report destination inside the evidence directory", async ({
+it("gives tests an evidence destination and reports their completed result", async ({
   directory,
 }) => {
   expect(
@@ -84,17 +75,10 @@ it("gives test phases a report destination inside the evidence directory", async
       { reportDirectory: directory },
     ),
   ).toBe(0);
-  expect(await readFile(join(directory, "test-example.xml"), "utf8")).toBe("test-result");
-});
-
-it("reports completed phases without capturing their console output", async ({ directory }) => {
-  expect(
-    runPlan([markerStep("check", join(directory, "marker"), 0)], { reportDirectory: directory }),
-  ).toBe(0);
-  const report = JSON.parse(await readFile(join(directory, "verification.json"), "utf8"));
-  expect(report).toEqual({
-    node: process.version,
-    status: "passed",
-    phases: [{ label: "check", status: "passed", exitCode: 0, elapsedMs: expect.any(Number) }],
-  });
+  const reports = (await readdir(directory)).filter((file) => file.endsWith(".xml"));
+  expect(reports).toHaveLength(1);
+  expect(await readFile(join(directory, reports[0]), "utf8")).toBe("test-result");
+  expect(await readFile(join(directory, "verification.md"), "utf8")).toMatch(
+    /test:example.*passed/,
+  );
 });

@@ -25,53 +25,16 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run Trivy in hardened container
-        id: scan
-        shell: bash
-        run: |
-          set -euo pipefail
-          report_dir="$RUNNER_TEMP/trivy-filesystem-reports"
-          mkdir -p "$report_dir"
-          touch "$GITHUB_STEP_SUMMARY"
-          docker run --rm \
-            --cap-drop=ALL \
-            --security-opt=no-new-privileges \
-            --read-only \
-            --tmpfs /tmp:rw,noexec,nosuid,nodev \
-            --user "$(id -u):$(id -g)" \
-            --workdir /work \
-            --env HOME=/tmp \
-            --env TRIVY_CACHE_DIR=/tmp/trivy-cache \
-            --env TRIVY_SCAN_ROOT=/work \
-            --env TRIVY_REPORT_DIR=/reports \
-            --env GITHUB_STEP_SUMMARY=/summary.md \
-            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/work,readonly" \
-            --mount "type=bind,source=$report_dir,target=/reports" \
-            --mount "type=bind,source=$GITHUB_STEP_SUMMARY,target=/summary.md" \
-            --entrypoint /bin/sh \
-            aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f \
-            scripts/trivy-filesystem-scan.sh
-
-      - name: Summarize scanner execution
-        if: always()
-        shell: bash
+      - name: Scan source
         env:
-          SCAN: ${{ steps.scan.outcome }}
-        run: |
-          {
-            echo '## Source scan execution'
-            echo
-            printf 'Scanner step: **%s**. A failed or skipped step is not a clean scan.\n\n' "$SCAN"
-            echo 'Available inventory and policy reports are retained as **trivy-filesystem-reports** for seven days. Inventory, startup, and infrastructure failures may prevent a policy report; inspect the scanner step log.'
-          } >> "$GITHUB_STEP_SUMMARY"
+          TRIVY_REPORT_DIR: ${{ runner.temp }}/trivy-filesystem-reports
+        run: bash scripts/trivy-scan.sh
 
       - name: Retain filesystem scan reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: trivy-filesystem-reports
-          path: |
-            ${{ runner.temp }}/trivy-filesystem-reports/trivy-dependency-inventory.json
-            ${{ runner.temp }}/trivy-filesystem-reports/trivy-policy-results.txt
+          path: ${{ runner.temp }}/trivy-filesystem-reports/
           if-no-files-found: warn
           retention-days: 7

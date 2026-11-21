@@ -1,33 +1,39 @@
 import { spawnSync } from "node:child_process";
-import { performance } from "node:perf_hooks";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
 
 export function listPlan(steps) {
   return steps.map(({ label, command, args }) => `${label}: ${[command, ...args].join(" ")}`);
 }
 
 export function runPlan(steps, { reportDirectory } = {}) {
-  const report = {
-    node: process.version,
-    status: "running",
-    phases: steps.map(({ label }) => ({ label, status: "not-run" })),
-  };
+  const phases = steps.map(({ label }) => ({ label, status: "not run", elapsedMs: undefined }));
   if (reportDirectory) {
     reportDirectory = resolve(reportDirectory);
     mkdirSync(reportDirectory, { recursive: true });
   }
   const save = () => {
-    if (reportDirectory) {
-      writeFileSync(
-        join(reportDirectory, "verification.json"),
-        `${JSON.stringify(report, null, 2)}\n`,
-      );
-    }
+    if (!reportDirectory) return;
+    const rows = phases.map(
+      ({ label, status, elapsedMs }) =>
+        `| ${label} | ${status} | ${elapsedMs === undefined ? "—" : `${(elapsedMs / 1000).toFixed(2)}s`} |`,
+    );
+    writeFileSync(
+      join(reportDirectory, "verification.md"),
+      `## Full verification
+
+Node: ${process.version}
+
+| Check | Result | Duration |
+| --- | --- | --- |
+${rows.join("\n")}
+`,
+    );
   };
   save();
   for (const [index, { label, command, args }] of steps.entries()) {
-    const phase = report.phases[index];
+    const phase = phases[index];
     phase.status = "running";
     save();
     console.log(`\n==> ${label}`);
@@ -45,9 +51,7 @@ export function runPlan(steps, { reportDirectory } = {}) {
     });
     const elapsedMs = Math.max(0, Math.round(performance.now() - startedAt));
     phase.elapsedMs = elapsedMs;
-    phase.exitCode = result.status ?? 1;
     phase.status = result.status === 0 && !result.error ? "passed" : "failed";
-    report.status = phase.status === "failed" ? "failed" : "running";
     save();
     if (result.error) {
       console.error(
@@ -61,7 +65,5 @@ export function runPlan(steps, { reportDirectory } = {}) {
     }
     console.log(`<== ${label} passed in ${elapsedMs} ms`);
   }
-  report.status = "passed";
-  save();
   return 0;
 }

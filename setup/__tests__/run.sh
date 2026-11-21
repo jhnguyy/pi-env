@@ -40,11 +40,6 @@ CALLER_STATE=(
 UNSET_CALLER_STATE=()
 for name in "${CALLER_STATE[@]}"; do UNSET_CALLER_STATE+=(-u "$name"); done
 
-if [ -n "${PI_ENV_TEST_REPORT:-}" ]; then
-  exec env "${UNSET_CALLER_STATE[@]}" "$PI_ENV_TEST_NODE_BIN" \
-    "$ROOT/scripts/setup-test-report.mjs" "$PI_ENV_TEST_REPORT" "${SETUP_TESTS[@]}"
-fi
-
 for test_script in "${SETUP_TESTS[@]}"; do
   printf '\nsetup-test: start %s\n' "$test_script"
   started_at=$SECONDS
