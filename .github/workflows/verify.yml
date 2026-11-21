@@ -9,10 +9,6 @@ on:
 permissions:
   contents: read
 
-# Keep tool profiles in the container, not the runner-owned /github/home mount.
-env:
-  HOME: /root
-
 defaults:
   run:
     shell: bash
@@ -31,8 +27,9 @@ jobs:
     steps:
       - name: Prepare clean provisioning environment
         run: |
+          # Fixtures change HOME; align ownership instead of relying on global Git trust.
+          chown "$(id -u):$(id -g)" "$HOME" "$GITHUB_WORKSPACE"
           apt-get update && apt-get install -y --no-install-recommends ca-certificates git zstd
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
@@ -83,8 +80,9 @@ jobs:
     steps:
       - name: Prepare clean provisioning environment
         run: |
+          # Nix requires its profile home to belong to the installing user.
+          chown "$(id -u):$(id -g)" "$HOME" "$GITHUB_WORKSPACE"
           apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git sudo xz-utils
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
