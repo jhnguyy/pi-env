@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+# Keep tool profiles in the container, not the runner-owned /github/home mount.
+env:
+  HOME: /root
+
 defaults:
   run:
     shell: bash
@@ -26,7 +30,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Prepare clean provisioning environment
-        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates git zstd
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends ca-certificates git zstd
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
@@ -76,7 +82,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Prepare clean provisioning environment
-        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git sudo xz-utils
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git sudo xz-utils
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
