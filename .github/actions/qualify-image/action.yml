@@ -15,19 +15,41 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Export full verification evidence
+      id: verification
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        reports="$RUNNER_TEMP/pi-env-reports/verification"
+        mkdir -p "$reports"
+        # Always rerun verification in this job, then reuse its local layers when
+        # assembling the candidate. Failed tests can export evidence, not an image.
+        docker buildx bake reports \
+          --set "reports.output=type=local,dest=$reports"
+
+    - name: Report full verification results
+      id: verification-result
+      if: always()
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: node scripts/ci-report.mjs verification "$RUNNER_TEMP/pi-env-reports/verification"
+
     - name: Build container image candidate
+      id: build
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
         IMAGE_TAG: ${{ inputs.image-tag }}
       run: |
         set -euo pipefail
-        if ! docker buildx bake image --set "image.tags=$IMAGE_TAG"; then
+        if ! docker buildx bake candidate --set "candidate.tags=$IMAGE_TAG"; then
           echo "::error title=Container image build failed::Docker could not build the image candidate."
           exit 1
         fi
 
     - name: Verify container artifact contract
+      id: artifact
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
@@ -52,6 +74,8 @@ runs:
         results="$results_dir/trivy-image-results.json"
         cache_dir="$RUNNER_TEMP/trivy-cache"
         ignore_file="$GITHUB_WORKSPACE/.trivyignore.yaml"
+        evidence_dir="$RUNNER_TEMP/pi-env-reports"
+        mkdir -p "$evidence_dir"
         echo "archive-path=$image_tar" >> "$GITHUB_OUTPUT"
         docker save "$IMAGE_TAG" --output "$image_tar"
         chmod 0644 "$image_tar"
@@ -82,6 +106,7 @@ runs:
           echo "::error title=Container image scanner failed::The scanner could not evaluate the image candidate."
           exit 1
         fi
+        node scripts/ci-report.mjs scan-report "$results" "$evidence_dir/trivy-image.json"
         set +e
         node scripts/trivy-image-summary.mjs "$results"
         summary_status="$?"
@@ -94,3 +119,27 @@ runs:
           echo "::error title=Container image scanner failed::The scanner returned an invalid image report."
           exit "$summary_status"
         fi
+
+    - name: Summarize image qualification
+      if: always()
+      shell: bash
+      env:
+        VERIFICATION: ${{ steps.verification.outcome }}
+        VERIFICATION_RESULT: ${{ steps.verification-result.outcome }}
+        BUILD: ${{ steps.build.outcome }}
+        ARTIFACT: ${{ steps.artifact.outcome }}
+        SCAN: ${{ steps.scan-image.outcome }}
+      run: |
+        {
+          echo '## Image qualification'
+          echo
+          echo '| Phase | Step outcome |'
+          echo '| --- | --- |'
+          printf '| Verification evidence export | %s |\n' "$VERIFICATION"
+          printf '| Full verification policy gate | %s |\n' "$VERIFICATION_RESULT"
+          printf '| Candidate assembly | %s |\n' "$BUILD"
+          printf '| Artifact contract | %s |\n' "$ARTIFACT"
+          printf '| Security scan and policy | %s |\n' "$SCAN"
+          echo
+          echo 'Evidence export success is not a test pass. The full-verification table owns test results. Skipped steps provide no qualification. Reports are retained as **image-evidence** for seven days when available.'
+        } >> "$GITHUB_STEP_SUMMARY"

@@ -1,5 +1,20 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
+
+function appendSummary(body) {
+  if (!process.env.GITHUB_STEP_SUMMARY) return;
+  try {
+    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n## Trivy built-image scan\n\n${body}\n`);
+  } catch {
+    console.error("Could not append Trivy image step summary.");
+  }
+}
+
+function markdown(value) {
+  return String(value ?? "unknown")
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, " ")
+    .replace(/[^a-zA-Z0-9 ]/g, (character) => `&#${character.codePointAt(0)};`);
+}
 
 const [jsonPath] = process.argv.slice(2);
 if (!jsonPath) {
@@ -11,11 +26,15 @@ let report;
 try {
   report = JSON.parse(readFileSync(jsonPath, "utf8"));
 } catch {
+  appendSummary(
+    "Scanner/report error: image report is unreadable or invalid JSON. Policy result unavailable.",
+  );
   console.error("Trivy image scan returned invalid JSON.");
   process.exit(2);
 }
 
 if (!Array.isArray(report?.Results) || report.Results.length === 0) {
+  appendSummary("Scanner/report error: no scanned targets reported. Policy result unavailable.");
   console.error("Trivy image scan did not report any targets.");
   process.exit(2);
 }
@@ -97,6 +116,36 @@ console.log(`Secrets: ${secretCount}`);
 console.log(`Misconfigurations: ${misconfigCount}`);
 console.log(`Ignored unfixed HIGH/CRITICAL vulnerabilities: ${ignoredUnfixedHighCritical}`);
 console.log(`Policy findings: ${policyFindings.length}`);
+
+const actionableVulnerabilities = policyFindings.filter(
+  (finding) => finding.kind === "vuln",
+).length;
+const summary = [
+  policyFindings.length > 0
+    ? "Policy failed: actionable HIGH/CRITICAL findings."
+    : "Policy passed: no actionable HIGH/CRITICAL findings (not a vulnerability-free image).",
+  "",
+  "| Metric | Count |",
+  "| --- | ---: |",
+  `| Targets scanned | ${targetCount} |`,
+  `| Total vulnerabilities (all reported severities) | ${vulnerabilityCount} |`,
+  `| Critical vulnerabilities | ${severityCounts.CRITICAL} |`,
+  `| High vulnerabilities | ${severityCounts.HIGH} |`,
+  `| Actionable fixable HIGH/CRITICAL vulnerabilities | ${actionableVulnerabilities} |`,
+  `| Unfixed HIGH/CRITICAL vulnerabilities (informational, not blocking) | ${ignoredUnfixedHighCritical} |`,
+  `| Secrets (all reported severities) | ${secretCount} |`,
+  `| Misconfigurations (all reported severities) | ${misconfigCount} |`,
+  `| Policy findings (including HIGH/CRITICAL secrets and misconfigurations) | ${policyFindings.length} |`,
+];
+if (policyFindings.length > 0) {
+  summary.push("", "Policy finding IDs (first 50; no secret matches or report context):", "");
+  for (const finding of policyFindings.slice(0, 50)) {
+    summary.push(`- ${finding.kind.toUpperCase()} ${finding.severity}: ${markdown(finding.id)}`);
+  }
+  if (policyFindings.length > 50)
+    summary.push(`\n${policyFindings.length - 50} additional finding(s) omitted.`);
+}
+appendSummary(summary.join("\n"));
 
 if (policyFindings.length > 0) {
   console.log("\nPolicy findings (first 50):");

@@ -1,4 +1,4 @@
-name: Nub Setup
+name: Portable Setup and Nix
 
 on:
   pull_request:
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   nub-setup:
-    name: Nub setup
+    name: Portable setup and install
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -47,12 +47,19 @@ jobs:
           nub --version
           node --version
           nub node which
+          {
+            echo '## Portable toolchain'
+            echo
+            printf 'Nub: `%s` · host Node: `%s`\n' "$(nub --version)" "$(node --version)"
+            printf '\nProject Node: `%s`\n' "$(nub node which)"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install dependencies
         shell: bash
         run: nub install --frozen-lockfile
 
       - name: Verify changed-file policy
+        id: changed-policy
         shell: bash
         run: nub run verify --checks-only
 
@@ -60,16 +67,54 @@ jobs:
       # tmux 3.8. This job covers what only a stock runner shows: Nub provisioning,
       # portable setup, and installation with the host's own tools.
       - name: Verify portable setup
+        id: portable
         shell: bash
-        run: nub run test:setup
+        env:
+          PI_ENV_TEST_REPORT: ${{ runner.temp }}/pi-env-portable-reports/setup.xml
+        run: |
+          mkdir -p "$RUNNER_TEMP/pi-env-portable-reports"
+          nub run test:setup
 
       - name: Verify build and install readiness
+        id: install
         shell: bash
         run: nub run build && nub run verify:install
 
       - name: Verify safe Analyze canary
+        id: analyze
         shell: bash
         run: nub run --node analyze -- --checks async-risk src/analyze/policy.ts
+
+      - name: Summarize portable qualification
+        if: always()
+        shell: bash
+        env:
+          POLICY: ${{ steps.changed-policy.outcome }}
+          PORTABLE: ${{ steps.portable.outcome }}
+          INSTALL: ${{ steps.install.outcome }}
+          ANALYZE: ${{ steps.analyze.outcome }}
+        run: |
+          {
+            echo '## Portable qualification'
+            echo
+            echo '| Contract | Step outcome |'
+            echo '| --- | --- |'
+            printf '| Changed-file policy | %s |\n' "$POLICY"
+            printf '| Stock-runner portable setup | %s |\n' "$PORTABLE"
+            printf '| Build and install readiness | %s |\n' "$INSTALL"
+            printf '| Safe Analyze canary | %s |\n' "$ANALYZE"
+            echo
+            echo 'Skipped steps provide no qualification. Full unit, integration, and workflow tests run in **Container Image**; this lane tests stock-runner provisioning and portable behavior. Download **portable-setup-evidence** for setup test results when available. Step logs retain detailed diagnostics and timings.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain portable setup evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: portable-setup-evidence
+          path: ${{ runner.temp }}/pi-env-portable-reports
+          if-no-files-found: warn
+          retention-days: 7
 
   nix-flake-check:
     name: Nix flake check
@@ -87,5 +132,18 @@ jobs:
         uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
 
       - name: Check flake
+        id: flake
         shell: bash
         run: nix flake check --print-build-logs
+
+      - name: Summarize Nix qualification
+        if: always()
+        shell: bash
+        env:
+          FLAKE: ${{ steps.flake.outcome }}
+        run: |
+          {
+            echo '## Nix flake qualification'
+            echo
+            printf 'Check outcome: **%s**. Skipped checks provide no qualification; build diagnostics remain in the step log.\n' "$FLAKE"
+          } >> "$GITHUB_STEP_SUMMARY"
