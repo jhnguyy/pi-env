@@ -5,12 +5,14 @@ on:
     paths:
       - ci/provisioning/**
       - .github/workflows/ci-base.yml
+      - scripts/trivy-actionable.tpl
   push:
     branches:
       - main
     paths:
       - ci/provisioning/**
       - .github/workflows/ci-base.yml
+      - scripts/trivy-actionable.tpl
   workflow_dispatch:
 
 permissions:
