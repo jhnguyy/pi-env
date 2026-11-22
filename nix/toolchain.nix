@@ -100,7 +100,6 @@ let
     {
       inherit atuin node tmux toolchainPackages;
       hunk = hunkPackage;
-      nub = nubPackage;
       pi = piPackage;
       toolchain = package "pi-env-toolchain" toolchainPackages;
       tools = package "pi-env-tools" toolsPackages;

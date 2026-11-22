@@ -9,16 +9,10 @@ let
   builder-root = pkgs.buildEnv {
     name = "pi-env-builder-root";
     paths = [
-      packages.node
-      packages.nub
+      packages.toolchain
       pkgs.bashInteractive
       pkgs.cacert
-      pkgs.coreutils
       pkgs.curl
-      pkgs.findutils
-      pkgs.git
-      pkgs.gnugrep
-      pkgs.gnused
       pkgs.gnutar
       pkgs.gzip
       pkgs.nix
@@ -59,7 +53,7 @@ in
       ];
       Labels = {
         "org.opencontainers.image.title" = "pi-env Nix builder";
-        "org.opencontainers.image.description" = "Locked Nix, Node and Nub toolchains for image builds";
+        "org.opencontainers.image.description" = "Curated pi-env toolchain with Nix for image builds";
         "org.opencontainers.image.source" = "https://github.com/jhnguyy/pi-env";
       };
     };

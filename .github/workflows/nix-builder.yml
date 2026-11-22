@@ -8,6 +8,7 @@ on:
       - nix/**
       - package.json
       - .github/workflows/nix-builder.yml
+      - .github/workflows/actions.lock
   push:
     branches:
       - main
@@ -17,6 +18,7 @@ on:
       - nix/**
       - package.json
       - .github/workflows/nix-builder.yml
+      - .github/workflows/actions.lock
   workflow_dispatch:
 
 permissions:
@@ -37,12 +39,12 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout repository
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        uses: actions/checkout@v5.0.1
         with:
           persist-credentials: false
 
       - name: Install Nix
-        uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+        uses: cachix/install-nix-action@v31.11.2
         with:
           extra_nix_config: |
             substituters = https://cache.nixos.org
@@ -52,7 +54,7 @@ jobs:
 
       - name: Restore builder closure
         id: cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@v4.3.0
         with:
           path: ${{ env.BUILDER_CACHE }}
           key: nix-builder-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'flake.nix', 'nix/**', 'package.json') }}
@@ -75,31 +77,17 @@ jobs:
           nix path-info --closure-size "$root" >> "$GITHUB_STEP_SUMMARY"
           docker image inspect pi-env-builder:ci --format 'Image size: {{.Size}} bytes' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Exercise baked toolchains and writable Nix store
+      - name: Build and verify the repository with the baked toolchain
         run: |
-          docker run --rm pi-env-builder:ci bash -euc '
-            nix --version
-            node --version
-            nub --version
-            git --version
-            curl --version
-            test -s "$SSL_CERT_FILE"
-            nix-store --verify
-            result=$(nix build --offline --no-link --print-out-paths --expr '\''
-              derivation {
-                name = "builder-smoke";
-                system = builtins.currentSystem;
-                builder = "/bin/sh";
-                args = [ "-c" "printf builder-ok > $out" ];
-              }
-            '\'')
-            test "$(< "$result")" = builder-ok
-            mkdir /tmp/nub-smoke
-            cd /tmp/nub-smoke
-            printf '\''{"name":"builder-smoke","version":"1.0.0","private":true}'\'' > package.json
-            nub install
-            nub install --frozen-lockfile
-          '
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            pi-env-builder:ci bash -euc '
+              git config --global --add safe.directory /workspace
+              nub install --frozen-lockfile
+              nub run build
+              nub run verify:install
+              nix build --no-link --print-build-logs .#checks.x86_64-linux.setup-tests
+            '
 
       # Only trusted main builds populate the shared cache. Cache runtime outputs,
       # not the whole store, image tarballs, or transient compiler dependencies.
@@ -121,7 +109,7 @@ jobs:
 
       - name: Save builder closure
         if: steps.export.outputs.ready == 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/save@v4.3.0
         with:
           path: ${{ env.BUILDER_CACHE }}
           key: ${{ steps.cache.outputs.cache-primary-key }}
