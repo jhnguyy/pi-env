@@ -52,14 +52,20 @@ jobs:
       - name: Configure cache directory
         run: echo "BUILDER_CACHE=$RUNNER_TEMP/nix-builder-cache" >> "$GITHUB_ENV"
 
+      - name: Resolve builder closure identity
+        id: closure
+        run: |
+          root="$(nix eval --raw .#builder-root.outPath)"
+          echo "identity=${root##*/}" >> "$GITHUB_OUTPUT"
+
       - name: Restore builder closure
         id: cache
         uses: actions/cache/restore@v4.3.0
         with:
           path: ${{ env.BUILDER_CACHE }}
-          key: nix-builder-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', 'flake.nix', 'nix/**', 'package.json') }}
+          key: nix-builder-v1-${{ runner.arch }}-${{ steps.closure.outputs.identity }}
           restore-keys: |
-            nix-builder-v1-${{ runner.os }}-${{ runner.arch }}-
+            nix-builder-v1-${{ runner.arch }}-
 
       - name: Import cached outputs
         run: |

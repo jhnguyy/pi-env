@@ -9,15 +9,7 @@ let
   builder-root = pkgs.buildEnv {
     name = "pi-env-builder-root";
     paths = [
-      packages.toolchain
-      pkgs.bashInteractive
-      pkgs.cacert
-      pkgs.curl
-      pkgs.gnutar
-      pkgs.gzip
-      pkgs.nix
-      pkgs.xz
-      pkgs.zstd
+      packages.buildTools
       pkgs.dockerTools.usrBinEnv
       pkgs.dockerTools.fakeNss
       settings
@@ -53,7 +45,7 @@ in
       ];
       Labels = {
         "org.opencontainers.image.title" = "pi-env Nix builder";
-        "org.opencontainers.image.description" = "Curated pi-env toolchain with Nix for image builds";
+        "org.opencontainers.image.description" = "Shared pi-env build tools with Nix, without interactive workbench tools";
         "org.opencontainers.image.source" = "https://github.com/jhnguyy/pi-env";
       };
     };
