@@ -89,5 +89,8 @@ in
   packages = {
     default = toolchain;
     inherit (packages) atuin hunk pi tmux toolchain tools;
-  };
+  }
+  // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
+    import ./builder-image.nix { inherit packages pkgs; }
+  );
 }
