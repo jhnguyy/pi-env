@@ -5,7 +5,7 @@
     hunk.url = "github:modem-dev/hunk/v0.24.1";
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     nub = {
-      url = "github:nubjs/nub/v0.10.0";
+      url = "github:nubjs/nub/v0.11.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     pi = {

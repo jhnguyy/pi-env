@@ -61,18 +61,30 @@ let
         package;
       hunkPackage = hunk.packages.${pkgs.stdenv.hostPlatform.system}.hunk;
       atuin = import ./atuin.nix { inherit pkgs; };
-      toolsPackages = [
-        hunkPackage
+      basePackages = [
         node
         nubPackage
         pkgs.coreutils
         pkgs.findutils
         pkgs.flock
         pkgs.gawk
-        pkgs.gh
         pkgs.git
         pkgs.gnugrep
         pkgs.gnused
+      ];
+      buildToolsPackages = basePackages ++ [
+        pkgs.bashInteractive
+        pkgs.cacert
+        pkgs.curl
+        pkgs.gnutar
+        pkgs.gzip
+        pkgs.nix
+        pkgs.xz
+        pkgs.zstd
+      ];
+      toolsPackages = basePackages ++ [
+        hunkPackage
+        pkgs.gh
         pkgs.ncurses
         pkgs.neovim
         pkgs.ripgrep
@@ -101,6 +113,7 @@ let
       inherit atuin node tmux toolchainPackages;
       hunk = hunkPackage;
       pi = piPackage;
+      buildTools = package "pi-env-build-tools" buildToolsPackages;
       toolchain = package "pi-env-toolchain" toolchainPackages;
       tools = package "pi-env-tools" toolsPackages;
     };

@@ -1,0 +1,121 @@
+name: Nix Builder
+
+on:
+  pull_request:
+    paths:
+      - flake.nix
+      - flake.lock
+      - nix/**
+      - package.json
+      - .github/workflows/nix-builder.yml
+      - .github/workflows/actions.lock
+  push:
+    branches:
+      - main
+    paths:
+      - flake.nix
+      - flake.lock
+      - nix/**
+      - package.json
+      - .github/workflows/nix-builder.yml
+      - .github/workflows/actions.lock
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nix-builder-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  qualify:
+    name: Build and exercise Nix builder
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31.11.2
+        with:
+          extra_nix_config: |
+            substituters = https://cache.nixos.org
+
+      - name: Configure cache directory
+        run: echo "BUILDER_CACHE=$RUNNER_TEMP/nix-builder-cache" >> "$GITHUB_ENV"
+
+      - name: Resolve builder closure identity
+        id: closure
+        run: |
+          root="$(nix eval --raw .#builder-root.outPath)"
+          echo "identity=${root##*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore builder closure
+        id: cache
+        uses: actions/cache/restore@v4.3.0
+        with:
+          path: ${{ env.BUILDER_CACHE }}
+          key: nix-builder-v1-${{ runner.arch }}-${{ steps.closure.outputs.identity }}
+          restore-keys: |
+            nix-builder-v1-${{ runner.arch }}-
+
+      - name: Import cached outputs
+        run: |
+          if [[ -d "$BUILDER_CACHE/nar" ]]; then
+            nix copy --all --from "file://$BUILDER_CACHE?trusted=1"
+          fi
+
+      - name: Build builder closure and layered image
+        id: build
+        run: |
+          root="$(nix build .#builder-root --no-link --print-out-paths --print-build-logs)"
+          echo "root=$root" >> "$GITHUB_OUTPUT"
+          stream="$(nix build .#builder-image --no-link --print-out-paths --print-build-logs)"
+          "$stream" | docker load
+          nix path-info --closure-size "$root" >> "$GITHUB_STEP_SUMMARY"
+          docker image inspect pi-env-builder:ci --format 'Image size: {{.Size}} bytes' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build and verify the repository with the baked toolchain
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            pi-env-builder:ci bash -euc '
+              git config --global --add safe.directory /workspace
+              nub install --frozen-lockfile
+              nub run build
+              nub run verify:install
+              nix build --no-link --print-build-logs .#checks.x86_64-linux.setup-tests
+            '
+
+      # Only trusted main builds populate the shared cache. Cache runtime outputs,
+      # not the whole store, image tarballs, or transient compiler dependencies.
+      - name: Prepare bounded binary cache
+        id: export
+        if: github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        env:
+          BUILDER_ROOT: ${{ steps.build.outputs.root }}
+        run: |
+          bytes="$(nix path-info --json --closure-size "$BUILDER_ROOT" | jq '[.[] | .closureSize] | add')"
+          if (( bytes > 1073741824 )); then
+            echo 'Builder closure exceeds the 1 GiB cache-entry budget; skipping cache export.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          rm -rf "$BUILDER_CACHE"
+          nix copy --to "file://$BUILDER_CACHE" "$BUILDER_ROOT"
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+          du -sh "$BUILDER_CACHE" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save builder closure
+        if: steps.export.outputs.ready == 'true'
+        uses: actions/cache/save@v4.3.0
+        with:
+          path: ${{ env.BUILDER_CACHE }}
+          key: ${{ steps.cache.outputs.cache-primary-key }}
