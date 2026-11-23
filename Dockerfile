@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1.7
 
 # Package the portable workbench without machine-local identity or state.
-# The image workflow runs verification in the test target before qualifying the
-# final artifact; Docker builds themselves do not run tests.
-# Debian's tmux predates the 3.8 baseline that the tmux template and its tests need.
+# CI runs verification in the Nix builder before qualifying this artifact.
+# Docker builds themselves do not run tests.
+# Debian's tmux predates the 3.8 baseline required by the tmux template.
 FROM node:26-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e AS tmux-build
 COPY scripts/install-tmux.sh /tmp/install-tmux.sh
 RUN sh /tmp/install-tmux.sh
@@ -38,7 +38,7 @@ RUN tmux -V
 
 WORKDIR ${PI_ENV_HOME}
 
-FROM toolchain AS test
+FROM toolchain AS dependencies
 
 COPY --chown=node:node . .
 RUN chown -R node:node ${PI_ENV_HOME}
@@ -52,7 +52,7 @@ RUN --mount=type=cache,target=/home/node/.local/share/nub/store,uid=1000,gid=100
     --package-root /usr/local/lib/node_modules \
     --system-license node-LICENSE.txt=/usr/local/LICENSE
 
-FROM test AS package
+FROM dependencies AS package
 # The compiler sensor is needed for qualification, not the distributed workbench.
 RUN find ${PI_ENV_HOME}/node_modules/.store \
     -path '*/node_modules/@oxlint-tsgolint/*/tsgolint' -type f -delete

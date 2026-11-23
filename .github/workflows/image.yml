@@ -23,8 +23,12 @@ env:
   CANDIDATE_TAG: pi-env:ci
 
 jobs:
+  verify:
+    uses: ./.github/workflows/nix-builder.yml
+
   qualify:
     name: Build, verify, and scan image candidate
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -32,24 +36,6 @@ jobs:
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           persist-credentials: false
-
-      - name: Build verification environment
-        run: docker buildx bake test
-
-      - name: Run full verification
-        id: verify
-        run: >-
-          docker run --init --name pi-env-verification
-          -e PI_ENV_REPORT_DIR=/tmp/pi-env-reports
-          pi-env:test nub run verify:full
-
-      - name: Collect verification reports
-        if: always() && steps.verify.outcome != 'skipped'
-        run: |
-          trap 'docker rm -f pi-env-verification' EXIT
-          mkdir -p "$RUNNER_TEMP/pi-env-reports"
-          docker cp pi-env-verification:/tmp/pi-env-reports/. "$RUNNER_TEMP/pi-env-reports"
-          cat "$RUNNER_TEMP/pi-env-reports/verification.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build image candidate
         run: docker buildx bake image --set "image.tags=$CANDIDATE_TAG"

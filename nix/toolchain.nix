@@ -73,6 +73,8 @@ let
         pkgs.gnused
       ];
       buildToolsPackages = basePackages ++ [
+        # Full qualification exercises private tmux servers.
+        tmux
         pkgs.bashInteractive
         pkgs.cacert
         pkgs.curl
