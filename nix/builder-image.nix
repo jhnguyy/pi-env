@@ -33,8 +33,9 @@ in
       chmod 1777 tmp
     '';
     config = {
-      # This is a single-user build environment, not the deployed application.
-      User = "0:0";
+      # Keep Docker's root default for this single-user build environment.
+      # An explicit User makes docker exec resolve Nix's symlinked NSS files
+      # outside the container, which recent Docker versions reject.
       WorkingDir = "/workspace";
       Cmd = [ "/bin/bash" ];
       Env = [
