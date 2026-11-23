@@ -65,29 +65,42 @@ jobs:
           nix path-info --closure-size "$root" >> "$GITHUB_STEP_SUMMARY"
           docker image inspect pi-env-builder:ci --format 'Image size: {{.Size}} bytes' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Build and verify with the baked toolchain
-        id: verify
+      - name: Prepare verification container
+        id: container
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}
         run: |
           docker create --init --name pi-env-verification \
             -e GITHUB_BASE_REF -e PI_ENV_REPORT_DIR=/tmp/pi-env-reports \
-            pi-env-builder:ci bash -euc '
-              nub install --frozen-lockfile
-              nub run verify --checks-only
-              nub run verify:full
-              nub run --node analyze -- --checks async-risk src/analyze/policy.ts
-              nix flake check --print-build-logs
-            '
+            pi-env-builder:ci sleep infinity
           # Copy rather than bind-mount: fixture HOME changes must not bypass Git
           # ownership checks, and the builder must not change the host checkout.
           docker cp "$GITHUB_WORKSPACE/." pi-env-verification:/workspace
-          docker start --attach pi-env-verification
+          docker start pi-env-verification
+
+      - name: Install frozen dependencies
+        run: docker exec pi-env-verification nub install --frozen-lockfile
+
+      - name: Verify changed-file policy
+        run: |
+          docker exec pi-env-verification bash -euc '
+            git merge-base "origin/${GITHUB_BASE_REF:-main}" HEAD
+            nub run verify --checks-only
+          '
+
+      - name: Run full verification
+        id: verify
+        run: docker exec pi-env-verification nub run verify:full
+
+      - name: Verify safe Analyze canary
+        run: docker exec pi-env-verification nub run --node analyze -- --checks async-risk src/analyze/policy.ts
+
+      - name: Check flake
+        run: docker exec pi-env-verification nix flake check --print-build-logs
 
       - name: Collect verification reports
         if: always() && steps.verify.outcome != 'skipped'
         run: |
-          trap 'docker rm -f pi-env-verification' EXIT
           mkdir -p "$RUNNER_TEMP/pi-env-reports"
           docker cp pi-env-verification:/tmp/pi-env-reports/. "$RUNNER_TEMP/pi-env-reports"
           cat "$RUNNER_TEMP/pi-env-reports/verification.md" >> "$GITHUB_STEP_SUMMARY"
@@ -100,6 +113,10 @@ jobs:
           path: ${{ runner.temp }}/pi-env-reports
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Remove verification container
+        if: always() && steps.container.outcome != 'skipped'
+        run: docker rm -f pi-env-verification
 
       # Only trusted main builds populate the shared cache. Cache runtime outputs,
       # not the whole store, image tarballs, or transient compiler dependencies.
