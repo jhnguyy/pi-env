@@ -66,7 +66,8 @@ let
         nubPackage
         pkgs.coreutils
         pkgs.findutils
-        pkgs.flock
+        # Daemon ownership uses util-linux's zero-timeout locking on Linux.
+        (if pkgs.stdenv.hostPlatform.isLinux then pkgs.util-linuxMinimal else pkgs.flock)
         pkgs.gawk
         pkgs.git
         pkgs.gnugrep
