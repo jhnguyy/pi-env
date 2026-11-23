@@ -73,20 +73,17 @@ jobs:
           docker create --init --name pi-env-verification \
             -e GITHUB_BASE_REF -e PI_ENV_REPORT_DIR=/tmp/pi-env-reports \
             pi-env-builder:ci sleep infinity
-          # Copy rather than bind-mount: fixture HOME changes must not bypass Git
-          # ownership checks, and the builder must not change the host checkout.
+          # Keep Git metadata container-owned when fixtures change HOME, without
+          # changing ownership of the host checkout.
           docker cp "$GITHUB_WORKSPACE/." pi-env-verification:/workspace
           docker start pi-env-verification
+          docker exec pi-env-verification chown -R 0:0 /workspace
 
       - name: Install frozen dependencies
         run: docker exec pi-env-verification nub install --frozen-lockfile
 
       - name: Verify changed-file policy
-        run: |
-          docker exec pi-env-verification bash -euc '
-            git merge-base "origin/${GITHUB_BASE_REF:-main}" HEAD
-            nub run verify --checks-only
-          '
+        run: docker exec pi-env-verification nub run verify --checks-only
 
       - name: Run full verification
         id: verify
