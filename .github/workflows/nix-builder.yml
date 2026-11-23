@@ -52,15 +52,12 @@ jobs:
           restore-keys: |
             nix-builder-v1-${{ runner.arch }}-
 
-      - name: Import cached outputs
-        run: |
-          if [[ -d "$BUILDER_CACHE/nar" ]]; then
-            nix copy --all --from "file://$BUILDER_CACHE?trusted=1"
-          fi
-
       - name: Build builder closure and layered image
         id: build
         run: |
+          if [[ -d "$BUILDER_CACHE/nar" ]]; then
+            export NIX_CONFIG="${NIX_CONFIG:-}"$'\n'"extra-substituters = file://$BUILDER_CACHE?trusted=1"
+          fi
           root="$(nix build .#builder-root --no-link --print-out-paths --print-build-logs)"
           echo "root=$root" >> "$GITHUB_OUTPUT"
           stream="$(nix build .#builder-image --no-link --print-out-paths --print-build-logs)"
