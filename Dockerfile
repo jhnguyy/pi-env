@@ -33,7 +33,6 @@ FROM ${RUNTIME_IMAGE} AS pi-env
 ENV PI_ENV_HOME=/opt/pi-env \
   PI_ENV_CONTAINER=1 \
   HOME=/home/agent
-WORKDIR ${PI_ENV_HOME}
 LABEL org.opencontainers.image.title="pi-env" \
   org.opencontainers.image.description="Nix-based pi-env workbench with qualified dependencies and prebuilt extension bundles" \
   org.opencontainers.image.source="https://github.com/jhnguyy/pi-env" \

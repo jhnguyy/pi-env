@@ -138,6 +138,11 @@ jobs:
 
       - name: Archive and reload runtime candidate
         run: |
+          docker image inspect pi-env-runtime:ci "$CANDIDATE_TAG" \
+            --format '{{json .RepoTags}} {{json .RootFS.Layers}}' \
+            > "$RUNNER_TEMP/pi-env-reports/image-layers.txt"
+          docker history --no-trunc "$CANDIDATE_TAG" \
+            > "$RUNNER_TEMP/pi-env-reports/image-history.txt"
           docker save "$CANDIDATE_TAG" --output "$RUNNER_TEMP/pi-env-image.tar"
           docker load --input "$RUNNER_TEMP/pi-env-image.tar"
 
