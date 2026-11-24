@@ -33,6 +33,7 @@ let
       cp -aL etc etc-copy
       rm -rf etc
       mv etc-copy etc
+      chmod -R u+w etc
       printf 'agent:x:1000:1000:pi-env:/home/agent:/bin/bash\n' >> etc/passwd
       printf 'agent:x:1000:\n' >> etc/group
       mkdir -p root workspace opt/pi-env home/agent tmp

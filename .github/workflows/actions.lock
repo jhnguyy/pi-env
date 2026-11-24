@@ -10,11 +10,9 @@ workflows:
         - 'actions/upload-artifact@v7.0.1'
         - 'cachix/install-nix-action@v31.11.2'
         - 'docker/login-action@v4.4.0'
-    '.github/workflows/nix-builder.yml':
-        - 'actions/cache@v4.3.0'
+    '.github/workflows/trivy.yml':
         - 'actions/checkout@v5.0.1'
         - 'actions/upload-artifact@v7.0.1'
-        - 'cachix/install-nix-action@v31.11.2'
 dependencies:
     'actions/cache@v4.3.0':
         ref: 'v4.3.0'
