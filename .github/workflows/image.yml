@@ -70,6 +70,8 @@ jobs:
           closure="$(nix build .#runtime-closure --no-link --print-out-paths)"
           mkdir -p "$RUNNER_TEMP/pi-env-reports"
           cp "$closure/store-paths" "$RUNNER_TEMP/pi-env-reports/nix-runtime-store-paths.txt"
+          docker image inspect pi-env-builder:ci pi-env-runtime:ci \
+            --format '{{json .RepoTags}}: {{.Size}} bytes' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build pi-env components once
         run: |
@@ -122,12 +124,17 @@ jobs:
           docker exec --user 1000:1000 pi-env-runtime-check id -u
           docker exec -e PI_ENV_TEST_REPORT=/tmp/runtime-workflows.xml \
             pi-env-runtime-check nub run test:workflows
+          docker exec -e PI_ENV_TEST_REPORT=/tmp/runtime-daemon.xml \
+            pi-env-runtime-check nub run test:integration \
+              scripts/__tests__/restart-lsp-daemon.integration.test.mjs \
+              --maxWorkers=1 --no-file-parallelism
 
       - name: Collect runtime test report
         if: always() && steps.runtime.outcome != 'skipped'
         run: |
           trap 'docker rm -f pi-env-runtime-check' EXIT
           docker cp pi-env-runtime-check:/tmp/runtime-workflows.xml "$RUNNER_TEMP/pi-env-reports/"
+          docker cp pi-env-runtime-check:/tmp/runtime-daemon.xml "$RUNNER_TEMP/pi-env-reports/"
 
       - name: Archive runtime candidate
         run: docker save "$CANDIDATE_TAG" --output "$RUNNER_TEMP/pi-env-image.tar"
