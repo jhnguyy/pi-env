@@ -2,4 +2,22 @@
 
 The image packages the portable workbench, not a configured agent identity. Credentials, personal settings, sessions, and deployment state remain external. Downstream images own any additional transport tools and their security-update policy.
 
-The [image workflow](../.github/workflows/image.yml) owns qualification, publication, and retained evidence. It calls the [Nix builder workflow](../.github/workflows/nix-builder.yml) for source verification with the baked toolchain; setup fixtures run there, not in a clean Nub/Nix provisioning environment. The [Dockerfile](../Dockerfile) still owns the portable runtime image contents; building an image is not a claim that its tests passed. See [licensing](licensing.md) for distribution obligations.
+The [Nix image definitions](../nix/builder-image.nix) supply builder and runtime bases from the same locked tools. The [Dockerfile](../Dockerfile) installs dependencies and hydrates components once in its verification target. Tests run against that baked image with `verify:full --prebuilt`; final assembly consumes it without another installation or build. The non-root runtime omits build-only tooling and receives the same application bundles.
+
+The [image workflow](../.github/workflows/image.yml) owns qualification and retained evidence. It checks bundle identity and exercises the built components again in the final runtime. Setup fixtures remain part of qualification, not a clean Nub/Nix installer test. Building an image alone does not establish that its tests passed.
+
+Registry publication and new binary-cache exports are blocked while Nix closure notices/corresponding source and OS vulnerability-scan coverage remain unqualified. The closure inventory is not a compliance bundle; a green Trivy result does not establish Nix OS coverage. See [licensing](licensing.md).
+
+For a local Docker build, first load both locked bases, then build the verification target before final assembly:
+
+```bash
+for target in builder-image runtime-image; do
+  stream="$(nix build ".#$target" --no-link --print-out-paths)"
+  "$stream" | docker load
+done
+docker buildx bake verification
+docker run --rm --init pi-env:verification nub run verify:full --prebuilt
+docker buildx bake image
+```
+
+Downstream images must not assume Debian tools or `apt` are available.

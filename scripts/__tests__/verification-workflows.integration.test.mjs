@@ -209,6 +209,47 @@ for (const exitCode of [7, 0]) {
   );
 }
 
+for (const prebuilt of [false, true]) {
+  it(
+    prebuilt
+      ? "qualifies baked output without replacing it"
+      : "builds output for source qualification",
+    async ({ workspace }) => {
+      const file = join(workspace.root, "package.json");
+      const pkg = JSON.parse(await readFile(file, "utf8"));
+      const artifact = join(workspace.root, "artifact");
+      await writeFile(artifact, "baked");
+      const noop = `node -e 'process.exit(0)'`;
+      for (const name of [
+        "format:check",
+        "check:patterns",
+        "check:dependencies",
+        "licenses:check",
+        "typecheck",
+        "lint:type",
+        "test:setup",
+        "test:unit",
+        "test:integration",
+        "test:workflows",
+      ]) {
+        pkg.scripts[name] = noop;
+      }
+      pkg.scripts.build = `node -e 'require("node:fs").writeFileSync("artifact", "rebuilt")'`;
+      pkg.scripts["verify:install"] = `node -e 'require("node:fs").readFileSync("artifact")'`;
+      await writeFile(file, JSON.stringify(pkg));
+      const result = await workspace.run("verify:full", prebuilt ? ["--prebuilt"] : []);
+      expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(await readFile(artifact, "utf8")).toBe(prebuilt ? "baked" : "rebuilt");
+      if (prebuilt) {
+        await rm(artifact);
+        const missing = await workspace.run("verify:full", ["--prebuilt"]);
+        expect(missing.exitCode).not.toBe(0);
+        expect(missing.stderr).toContain("artifact");
+      }
+    },
+  );
+}
+
 it("fails clearly on an unknown base instead of fetching or widening the analysis", async ({
   workspace,
 }) => {

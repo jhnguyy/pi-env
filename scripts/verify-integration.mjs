@@ -1,7 +1,15 @@
 #!/usr/bin/env node
+import { parseArgs } from "node:util";
 import { runPlan } from "./verification-runner.mjs";
 
-// This is the full qualification order, shared by local and container verification.
+const {
+  values: { prebuilt },
+} = parseArgs({
+  options: { prebuilt: { type: "boolean", default: false } },
+});
+
+// Source qualification builds first; image qualification checks the baked output
+// instead. Both paths exercise the same tests without replacing an image's bundles.
 const scripts = [
   "format:check",
   "check:patterns",
@@ -9,11 +17,11 @@ const scripts = [
   "licenses:check",
   "typecheck",
   "lint:type",
-  "build",
+  prebuilt ? "verify:install" : "build",
   "test:setup",
   "test:unit",
   "test:integration",
-  "verify:install",
+  ...(!prebuilt ? ["verify:install"] : []),
   "test:workflows",
 ];
 

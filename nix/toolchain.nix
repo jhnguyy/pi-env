@@ -73,11 +73,13 @@ let
         pkgs.gnugrep
         pkgs.gnused
       ];
-      buildToolsPackages = basePackages ++ [
-        # Full qualification exercises private tmux servers.
+      runtimeToolsPackages = basePackages ++ [
+        # Native qualification and the deployed workbench both use tmux.
         tmux
         pkgs.bashInteractive
         pkgs.cacert
+      ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.tini ];
+      buildToolsPackages = [ runtimeTools ] ++ [
         pkgs.curl
         pkgs.gnutar
         pkgs.gzip
@@ -111,9 +113,10 @@ let
             platforms = systems;
           };
         };
+      runtimeTools = package "pi-env-runtime-tools" runtimeToolsPackages;
     in
     {
-      inherit atuin node tmux toolchainPackages;
+      inherit atuin node tmux toolchainPackages runtimeTools;
       hunk = hunkPackage;
       pi = piPackage;
       buildTools = package "pi-env-build-tools" buildToolsPackages;

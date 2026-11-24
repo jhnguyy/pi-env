@@ -1,80 +1,47 @@
 # syntax=docker/dockerfile:1.7
 
-# Package the portable workbench without machine-local identity or state.
-# CI runs verification in the Nix builder before qualifying this artifact.
-# Docker builds themselves do not run tests.
-# Debian's tmux predates the 3.8 baseline required by the tmux template.
-FROM node:26-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e AS tmux-build
-COPY scripts/install-tmux.sh /tmp/install-tmux.sh
-RUN sh /tmp/install-tmux.sh
+# Load the flake's builder-image and runtime-image before invoking Bake.
+# The final target consumes the separately built verification image: it cannot
+# silently reinstall dependencies or rebuild bundles if build caches disappear.
+ARG BUILDER_IMAGE=pi-env-builder:ci
+ARG COMPONENTS_IMAGE=pi-env:verification
+ARG RUNTIME_IMAGE=pi-env-runtime:ci
 
-FROM node:26-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e AS toolchain
-
+FROM ${BUILDER_IMAGE} AS verification
 ENV PI_ENV_HOME=/opt/pi-env \
   PI_ENV_CONTAINER=1 \
-  NPM_CONFIG_AUDIT=false \
-  NPM_CONFIG_FUND=false \
-  NPM_CONFIG_UPDATE_NOTIFIER=false
-
-USER root
-COPY package.json /tmp/pi-env-package.json
-RUN export DEBIAN_FRONTEND=noninteractive \
-  && apt-get update \
-  && apt-get upgrade -y \
-  && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    git \
-    libevent-core-2.1-7 \
-    tini \
-    util-linux \
-  && npm install --global --omit=dev "$(node -p 'JSON.parse(require("fs").readFileSync("/tmp/pi-env-package.json")).packageManager.replace("nub@", "@nubjs/nub@")')" \
-  && nub --version \
-  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
-  && rm -rf /var/lib/apt/lists/* /tmp/pi-env-package.json \
-  && node --version
-
-COPY --from=tmux-build /usr/local/bin/tmux /usr/local/bin/tmux
-RUN tmux -V
-
+  HOME=/home/agent
 WORKDIR ${PI_ENV_HOME}
+COPY --chown=1000:1000 . .
+RUN chown -R 1000:1000 ${PI_ENV_HOME}
+USER 1000:1000
 
-FROM toolchain AS dependencies
-
-COPY --chown=node:node . .
-RUN chown -R node:node ${PI_ENV_HOME}
-
-USER node
-
-# Keep Nub's content-addressed download store out of immutable image layers.
-RUN --mount=type=cache,target=/home/node/.local/share/nub/store,uid=1000,gid=1000 \
+# Nub's postinstall hydrates the extension bundles. Qualification uses --prebuilt
+# so it tests these outputs rather than replacing them in a writable container.
+RUN --mount=type=cache,target=/home/agent/.local/share/nub/store,uid=1000,gid=1000 \
   nub install --frozen-lockfile \
   && nub run licenses:generate \
-    --package-root /usr/local/lib/node_modules \
-    --system-license node-LICENSE.txt=/usr/local/LICENSE
+    --system-license node-LICENSE.txt=/usr/share/licenses/nodejs/LICENSE
 
-FROM dependencies AS package
-# The compiler sensor is needed for qualification, not the distributed workbench.
-RUN find ${PI_ENV_HOME}/node_modules/.store \
-    -path '*/node_modules/@oxlint-tsgolint/*/tsgolint' -type f -delete
+FROM ${COMPONENTS_IMAGE} AS package
+# Qualification-only compiler binaries and build metadata are not distributed.
+RUN find /opt/pi-env/node_modules/.store \
+    -path '*/node_modules/@oxlint-tsgolint/*/tsgolint' -type f -delete \
+  && rm -rf /opt/pi-env/.git \
+    /home/agent/.local/share/nub/store \
+    /home/agent/.cache/nub/pm/packuments-full-v1
 
-USER root
-# Nub uses the host Node when compatible, so its managed Node cache is optional.
-RUN if [ -e /home/node/.cache/nub/node ]; then \
-    find /home/node/.cache/nub/node -path '*/lib/node_modules/npm' -prune -exec rm -rf {} + \
-    && find /home/node/.cache/nub/node \( -name npm -o -name npx \) -type l -delete; \
-  fi \
-  && rm -rf /home/node/.cache/nub/pm/packuments-full-v1 \
-  && rm -rf /home/node/.local/share/nub/store \
-  && rm -rf ${PI_ENV_HOME}/.git
-
-# Excluded files must not survive in earlier distributed layers.
-FROM toolchain AS pi-env
+FROM ${RUNTIME_IMAGE} AS pi-env
+ENV PI_ENV_HOME=/opt/pi-env \
+  PI_ENV_CONTAINER=1 \
+  HOME=/home/agent
+WORKDIR ${PI_ENV_HOME}
 LABEL org.opencontainers.image.title="pi-env" \
-  org.opencontainers.image.description="pi-env CI/toolchain image artifact with locked Nub dependencies and prebuilt extension bundles" \
+  org.opencontainers.image.description="Nix-based pi-env workbench with qualified dependencies and prebuilt extension bundles" \
   org.opencontainers.image.source="https://github.com/jhnguyy/pi-env" \
   org.opencontainers.image.licenses="MIT"
-COPY --from=package --chown=node:node /opt/pi-env /opt/pi-env
-COPY --from=package --chown=node:node /home/node /home/node
-USER node
-ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
+COPY --from=package --chown=1000:1000 /opt/pi-env /opt/pi-env
+COPY --from=package --chown=1000:1000 /home/agent /home/agent
+USER 1000:1000
+ENTRYPOINT ["tini", "--"]
 CMD ["nub", "run", "verify:install"]
