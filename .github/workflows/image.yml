@@ -122,9 +122,10 @@ jobs:
         run: |
           docker run --detach --name pi-env-runtime-check "$CANDIDATE_TAG" sleep infinity
           docker exec --user 1000:1000 pi-env-runtime-check id -u
-          docker exec -e PI_ENV_TEST_REPORT=/tmp/runtime-workflows.xml \
+          docker exec pi-env-runtime-check mkdir -p /tmp/runtime-reports
+          docker exec -e PI_ENV_TEST_REPORT=/tmp/runtime-reports/runtime-workflows.xml \
             pi-env-runtime-check nub run test:workflows
-          docker exec -e PI_ENV_TEST_REPORT=/tmp/runtime-daemon.xml \
+          docker exec -e PI_ENV_TEST_REPORT=/tmp/runtime-reports/runtime-daemon.xml \
             pi-env-runtime-check nub run test:integration \
               scripts/__tests__/restart-lsp-daemon.integration.test.mjs \
               --maxWorkers=1 --no-file-parallelism
@@ -133,8 +134,7 @@ jobs:
         if: always() && steps.runtime.outcome != 'skipped'
         run: |
           trap 'docker rm -f pi-env-runtime-check' EXIT
-          docker cp pi-env-runtime-check:/tmp/runtime-workflows.xml "$RUNNER_TEMP/pi-env-reports/"
-          docker cp pi-env-runtime-check:/tmp/runtime-daemon.xml "$RUNNER_TEMP/pi-env-reports/"
+          docker cp pi-env-runtime-check:/tmp/runtime-reports/. "$RUNNER_TEMP/pi-env-reports/"
 
       - name: Archive runtime candidate
         run: docker save "$CANDIDATE_TAG" --output "$RUNNER_TEMP/pi-env-image.tar"
