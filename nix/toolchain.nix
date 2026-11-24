@@ -73,7 +73,11 @@ let
         pkgs.gnugrep
         pkgs.gnused
       ];
-      runtimeToolsPackages = basePackages ++ [
+      # Images use Nub, not npm/corepack. Keep the regular Node profile for
+      # existing development shells and upstream Nix package builds.
+      runtimeToolsPackages = [
+        (builtins.getAttr "nodejs-slim_${builtins.head nodeMatch}" pkgs)
+      ] ++ pkgs.lib.remove node basePackages ++ [
         # Native qualification and the deployed workbench both use tmux.
         tmux
         pkgs.bashInteractive
