@@ -124,7 +124,7 @@ jobs:
           docker exec --user 1000:1000 pi-env-runtime-check id -u
           docker exec pi-env-runtime-check mkdir -p /tmp/runtime-reports
           docker exec -e PI_ENV_TEST_REPORT=/tmp/runtime-reports/runtime-workflows.xml \
-            pi-env-runtime-check nub run test:workflows
+            pi-env-runtime-check nub run test:workflows --maxWorkers=1 --no-file-parallelism
           docker exec -e PI_ENV_TEST_REPORT=/tmp/runtime-reports/runtime-daemon.xml \
             pi-env-runtime-check nub run test:integration \
               scripts/__tests__/restart-lsp-daemon.integration.test.mjs \
@@ -136,8 +136,10 @@ jobs:
           trap 'docker rm -f pi-env-runtime-check' EXIT
           docker cp pi-env-runtime-check:/tmp/runtime-reports/. "$RUNNER_TEMP/pi-env-reports/"
 
-      - name: Archive runtime candidate
-        run: docker save "$CANDIDATE_TAG" --output "$RUNNER_TEMP/pi-env-image.tar"
+      - name: Archive and reload runtime candidate
+        run: |
+          docker save "$CANDIDATE_TAG" --output "$RUNNER_TEMP/pi-env-image.tar"
+          docker load --input "$RUNNER_TEMP/pi-env-image.tar"
 
       - name: Verify safe scanner reporting
         run: bash scripts/trivy-scan.sh check-report

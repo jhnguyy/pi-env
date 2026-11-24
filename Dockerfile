@@ -27,9 +27,7 @@ FROM ${COMPONENTS_IMAGE} AS package
 # Qualification-only compiler binaries and build metadata are not distributed.
 RUN find /opt/pi-env/node_modules/.store \
     -path '*/node_modules/@oxlint-tsgolint/*/tsgolint' -type f -delete \
-  && rm -rf /opt/pi-env/.git \
-    /home/agent/.local/share/nub/store \
-    /home/agent/.cache/nub/pm/packuments-full-v1
+  && rm -rf /opt/pi-env/.git
 
 FROM ${RUNTIME_IMAGE} AS pi-env
 ENV PI_ENV_HOME=/opt/pi-env \
@@ -41,7 +39,6 @@ LABEL org.opencontainers.image.title="pi-env" \
   org.opencontainers.image.source="https://github.com/jhnguyy/pi-env" \
   org.opencontainers.image.licenses="MIT"
 COPY --from=package --chown=1000:1000 /opt/pi-env /opt/pi-env
-COPY --from=package --chown=1000:1000 /home/agent /home/agent
 USER 1000:1000
 ENTRYPOINT ["tini", "--"]
 CMD ["nub", "run", "verify:install"]
