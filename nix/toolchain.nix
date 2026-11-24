@@ -84,6 +84,7 @@ let
         pkgs.cacert
       ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.tini ];
       buildToolsPackages = [ runtimeTools ] ++ [
+        pkgs.skopeo
         pkgs.curl
         pkgs.gnutar
         pkgs.gzip
