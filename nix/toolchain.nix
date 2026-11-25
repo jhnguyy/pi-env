@@ -53,7 +53,7 @@ let
         };
       nubPackage =
         let
-          package = nub.packages.${pkgs.stdenv.hostPlatform.system}.default;
+          package = import ./nub.nix { inherit pkgs nub; };
         in
         assert pkgs.lib.assertMsg (
           manifest.packageManager == "nub@${package.version}"

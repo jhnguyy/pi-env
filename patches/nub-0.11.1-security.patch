@@ -1,0 +1,52 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 2364bbb..5ee5a23 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -183,7 +183,7 @@ tar = "0.4"
+ # DEFLATE, so we skip bzip2/zstd/lzma/aes backends and their C deps. Keeps the
+ # checksum-verify-then-extract flow in one process, deterministic across Windows
+ # versions. Builds on every target; the .zip path just isn't exercised on unix.
+-zip = { version = "8.6", default-features = false, features = ["deflate"] }
++zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
+ thiserror = "2"
+ tracing = "0.1"
+ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+diff --git a/crates/nub-core/Cargo.toml b/crates/nub-core/Cargo.toml
+index becd118..a465fb7 100644
+--- a/crates/nub-core/Cargo.toml
++++ b/crates/nub-core/Cargo.toml
+@@ -83,7 +83,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
+ sha1 = "0.11"
+ sha2 = "0.11"
+ tar = "0.4"
+-zip = { version = "8.6", default-features = false, features = ["deflate"] }
++zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
+ thiserror = "2"
+ tracing = "0.1"
+ # Pure-Rust zstd DECODER for inflating the embedded runtime blob on first run
+diff --git a/vendor/aube/Cargo.toml b/vendor/aube/Cargo.toml
+index 121bcbe..5cc4699 100644
+--- a/vendor/aube/Cargo.toml
++++ b/vendor/aube/Cargo.toml
+@@ -192,7 +192,7 @@ zstd = { version = "0.13", default-features = false }
+ # zip-of-JSONs and the dependency-free std crate ecosystem has no
+ # alternative. `deflate` is the only OSV-used compression method, so
+ # defeature everything else to keep the build slim.
+-zip = { version = "8", default-features = false, features = ["deflate"] }
++zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
+
+ # Semver
+ node-semver = "2"
+diff --git a/vendor/aube/crates/aube-registry/src/osv_mirror.rs b/vendor/aube/crates/aube-registry/src/osv_mirror.rs
+index a5378b5..733be0f 100644
+--- a/vendor/aube/crates/aube-registry/src/osv_mirror.rs
++++ b/vendor/aube/crates/aube-registry/src/osv_mirror.rs
+@@ -452,7 +452,7 @@ fn build_index_from_zip(bytes: &[u8]) -> Result<HashMap<String, Vec<AdvisoryEntr
+         // directory in order without re-cloning the archive
+         // reader. Holds a mutable borrow for one iteration each.
+         let mut entry = archive.by_index(i)?;
+-        let name = entry.name().to_owned();
++        let name = entry.name()?.into_owned();
+         if !is_mal_filename(&name) {
+             continue;
+         }
