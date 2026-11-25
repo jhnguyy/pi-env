@@ -1,7 +1,6 @@
 {
   hunk,
   nixpkgs,
-  nub,
   pi,
 }:
 let
@@ -53,11 +52,11 @@ let
         };
       nubPackage =
         let
-          package = import ./nub.nix { inherit pkgs nub; };
+          package = import ./nub.nix { inherit pkgs node; };
         in
         assert pkgs.lib.assertMsg (
           manifest.packageManager == "nub@${package.version}"
-        ) "Nub flake must match package.json#packageManager";
+        ) "Precompiled Nub release must match package.json#packageManager";
         package;
       hunkPackage = hunk.packages.${pkgs.stdenv.hostPlatform.system}.hunk;
       atuin = import ./atuin.nix { inherit pkgs; };

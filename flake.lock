@@ -145,27 +145,6 @@
         "type": "github"
       }
     },
-    "nub": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1794780264,
-        "narHash": "sha256-9ZXDRy5QyX90etJ2Jm8/1RAKKmrTJVdNSoT1Gj8SzQA=",
-        "owner": "nubjs",
-        "repo": "nub",
-        "rev": "e883acdfc837a87e3098843a081dfa20f91103c6",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nubjs",
-        "ref": "v0.11.1",
-        "repo": "nub",
-        "type": "github"
-      }
-    },
     "pi": {
       "inputs": {
         "nixpkgs": [
@@ -192,7 +171,6 @@
       "inputs": {
         "hunk": "hunk",
         "nixpkgs": "nixpkgs_2",
-        "nub": "nub",
         "pi": "pi"
       }
     },
