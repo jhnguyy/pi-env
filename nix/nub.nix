@@ -18,6 +18,16 @@ let
     };
   };
   artifact = release.artifacts.${pkgs.stdenv.hostPlatform.system};
+  # Official binaries lack cargo-auditable metadata. These release-source locks
+  # provide conservative scan inventories, not proof of compiled dependencies.
+  workspaceLock = pkgs.fetchurl {
+    url = "https://raw.githubusercontent.com/nubjs/nub/v${release.version}/Cargo.lock";
+    sha256 = "ea11e3595b995a503b6d536d7045f1ca8d251cec6ad63fc88f8b23185ae5dc4b";
+  };
+  nativeLock = pkgs.fetchurl {
+    url = "https://raw.githubusercontent.com/nubjs/nub/v${release.version}/crates/nub-native/Cargo.lock";
+    sha256 = "c6c468d50b40da0c8ebd814a18823d7ae0deff0c32cc6ab2a37d4dca6fa2643b";
+  };
 in
 pkgs.stdenvNoCC.mkDerivation {
   pname = "nub";
@@ -37,6 +47,8 @@ pkgs.stdenvNoCC.mkDerivation {
     install -Dm755 bin/nub "$out/bin/nub"
     ln -s nub "$out/bin/nubx"
     ln -s nub "$out/bin/nubr"
+    install -Dm644 ${workspaceLock} "$out/share/nub/${release.version}/source/Cargo.lock"
+    install -Dm644 ${nativeLock} "$out/share/nub/${release.version}/native/Cargo.lock"
     runHook postInstall
   '';
   doInstallCheck = true;

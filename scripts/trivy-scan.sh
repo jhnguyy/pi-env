@@ -60,8 +60,10 @@ sandbox=("$RUNTIME" run --rm
 
 case "${1:-filesystem}" in
   check-report)
-    "${sandbox[@]}" --network none --entrypoint sh "$IMAGE" \
-      /templates/__tests__/trivy-template.test.sh
+    "${sandbox[@]}" --network none \
+      -v "$ROOT/.trivyignore.yaml:/etc/trivy/ignore.yaml:ro" \
+      --entrypoint sh "$IMAGE" -c \
+      'sh /templates/__tests__/trivy-template.test.sh && sh /templates/__tests__/trivy-exceptions.test.sh /etc/trivy/ignore.yaml'
     exit
     ;;
   image)
