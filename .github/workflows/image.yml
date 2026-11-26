@@ -1,5 +1,5 @@
 name: Container Image
-run-name: ${{ github.event_name == 'push' && 'Publish verified pi-env image to GHCR' || 'Verify pi-env image artifact' }}
+run-name: Build and qualify the Nix-based pi-env image (publication blocked)
 
 on:
   pull_request:
@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: image-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -17,32 +21,186 @@ concurrency:
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
   CANDIDATE_TAG: pi-env:ci
+  GITHUB_BASE_REF: ${{ github.base_ref }}
 
 jobs:
   qualify:
-    name: Build, verify, and scan image candidate
+    name: Build, test, and scan Nix candidate
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    permissions:
-      contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        uses: actions/checkout@v5.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
-      - name: Qualify image candidate
-        id: qualified-image
-        uses: ./.github/actions/qualify-image
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31.11.2
         with:
-          image-tag: ${{ env.CANDIDATE_TAG }}
+          extra_nix_config: |
+            substituters = https://cache.nixos.org
 
+      - name: Configure cache directory
+        run: echo "BUILDER_CACHE=$RUNNER_TEMP/nix-builder-cache" >> "$GITHUB_ENV"
+
+      - name: Resolve builder closure identity
+        id: closure
+        run: |
+          root="$(nix eval --raw .#builder-root.outPath)"
+          echo "identity=${root##*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore builder closure
+        uses: actions/cache/restore@v4.3.0
+        with:
+          path: ${{ env.BUILDER_CACHE }}
+          key: nix-builder-v1-${{ runner.arch }}-${{ steps.closure.outputs.identity }}
+          restore-keys: |
+            nix-builder-v1-${{ runner.arch }}-
+
+      - name: Load Nix builder and runtime bases
+        run: |
+          if [[ -d "$BUILDER_CACHE/nar" ]]; then
+            export NIX_CONFIG="${NIX_CONFIG:-}"$'\n'"extra-substituters = file://$BUILDER_CACHE?trusted=1"
+          fi
+          for target in builder-image runtime-image; do
+            stream="$(nix build ".#$target" --no-link --print-out-paths --print-build-logs)"
+            "$stream" | docker load
+          done
+          closure="$(nix build .#runtime-closure --no-link --print-out-paths)"
+          mkdir -p "$RUNNER_TEMP/pi-env-reports"
+          cp "$closure/store-paths" "$RUNNER_TEMP/pi-env-reports/nix-runtime-store-paths.txt"
+          docker image inspect pi-env-builder:ci pi-env-runtime:ci \
+            --format '{{json .RepoTags}}: {{.Size}} bytes' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build pi-env components once
+        run: |
+          docker buildx bake verification
+          docker run --rm pi-env:verification bash -euc \
+            'find extensions -type f -path "*/dist/*" -exec sha256sum {} + | sort' \
+            > "$RUNNER_TEMP/pi-env-reports/component-sha256.txt"
+
+      - name: Verify changed-file policy
+        run: docker run --rm -e GITHUB_BASE_REF pi-env:verification nub run verify --checks-only
+
+      - name: Verify baked pi-env components
+        id: verify
+        run: >-
+          docker run --init --name pi-env-verification
+          -e PI_ENV_REPORT_DIR=/tmp/pi-env-reports
+          pi-env:verification nub run verify:full --prebuilt
+
+      - name: Collect verification reports
+        if: always() && steps.verify.outcome != 'skipped'
+        run: |
+          trap 'docker rm -f pi-env-verification' EXIT
+          mkdir -p "$RUNNER_TEMP/pi-env-reports"
+          docker cp pi-env-verification:/tmp/pi-env-reports/. "$RUNNER_TEMP/pi-env-reports"
+          cat "$RUNNER_TEMP/pi-env-reports/verification.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify safe Analyze canary
+        run: docker run --rm pi-env:verification nub run --node analyze -- --checks async-risk src/analyze/policy.ts
+
+      - name: Check flake
+        run: |
+          docker run --rm --user 0:0 -e HOME=/root pi-env:verification bash -euc '
+            git config --global --add safe.directory /opt/pi-env
+            nix flake check --print-build-logs
+          '
+
+      - name: Assemble runtime without rebuilding components
+        run: docker buildx bake image --set "image.tags=$CANDIDATE_TAG"
+
+      - name: Prepare runtime archive for qualification
+        run: |
+          docker image inspect pi-env-runtime:ci "$CANDIDATE_TAG" \
+            --format '{{json .RepoTags}} {{json .RootFS.Layers}}' \
+            > "$RUNNER_TEMP/pi-env-reports/image-layers.txt"
+          docker history --no-trunc "$CANDIDATE_TAG" \
+            > "$RUNNER_TEMP/pi-env-reports/image-history.txt"
+          archive_dir="$RUNNER_TEMP/pi-env-image-archive"
+          mkdir -p "$archive_dir"
+          candidate_layers="$(docker image inspect "$CANDIDATE_TAG" --format '{{json .RootFS.Layers}}')"
+          docker save "$CANDIDATE_TAG" --output "$archive_dir/docker-save.tar"
+          # Normalize mixed imported-layer encodings through the native archive
+          # transport, not a custom tar rewrite or a privileged scanner socket.
+          docker run --rm --network none --cap-drop=ALL \
+            --security-opt=no-new-privileges --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev \
+            --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$archive_dir:/archives:rw" pi-env-builder:ci \
+            skopeo --policy /etc/containers/default-policy.json copy --format v2s2 \
+              docker-archive:/archives/docker-save.tar \
+              "docker-archive:/archives/normalized.tar:$CANDIDATE_TAG"
+          mv "$archive_dir/normalized.tar" "$RUNNER_TEMP/pi-env-image.tar"
+          # Remove the old tag so a failed/untagged import cannot pass this check
+          # merely by leaving the original assembled image in the local store.
+          docker image rm "$CANDIDATE_TAG"
+          docker load --input "$RUNNER_TEMP/pi-env-image.tar"
+          test "$(docker image inspect "$CANDIDATE_TAG" --format '{{json .RootFS.Layers}}')" = "$candidate_layers"
+
+      - name: Verify runtime artifact and component identity
+        run: |
+          docker run --rm "$CANDIDATE_TAG" nub run verify:image-artifact
+          docker run --rm -i "$CANDIDATE_TAG" sha256sum --check \
+            < "$RUNNER_TEMP/pi-env-reports/component-sha256.txt"
+
+      - name: Exercise built components in the final runtime
+        id: runtime
+        run: |
+          docker run --detach --name pi-env-runtime-check "$CANDIDATE_TAG" sleep infinity
+          docker exec --user 1000:1000 pi-env-runtime-check id -u
+          docker exec pi-env-runtime-check mkdir -p /tmp/runtime-reports
+          docker exec -e PI_ENV_TEST_REPORT=/tmp/runtime-reports/runtime-workflows.xml \
+            pi-env-runtime-check nub run test:workflows --maxWorkers=1 --no-file-parallelism
+          docker exec -e PI_ENV_TEST_REPORT=/tmp/runtime-reports/runtime-daemon.xml \
+            pi-env-runtime-check nub run test:integration \
+              scripts/__tests__/restart-lsp-daemon.integration.test.mjs \
+              --maxWorkers=1 --no-file-parallelism
+
+      - name: Collect runtime test report
+        if: always() && steps.runtime.outcome != 'skipped'
+        run: |
+          trap 'docker rm -f pi-env-runtime-check' EXIT
+          docker cp pi-env-runtime-check:/tmp/runtime-reports/. "$RUNNER_TEMP/pi-env-reports/"
+
+      - name: Verify safe scanner reporting
+        run: bash scripts/trivy-scan.sh check-report
+
+      - name: Scan runtime candidate
+        env:
+          TRIVY_REPORT_DIR: ${{ runner.temp }}/pi-env-reports
+        run: bash scripts/trivy-scan.sh image "$RUNNER_TEMP/pi-env-image.tar"
+
+      - name: Explain publication hold
+        if: always()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ## Nix migration release gate
+
+          Registry publication, binary image uploads, and new binary-cache exports
+          are disabled pending Nix closure notices/corresponding source and OS
+          vulnerability-scan coverage. Passing application tests and the existing
+          Trivy policy does not satisfy these release gates.
+          EOF
+
+      - name: Retain qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: image-evidence
+          path: ${{ runner.temp }}/pi-env-reports
+          if-no-files-found: warn
+          retention-days: 7
+
+      # Keep the existing archive-to-publisher handoff, but do not distribute a
+      # Nix binary artifact before the release gates above have been qualified.
       - name: Retain qualified image for publisher
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: false
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: qualified-image
-          path: ${{ steps.qualified-image.outputs.archive-path }}
+          path: ${{ runner.temp }}/pi-env-image.tar
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
@@ -50,7 +208,8 @@ jobs:
   publish:
     name: Publish qualified image
     needs: qualify
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Block Nix binary distribution until notices/source and scanner coverage are qualified.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -58,29 +217,34 @@ jobs:
       packages: write
     steps:
       - name: Download qualified image
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: qualified-image
           path: ${{ runner.temp }}/qualified-image
 
       - name: Load qualified image
-        shell: bash
         run: docker load --input "$RUNNER_TEMP/qualified-image/pi-env-image.tar"
 
       - name: Authenticate publisher with GHCR
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0
+        uses: docker/login-action@v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
       - name: Publish verified image to GHCR
-        shell: bash
         run: |
-          set -euo pipefail
-          immutable_tag="$IMAGE_NAME:$GITHUB_SHA"
+          commit_tag="$IMAGE_NAME:$GITHUB_SHA"
           main_tag="$IMAGE_NAME:main"
-          docker tag "$CANDIDATE_TAG" "$immutable_tag"
+          docker tag "$CANDIDATE_TAG" "$commit_tag"
           docker tag "$CANDIDATE_TAG" "$main_tag"
-          docker push "$immutable_tag"
+          docker push "$commit_tag"
           docker push "$main_tag"
+          digest="$(docker buildx imagetools inspect "$commit_tag" --format '{{ printf "%s" .Manifest.Digest }}')"
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Published image
+
+          Digest-pinned pull: \`docker pull $IMAGE_NAME@$digest\`
+
+          Tags: \`$commit_tag\`, \`$main_tag\` (tags can move).
+          EOF

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -43,8 +44,11 @@ function run(command, args, label) {
 
 export function verifyImageArtifact(root) {
   const issues = imageArtifactIssues(root);
+  if (process.getuid?.() === 0) issues.push("image must run as a non-root user");
+  if (existsSync(join(root, ".git"))) issues.push("image must not distribute Git metadata");
   if (issues.length > 0) throw new Error(issues.join("\n"));
 
+  accessSync(homedir(), constants.W_OK);
   run("node", ["--version"], "Node.js check");
   run("nub", ["--version"], "Nub check");
   run(
@@ -52,10 +56,8 @@ export function verifyImageArtifact(root) {
     [
       join(root, "scripts", "generate-license-bundle.mjs"),
       "--check",
-      "--package-root",
-      "/usr/local/lib/node_modules",
       "--system-license",
-      "node-LICENSE.txt=/usr/local/LICENSE",
+      "node-LICENSE.txt=/usr/share/licenses/nodejs/LICENSE",
     ],
     "Image license compliance check",
   );

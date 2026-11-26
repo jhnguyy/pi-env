@@ -66,15 +66,25 @@ let
         nubPackage
         pkgs.coreutils
         pkgs.findutils
-        pkgs.flock
+        # Daemon ownership uses util-linux's zero-timeout locking on Linux.
+        (if pkgs.stdenv.hostPlatform.isLinux then pkgs.util-linuxMinimal else pkgs.flock)
         pkgs.gawk
         pkgs.git
         pkgs.gnugrep
         pkgs.gnused
       ];
-      buildToolsPackages = basePackages ++ [
+      # Images use Nub, not npm/corepack. Keep the regular Node profile for
+      # existing development shells and upstream Nix package builds.
+      runtimeToolsPackages = [
+        (builtins.getAttr "nodejs-slim_${builtins.head nodeMatch}" pkgs)
+      ] ++ pkgs.lib.remove node basePackages ++ [
+        # Native qualification and the deployed workbench both use tmux.
+        tmux
         pkgs.bashInteractive
         pkgs.cacert
+      ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.tini ];
+      buildToolsPackages = [ runtimeTools ] ++ [
+        pkgs.skopeo
         pkgs.curl
         pkgs.gnutar
         pkgs.gzip
@@ -108,9 +118,10 @@ let
             platforms = systems;
           };
         };
+      runtimeTools = package "pi-env-runtime-tools" runtimeToolsPackages;
     in
     {
-      inherit atuin node tmux toolchainPackages;
+      inherit atuin node tmux toolchainPackages runtimeTools;
       hunk = hunkPackage;
       pi = piPackage;
       buildTools = package "pi-env-build-tools" buildToolsPackages;

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
@@ -31,12 +31,19 @@ function markerStep(id, marker, exitCode) {
   };
 }
 
-it("stops sequential verification at failure and preserves its exit status", async ({
+it("stops at failure, preserves its exit status, and distinguishes unrun checks", async ({
   directory,
 }) => {
   const marker = join(directory, "completed-steps");
-  expect(runPlan([markerStep("first", marker, 7), markerStep("second", marker, 0)])).toBe(7);
+  expect(
+    runPlan([markerStep("first", marker, 7), markerStep("second", marker, 0)], {
+      reportDirectory: directory,
+    }),
+  ).toBe(7);
   expect(await readFile(marker, "utf8")).toBe("first\n");
+  const summary = await readFile(join(directory, "verification.md"), "utf8");
+  expect(summary).toMatch(/first.*failed/);
+  expect(summary).toMatch(/second.*not run/);
 });
 
 it("stops when a step cannot start", async ({ directory }) => {
@@ -48,4 +55,30 @@ it("stops when a step cannot start", async ({ directory }) => {
     ]),
   ).toBe(1);
   expect(existsSync(marker)).toBe(false);
+});
+
+it("gives tests an evidence destination and reports their completed result", async ({
+  directory,
+}) => {
+  expect(
+    runPlan(
+      [
+        {
+          label: "test:example",
+          command: node,
+          args: [
+            "-e",
+            'require("node:fs").writeFileSync(process.env.PI_ENV_TEST_REPORT, "test-result")',
+          ],
+        },
+      ],
+      { reportDirectory: directory },
+    ),
+  ).toBe(0);
+  const reports = (await readdir(directory)).filter((file) => file.endsWith(".xml"));
+  expect(reports).toHaveLength(1);
+  expect(await readFile(join(directory, reports[0]), "utf8")).toBe("test-result");
+  expect(await readFile(join(directory, "verification.md"), "utf8")).toMatch(
+    /test:example.*passed/,
+  );
 });

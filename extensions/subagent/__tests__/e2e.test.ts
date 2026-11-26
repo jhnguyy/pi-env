@@ -32,10 +32,14 @@ it.each(["on", "only"] as const)(
     mkdirSync(evidenceDir, { recursive: true });
     const artifact = join(mkdtempSync(join(evidenceDir, "pi-native-delegation-")), "result.json");
     const evidence: Record<string, unknown> = {
-      revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim(),
-      dirty:
-        execFileSync("git", ["status", "--porcelain"], { cwd: repo, encoding: "utf8" }).trim()
-          .length > 0,
+      // Distributed artifacts deliberately omit Git metadata; unavailable is not clean.
+      revision: existsSync(join(repo, ".git"))
+        ? execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim()
+        : null,
+      dirty: existsSync(join(repo, ".git"))
+        ? execFileSync("git", ["status", "--porcelain"], { cwd: repo, encoding: "utf8" }).trim()
+            .length > 0
+        : null,
       repeat: "nub run build && nub run test:workflows",
       input: {
         mode,

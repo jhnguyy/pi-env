@@ -1,8 +1,11 @@
-# Build entry point for the published Dockerfile target.
-#   docker buildx bake image
-
 group "default" {
   targets = ["image"]
+}
+
+target "verification" {
+  dockerfile = "Dockerfile"
+  target     = "verification"
+  tags       = ["pi-env:verification"]
 }
 
 target "image" {

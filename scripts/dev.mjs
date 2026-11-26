@@ -61,9 +61,17 @@ async function main([command, ...args]) {
     case "verify":
       return verify(args);
     case "full":
-      // Reject obsolete inspection flags before a broad pipeline can allocate work.
-      parseArgs({ args, options: {} });
-      return runSupervisedNode(["--heavyweight", "--command", "nub", "run", "verify:integration"]);
+      // Validate before the supervisor allocates work; artifact qualification must
+      // not rebuild the components that the image already contains.
+      parseArgs({ args, options: { prebuilt: { type: "boolean" } } });
+      return runSupervisedNode([
+        "--heavyweight",
+        "--command",
+        "nub",
+        "run",
+        "verify:integration",
+        ...args,
+      ]);
     default:
       throw new Error("usage: node scripts/dev.mjs <verify|full> [args...]");
   }

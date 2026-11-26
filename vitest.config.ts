@@ -18,6 +18,12 @@ const integrationTestRoots = [
 export default defineConfig({
   test: {
     project: ["unit"],
+    reporters: process.env.PI_ENV_TEST_REPORT
+      ? [
+          "default",
+          ["junit", { outputFile: process.env.PI_ENV_TEST_REPORT, includeConsoleOutput: false }],
+        ]
+      : ["default"],
     pool: "forks",
     // Global inputs require explicit full verification, not an implicit local suite expansion.
     forceRerunTriggers: [],

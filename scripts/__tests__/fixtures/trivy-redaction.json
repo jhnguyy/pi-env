@@ -1,0 +1,80 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "synthetic-fixture",
+  "ArtifactType": "filesystem",
+  "Results": [
+    {
+      "Target": "fixture.txt",
+      "Class": "secret",
+      "Type": "secret",
+      "PrivateContext": "PRIVATE-CONTEXT",
+      "Secrets": [
+        {
+          "RuleID": "fixture-secret-rule",
+          "Category": "Fixture",
+          "Severity": "HIGH",
+          "Title": "Synthetic credential rule",
+          "StartLine": 1,
+          "EndLine": 1,
+          "Match": "PRIVATE-MATCH",
+          "Code": {
+            "Lines": [
+              {
+                "Number": 1,
+                "Content": "PRIVATE-SECRET-SOURCE",
+                "IsCause": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "Target": "nub.lock",
+      "Class": "lang-pkgs",
+      "Type": "pnpm",
+      "Packages": [
+        {
+          "Name": "fixture-package",
+          "Version": "1.0.0"
+        }
+      ],
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-fixture",
+          "PkgName": "fixture-package",
+          "InstalledVersion": "1.0.0",
+          "FixedVersion": "2.0.0",
+          "Status": "fixed",
+          "Severity": "HIGH",
+          "Description": "PRIVATE-DESCRIPTION"
+        }
+      ]
+    },
+    {
+      "Target": "Dockerfile",
+      "Class": "config",
+      "Type": "dockerfile",
+      "Misconfigurations": [
+        {
+          "ID": "fixture-config-rule",
+          "Severity": "HIGH",
+          "Title": "Synthetic configuration rule",
+          "Status": "FAIL",
+          "CauseMetadata": {
+            "Code": {
+              "Lines": [
+                {
+                  "Number": 1,
+                  "Content": "PRIVATE-CONFIG-SOURCE",
+                  "IsCause": true
+                }
+              ]
+            }
+          },
+          "Description": "PRIVATE-CONFIG-DESCRIPTION"
+        }
+      ]
+    }
+  ]
+}

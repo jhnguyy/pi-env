@@ -47,7 +47,7 @@
     "check:quality": "node extensions/analyze/dist/cli.js --all --checks duplicates,dependencies,knip --fail-on error && nub run check:patterns",
     "verify": "scripts/node-run.sh scripts/dev.mjs verify",
     "verify:full": "scripts/node-run.sh scripts/dev.mjs full",
-    "verify:integration": "nub run format:check && nub run check:patterns && nub run check:dependencies && nub run licenses:check && nub run typecheck && nub run lint:type && nub run build && nub run test:setup && nub run test:unit && nub run test:integration && nub run verify:install && nub run test:workflows",
+    "verify:integration": "node scripts/verify-integration.mjs",
     "verify:install": "node scripts/verify-install.mjs",
     "verify:image-artifact": "node scripts/verify-image-artifact.mjs",
     "hydrate": "node scripts/hydrate.mjs",
