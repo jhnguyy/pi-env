@@ -110,9 +110,10 @@ jobs:
 
       - name: Assemble runtime archive without rebuilding components
         run: |
+          # Use one layer encoding for the pinned scanner, including inherited layers.
           docker buildx bake --allow "fs.write=$RUNNER_TEMP" image \
             --set "image.tags=$CANDIDATE_TAG" \
-            --set "image.output=type=docker,dest=$RUNNER_TEMP/pi-env-image.tar"
+            --set "image.output=type=docker,compression=uncompressed,force-compression=true,dest=$RUNNER_TEMP/pi-env-image.tar"
 
       - name: Load runtime archive for qualification
         run: |
