@@ -4,10 +4,6 @@
   inputs = {
     hunk.url = "github:modem-dev/hunk/v0.24.1";
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nub = {
-      url = "github:nubjs/nub/v0.11.1";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     pi = {
       url = "github:earendil-works/pi/v1.5.1";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -18,12 +14,11 @@
     {
       hunk,
       nixpkgs,
-      nub,
       pi,
       self,
     }:
     let
-      toolchain = import ./nix/toolchain.nix { inherit hunk nixpkgs nub pi; };
+      toolchain = import ./nix/toolchain.nix { inherit hunk nixpkgs pi; };
       perSystem = nixpkgs.lib.genAttrs toolchain.systems (
         system:
         let

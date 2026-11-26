@@ -1,11 +1,36 @@
 vulnerabilities:
+  - id: GHSA-4w2j-m93h-cj5j
+    paths:
+      - "**/*-nub-0.11.1/share/nub/0.11.1/source/Cargo.lock"
+    expired_at: 2026-12-25
+    statement: "User accepts the quinn-proto stream-reassembly memory-exhaustion risk in official Nub 0.11.1 temporarily while awaiting a fixed release. Do not expose Nub as an untrusted-input service. Remove on a fixed release or expiry; do not extend automatically."
+  - id: CVE-2026-115905
+    paths:
+      - "**/*-nub-0.11.1/share/nub/0.11.1/source/Cargo.lock"
+    expired_at: 2026-12-25
+    statement: "User accepts the zip dual-header parser-differential risk in official Nub 0.11.1 temporarily while awaiting a fixed release. Avoid untrusted archives. Remove on a fixed release or expiry; do not extend automatically."
+  - id: CVE-2026-115907
+    paths:
+      - "**/*-nub-0.11.1/share/nub/0.11.1/source/Cargo.lock"
+    expired_at: 2026-12-25
+    statement: "User accepts this zip vulnerability in official Nub 0.11.1 temporarily while awaiting a fixed release. Avoid untrusted archives. Remove on a fixed release or expiry; do not extend automatically."
+  - id: CVE-2026-115908
+    paths:
+      - "**/*-nub-0.11.1/share/nub/0.11.1/source/Cargo.lock"
+    expired_at: 2026-12-25
+    statement: "User accepts this zip vulnerability in official Nub 0.11.1 temporarily while awaiting a fixed release. Avoid untrusted archives. Remove on a fixed release or expiry; do not extend automatically."
+  - id: CVE-2026-115909
+    paths:
+      - "**/*-nub-0.11.1/share/nub/0.11.1/source/Cargo.lock"
+    expired_at: 2026-12-25
+    statement: "User accepts this zip vulnerability in official Nub 0.11.1 temporarily while awaiting a fixed release. Avoid untrusted archives. Remove on a fixed release or expiry; do not extend automatically."
   - id: CVE-2026-56851
     paths:
       - "**/@effect+tsgo-linux-x64@0.68.1/node_modules/@effect/tsgo-linux-x64/lib/tsc"
-    expired_at: 2026-11-25
-    statement: "Accept the crafted-input panic risk temporarily for local CLI checking. The affected nickname profile appears unused. Remove when compiler packages bundle fixed x/text."
+    expired_at: 2026-12-25
+    statement: "User accepts the crafted-input panic risk temporarily for local CLI checking while awaiting a fixed stable precompiled compiler. The affected nickname profile appears unused. Remove when the stable compiler bundles fixed x/text or on expiry; do not extend automatically."
   - id: CVE-2026-56852
     paths:
       - "**/@effect+tsgo-linux-x64@0.68.1/node_modules/@effect/tsgo-linux-x64/lib/tsc"
-    expired_at: 2026-11-25
-    statement: "Accept the malformed-UTF-8 normalization hang risk temporarily for local CLI checking. Do not expose this compiler as an untrusted-input service. Remove when compiler packages bundle fixed x/text."
+    expired_at: 2026-12-25
+    statement: "User accepts the malformed-UTF-8 normalization hang risk temporarily for local CLI checking while awaiting a fixed stable precompiled compiler. Do not expose this compiler as an untrusted-input service. Remove when the stable compiler bundles fixed x/text or on expiry; do not extend automatically."
