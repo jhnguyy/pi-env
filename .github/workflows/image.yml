@@ -108,36 +108,21 @@ jobs:
             nix flake check --print-build-logs
           '
 
-      - name: Assemble runtime without rebuilding components
-        run: docker buildx bake image --set "image.tags=$CANDIDATE_TAG"
-
-      - name: Prepare runtime archive for qualification
+      - name: Assemble runtime archive without rebuilding components
         run: |
+          docker buildx bake image \
+            --set "image.tags=$CANDIDATE_TAG" \
+            --set "image.output=type=docker,dest=$RUNNER_TEMP/pi-env-image.tar"
+
+      - name: Load runtime archive for qualification
+        run: |
+          # Tests and scanning consume the exported archive, without conversion.
+          docker load --input "$RUNNER_TEMP/pi-env-image.tar"
           docker image inspect pi-env-runtime:ci "$CANDIDATE_TAG" \
             --format '{{json .RepoTags}} {{json .RootFS.Layers}}' \
             > "$RUNNER_TEMP/pi-env-reports/image-layers.txt"
           docker history --no-trunc "$CANDIDATE_TAG" \
             > "$RUNNER_TEMP/pi-env-reports/image-history.txt"
-          archive_dir="$RUNNER_TEMP/pi-env-image-archive"
-          mkdir -p "$archive_dir"
-          candidate_layers="$(docker image inspect "$CANDIDATE_TAG" --format '{{json .RootFS.Layers}}')"
-          docker save "$CANDIDATE_TAG" --output "$archive_dir/docker-save.tar"
-          # Normalize mixed imported-layer encodings through the native archive
-          # transport, not a custom tar rewrite or a privileged scanner socket.
-          docker run --rm --network none --cap-drop=ALL \
-            --security-opt=no-new-privileges --read-only \
-            --tmpfs /tmp:rw,noexec,nosuid,nodev \
-            --user "$(id -u):$(id -g)" -e HOME=/tmp \
-            -v "$archive_dir:/archives:rw" pi-env-builder:ci \
-            skopeo --policy /etc/containers/default-policy.json copy --format v2s2 \
-              docker-archive:/archives/docker-save.tar \
-              "docker-archive:/archives/normalized.tar:$CANDIDATE_TAG"
-          mv "$archive_dir/normalized.tar" "$RUNNER_TEMP/pi-env-image.tar"
-          # Remove the old tag so a failed/untagged import cannot pass this check
-          # merely by leaving the original assembled image in the local store.
-          docker image rm "$CANDIDATE_TAG"
-          docker load --input "$RUNNER_TEMP/pi-env-image.tar"
-          test "$(docker image inspect "$CANDIDATE_TAG" --format '{{json .RootFS.Layers}}')" = "$candidate_layers"
 
       - name: Verify runtime artifact and component identity
         run: |
