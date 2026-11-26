@@ -8,8 +8,6 @@ The [image workflow](../.github/workflows/image.yml) owns qualification and reta
 
 Registry publication and new binary-cache exports are blocked while Nix closure notices/corresponding source and OS vulnerability-scan coverage remain unqualified. The closure inventory is not a compliance bundle; a green Trivy result does not establish Nix OS coverage. See [licensing](licensing.md).
 
-[Nub packaging](../nix/nub.nix) uses checksum-pinned official binaries without compiling Rust. Those binaries lack Rust dependency metadata, so the package also retains checksum-pinned workspace and native-addon lockfiles from the same upstream release for scanning. These are conservative source inventories, including dependencies that may not be compiled into the binary, not binary dependency attestations. [`.trivyignore.yaml`](../.trivyignore.yaml) owns the accepted findings, version-specific paths, and expiry dates; those exceptions do not establish that a vulnerability is fixed.
-
 For a local Docker build, first load both locked bases, then build the verification target before final assembly:
 
 ```bash
