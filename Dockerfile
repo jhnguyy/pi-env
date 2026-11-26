@@ -13,7 +13,6 @@ ENV PI_ENV_HOME=/opt/pi-env \
   HOME=/home/agent
 WORKDIR ${PI_ENV_HOME}
 COPY --chown=1000:1000 . .
-RUN chown -R 1000:1000 ${PI_ENV_HOME}
 USER 1000:1000
 
 # Nub's postinstall hydrates the extension bundles. Qualification uses --prebuilt
