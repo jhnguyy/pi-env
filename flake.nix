@@ -5,7 +5,7 @@
     hunk.url = "github:modem-dev/hunk/v0.24.1";
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     pi = {
-      url = "github:earendil-works/pi/v1.5.1";
+      url = "github:earendil-works/pi/v1.7.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };

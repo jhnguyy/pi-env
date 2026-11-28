@@ -15,7 +15,7 @@ overrides:
   source-map-js: 1.2.2
   tinypool: 2.1.2
   toml: 4.2.0
-  undici: 8.12.3
+  undici: 8.12.4
   vite: 8.3.3
   zod: 4.6.7
 
@@ -30,7 +30,7 @@ importers:
     dependencies:
       '@effect/opentelemetry':
         specifier: 4.1.2
-        version: 4.1.2(@opentelemetry/api@1.9.1)(@opentelemetry/api-logs@0.220.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-node@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/semantic-conventions@1.43.0)(effect@4.1.2)
+        version: 4.1.2(@opentelemetry/api@1.9.1)(@opentelemetry/api-logs@0.220.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-node@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/semantic-conventions@1.43.0)(effect@4.1.2)
       '@effect/platform-node':
         specifier: 4.1.2
         version: 4.1.2(@opentelemetry/api@1.9.1)(effect@4.1.2)(redis@6.3.0)
@@ -63,23 +63,23 @@ importers:
         version: 4.1.2
     devDependencies:
       '@earendil-works/chord':
-        specifier: 1.5.1
-        version: 1.5.1(esbuild@0.28.2)
+        specifier: 1.7.0
+        version: 1.7.0(esbuild@0.28.2)(ws@8.22.1)
       '@earendil-works/pi-agent-core':
-        specifier: 1.5.1
-        version: 1.5.1
+        specifier: 1.7.0
+        version: 1.7.0(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(node-fetch@3.3.2)(supports-color@7.2.0)(undici@8.12.4)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)
       '@earendil-works/pi-ai':
-        specifier: 1.5.1
-        version: 1.5.1
+        specifier: 1.7.0
+        version: 1.7.0(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(node-fetch@3.3.2)(supports-color@7.2.0)(undici@8.12.4)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)
       '@earendil-works/pi-coding-agent':
-        specifier: 1.5.1
-        version: 1.5.1
+        specifier: 1.7.0
+        version: 1.7.0(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(node-fetch@3.3.2)(supports-color@7.2.0)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)
       '@earendil-works/pi-durable':
-        specifier: 1.5.1
-        version: 1.5.1(esbuild@0.28.2)
+        specifier: 1.7.0
+        version: 1.7.0(@smithy/signature-v4@5.7.4)(esbuild@0.28.2)(google-auth-library@10.9.1)(node-fetch@3.3.2)(supports-color@7.2.0)(undici@8.12.4)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)
       '@earendil-works/pi-tui':
-        specifier: 1.5.1
-        version: 1.5.1
+        specifier: 1.7.0
+        version: 1.7.0
       '@effect/language-service':
         specifier: ^0.87.5
         version: 0.87.5
@@ -88,7 +88,7 @@ importers:
         version: 0.68.1
       '@effect/vitest':
         specifier: 4.1.2
-        version: 4.1.2(effect@4.1.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)))
+        version: 4.1.2(effect@4.1.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)))
       '@oxlint/plugins':
         specifier: 1.91.0
         version: 1.91.0
@@ -124,7 +124,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^5.0.5
-        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2))
+        version: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
 
   extensions/analyze: {}
 
@@ -146,7 +146,7 @@ importers:
     dependencies:
       '@earendil-works/pi-ai':
         specifier: '*'
-        version: 1.5.1
+        version: 1.7.0(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(node-fetch@3.3.2)(supports-color@7.2.0)(undici@8.12.4)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)
       effect:
         specifier: 4.1.2
         version: 4.1.2
@@ -160,7 +160,7 @@ importers:
     dependencies:
       '@earendil-works/pi-coding-agent':
         specifier: '*'
-        version: 1.5.1
+        version: 1.7.0(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(node-fetch@3.3.2)(supports-color@7.2.0)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)
 
   extensions/share: {}
 
@@ -168,7 +168,7 @@ importers:
     dependencies:
       '@earendil-works/pi-agent-core':
         specifier: '*'
-        version: 1.5.1
+        version: 1.7.0(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(node-fetch@3.3.2)(supports-color@7.2.0)(undici@8.12.4)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)
 
   extensions/web-context: {}
 
@@ -214,6 +214,10 @@ packages:
 
   '@aws-sdk/credential-provider-login@3.972.79':
     resolution: {integrity: sha512-L+Z85anONJd8MaiuraO4wRxATCdEejBZ3K3eymzWI5JPXa9sOS9CkIm72PBKqXKX+Z9p9NGMX5AIMXm0LEflgw==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/credential-provider-node@3.972.82':
+    resolution: {integrity: sha512-znDkEOGXB8W3kG1LJUKP3foBZY/9qLM0eil/DxWXSp37XsdsRLQHE/d/OaCGGVgKpA6znR38h/+INk8do1FjiA==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/credential-provider-node@3.972.84':
@@ -276,13 +280,13 @@ packages:
     resolution: {integrity: sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw==}
     engines: {node: '>=6.9.0'}
 
-  '@earendil-works/chord@1.5.1':
-    resolution: {integrity: sha512-zSmZ4FINxIBsy0iq5TPJXSVBtxHenKthU+svqxH1RbPGIDID/yjCg+wKk6IzsAsJAPmUGoP5yxD0Ap11ZGkefA==}
+  '@earendil-works/chord@1.7.0':
+    resolution: {integrity: sha512-/zBlRrJkNbw0dJ4OrUzk08PC48mzOIFZQKTUE1qxQUWoPlf/xms95lEigzC30MllS+k5qqih7Clg0cTzYgPs1w==}
     engines: {node: '>=22.19.0'}
     peerDependencies:
-      esbuild: 0.28.2
-      react: 19.3.0
-      ws: 8.21.0
+      esbuild: ^0.28.2
+      react: ^19.3.0
+      ws: ^8.21.0
     peerDependenciesMeta:
       esbuild:
         optional: true
@@ -291,42 +295,42 @@ packages:
       ws:
         optional: true
 
-  '@earendil-works/pi-agent-core@1.5.1':
-    resolution: {integrity: sha512-jD4qinlcwO3AoN/97v0AG3b0Umz/7hIBlEStmz6M3AQNicWOU+UK851fdDvzvCCukpQBSyOraEGRFMTgj+xGpA==}
+  '@earendil-works/pi-agent-core@1.7.0':
+    resolution: {integrity: sha512-pLs/wTAcrUnKDILPHjnd7RiDZSotAhJ965LwVc8x37TeWF+k+vKPMmAW6Z1T8XMQuICbIYusjkT7K0lmjgQwrg==}
     engines: {node: '>=22.19.0'}
 
-  '@earendil-works/pi-ai@1.5.1':
-    resolution: {integrity: sha512-ukMQ78DE1ypirehoWOrg32dZNEQsY/VXRETPJf5qgdpaw8abq/jlALpQpiEpRDyCkCyX/9FPiQRIazw7FA1FCw==}
-    engines: {node: '>=22.19.0'}
-    hasBin: true
-
-  '@earendil-works/pi-codemode@1.5.1':
-    resolution: {integrity: sha512-xVuCpni7AuLPhvrN+oCP9Kcq0I2kY8SdtJRNMevQMmC2DcuQcgSWgOH2KOtuG0/Ihe1BZgPCahY4q5oiFMHw4g==}
-    engines: {node: '>=22.19.0'}
-
-  '@earendil-works/pi-coding-agent@1.5.1':
-    resolution: {integrity: sha512-rdu4pRvpQba2ep83nqHaN8L1pvY1OQ3i/2FucogA/eyRxwoUXMUXdk1Z9JnZFJR+9ck9Gs1ajuSb9m7Hz7ejYw==}
+  '@earendil-works/pi-ai@1.7.0':
+    resolution: {integrity: sha512-iKryMlUYniwWbU7YU0uS7W0+cGd9c6oJ6PzRLOn8j4+1njG4c+BQq1cNawctx/npDqGeOx8ME7Gkgl6K6arPuw==}
     engines: {node: '>=22.19.0'}
     hasBin: true
 
-  '@earendil-works/pi-durable@1.5.1':
-    resolution: {integrity: sha512-kepvz2Fh0JPtvD/vUXp0gvnBHXk3VT/CN2jbsA9Ejd6SIEcMTm2DQQQzLJeFxMFvn6Lfs9BvropI0c/F8U2jmA==}
+  '@earendil-works/pi-codemode@1.7.0':
+    resolution: {integrity: sha512-fhCoh8TLxhdRTOWSEplwp39Uv+JTsu9pCqtgu9gorO8zcaw92vsbVI/G89yFs92csTo2+yB7EsJq/+725Vj+eA==}
     engines: {node: '>=22.19.0'}
 
-  '@earendil-works/pi-mcp@1.5.1':
-    resolution: {integrity: sha512-cUFhLnanLjBf8+NpHU+shJTzvcfLBjjDI02tI7hSmYnYqNfhqXhFPEkqT8G+/e+PX6r46DX1ZU54BTC5+p+MRA==}
+  '@earendil-works/pi-coding-agent@1.7.0':
+    resolution: {integrity: sha512-opRelA1oqV/o+cByICMYU87oiHuICeCkghHMqsZsDwDz9F6qo8HFhoH4J/wZkr6tBeFor7ryOSwEmpZsusYrbA==}
+    engines: {node: '>=22.19.0'}
+    hasBin: true
+
+  '@earendil-works/pi-durable@1.7.0':
+    resolution: {integrity: sha512-qL9PlFfXrirBNt7QR2bjZfviN6ZVcsGTHEqaj6U4Lxqqx9Vtth7LyIuGNlG2chDKMr3/ABamH8qZ9ggMgTGDOQ==}
     engines: {node: '>=22.19.0'}
 
-  '@earendil-works/pi-schema@1.5.1':
-    resolution: {integrity: sha512-QmvyJYVTva2ZT6/R2rFL64nmaiRmc6hCHv9ZoVNeyDhvLbRHIQLU8mI140vuX6JOnT7tCEd74GOyui/MIRF7ww==}
+  '@earendil-works/pi-mcp@1.7.0':
+    resolution: {integrity: sha512-ScsDjuFXjT9eKioD5oyZqofDXtaWCMhCBa+1aDSh7WmRACLsohfGQJtAX1rv5OmEbaerrRPgyD5jgwJFBjTFNw==}
     engines: {node: '>=22.19.0'}
 
-  '@earendil-works/pi-telemetry@1.5.1':
-    resolution: {integrity: sha512-uFi8XzG10gMgz9LggOlQW4CvEe/t1wZ6bwLChx36rmyZE7ogg/jHKTGekG73o6Rkwxi0bqE2AnTk+RZ4GmYQ2w==}
+  '@earendil-works/pi-schema@1.7.0':
+    resolution: {integrity: sha512-skji4McLg9jum3NFWzFa/4QRGEZhMGnSi3QL8b9VljJkc/QopH2/BFuGKI+VcEwYzKGwsd0I8RzvXGnZGfGltQ==}
     engines: {node: '>=22.19.0'}
 
-  '@earendil-works/pi-tui@1.5.1':
-    resolution: {integrity: sha512-UZkaMYLuJrk2anJhZf06dNYdLWL8toqWNL807fhAorc8Lzy5vkxWNq/pC1f0CIM2EVdlctuRibWuIQGKYOgx+A==}
+  '@earendil-works/pi-telemetry@1.7.0':
+    resolution: {integrity: sha512-QZkngqktohuFZ2TZuJSXDuUntld4sCMW1tkUPaD4moMEX/z1lwcjycXnd9ChO9HNxm/Jfo+UTiC+N2hkAF9b0w==}
+    engines: {node: '>=22.19.0'}
+
+  '@earendil-works/pi-tui@1.7.0':
+    resolution: {integrity: sha512-C6vkUYGTeDdl/cMIbFOabSEPMRy9HuaUV76PS2BhvSmWifO5y8Rz8/LgFWqGIIFS7RMqu0gdeEpdXfH8jIp05g==}
     engines: {node: '>=22.19.0'}
 
   '@effect/language-service@0.87.5':
@@ -593,9 +597,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@google/genai@2.21.0':
-    resolution: {integrity: sha512-+PDtco2/Z0ONdzCGekCoCT+O1VJS9xJQNN4XzQpXG/t3El/SWWMkCWlFRO1KmivOHPa4Q0VjUYu1HBKCZ/v33Q==}
-    engines: {node: '>=20.0.0'}
+  '@google/genai@3.6.1':
+    resolution: {integrity: sha512-DQIkZkl+VoZc+RUSaJ41vRuywjQDpP0t/oUf5/ddQhNW6JsPjVULW2EgHmuJ1mrr6ACtrmUdPlqtNXF1yfKySg==}
+    engines: {node: '>=22.0.0'}
     peerDependencies:
       '@modelcontextprotocol/sdk': ^1.25.2
     peerDependenciesMeta:
@@ -1933,13 +1937,14 @@ packages:
     resolution: {integrity: sha512-5vvB5+W7ePv+p3uqxi+RcW1XAzLW0/hxt3/4X4Lc4qHudzOhmBiBwOY6DRob4WnanAEGvNcLjF+KNOufrUoEQw==}
     engines: {node: '>=12.20.0'}
 
-  openai@7.19.0:
-    resolution: {integrity: sha512-MX2s3u2L5racTO0CC/SWpCOasJQBCJrqLKXK+l82cAhdeF8mPMBEe/gxMm0ZFa2xpKpOFLRjxv5afYEZbBXmbQ==}
+  openai@7.59.0:
+    resolution: {integrity: sha512-wPYKJkLPFEdNJ2tThSg4jE1Ptsv4X3u8g8LIvu0Qz/UIhsKeCzl73rl48PtQsDVrJL/ku0liXOsbyd2TsRsPJw==}
     engines: {node: '>=22.0.0'}
     peerDependencies:
       '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
       '@smithy/hash-node': '>=4.3.0 <5'
       '@smithy/signature-v4': '>=5.4.0 <6'
+      google-auth-library: '>=9.15.1 <12'
       undici: '>=5 <9'
       ws: ^8.21.0
       zod: ^3.25 || ^4.0
@@ -1949,6 +1954,8 @@ packages:
       '@smithy/hash-node':
         optional: true
       '@smithy/signature-v4':
+        optional: true
+      google-auth-library:
         optional: true
       undici:
         optional: true
@@ -2233,8 +2240,8 @@ packages:
   undici-types@7.24.6:
     resolution: {integrity: sha512-WRNW+sJgj5OBN4/0JpHFqtqzhpbnV0GuB+OozA9gCL7a993SmU+1JBZCzLNxYsbMfIeDL+lTsphD5jN5N+n0zg==}
 
-  undici@8.12.3:
-    resolution: {integrity: sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==}
+  undici@8.12.4:
+    resolution: {integrity: sha512-8Mx+uNKKER2bA4AdtedkqRbwUCIJFr2nJckXRe5yrDqzePqwLP7VNcctN8/XdmDSbF7mS+jJKIszlL+vbam1VA==}
     engines: {node: '>=22.19.0'}
 
   vite@8.3.3:
@@ -2390,18 +2397,6 @@ packages:
     engines: {node: '>=20.11'}
     hasBin: true
 
-  ws@8.22.0:
-    resolution: {integrity: sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg==}
-    engines: {node: '>=10.0.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: '>=5.0.2'
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
-
   ws@8.22.1:
     resolution: {integrity: sha512-oyL6OPYme/CmiFvNuGzeoxCJ4nOrZE2O1FwM9MWM1AsGri6nLXB2pg+lNA8aLeXMSav0J6eIVS1j6vUPzUtK9g==}
     engines: {node: '>=10.0.0'}
@@ -2429,10 +2424,15 @@ packages:
 
 snapshots:
 
-  '@anthropic-ai/sdk@0.129.0':
+  '@anthropic-ai/sdk@0.129.0(node-fetch@3.3.2)(undici@8.12.4)(undici-types@7.24.6)(zod@4.6.7)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.1.1
+    optionalDependencies:
+      node-fetch: 3.3.2
+      undici: 8.12.4
+      undici-types: 7.24.6
+      zod: 4.6.7
 
   '@aws-sdk/client-bedrock-runtime@3.1127.0':
     dependencies:
@@ -2500,6 +2500,20 @@ snapshots:
       '@aws-sdk/nested-clients': 3.997.46
       '@aws-sdk/types': 3.974.6
       '@smithy/core': 3.35.0
+      '@smithy/types': 4.19.0
+      tslib: 2.8.1
+
+  '@aws-sdk/credential-provider-node@3.972.82':
+    dependencies:
+      '@aws-sdk/credential-provider-env': 3.972.72
+      '@aws-sdk/credential-provider-http': 3.972.74
+      '@aws-sdk/credential-provider-ini': 3.973.17
+      '@aws-sdk/credential-provider-process': 3.972.72
+      '@aws-sdk/credential-provider-sso': 3.973.16
+      '@aws-sdk/credential-provider-web-identity': 3.972.78
+      '@aws-sdk/types': 3.974.6
+      '@smithy/core': 3.35.0
+      '@smithy/credential-provider-imds': 4.5.2
       '@smithy/types': 4.19.0
       tslib: 2.8.1
 
@@ -2618,70 +2632,56 @@ snapshots:
 
   '@babel/runtime@7.29.7': {}
 
-  '@earendil-works/chord@1.5.1(esbuild@0.28.2)':
+  '@earendil-works/chord@1.7.0(esbuild@0.28.2)(ws@8.22.1)':
     dependencies:
-      '@earendil-works/pi-schema': 1.5.1
-      '@earendil-works/pi-telemetry': 1.5.1
+      '@earendil-works/pi-schema': 1.7.0
+      '@earendil-works/pi-telemetry': 1.7.0
     optionalDependencies:
       esbuild: 0.28.2
+      ws: 8.22.1
 
-  '@earendil-works/pi-agent-core@1.5.1':
+  '@earendil-works/pi-agent-core@1.7.0(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(node-fetch@3.3.2)(supports-color@7.2.0)(undici@8.12.4)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)':
     dependencies:
-      '@earendil-works/pi-ai': 1.5.1
-      '@earendil-works/pi-schema': 1.5.1
+      '@earendil-works/pi-ai': 1.7.0(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(node-fetch@3.3.2)(supports-color@7.2.0)(undici@8.12.4)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)
+      '@earendil-works/pi-schema': 1.7.0
     transitivePeerDependencies:
-      - '@aws-sdk/credential-provider-node'
       - '@modelcontextprotocol/sdk'
       - '@smithy/hash-node'
-      - '@smithy/signature-v4'
       - bufferutil
       - kerberos
-      - node-fetch
-      - supports-color
-      - undici
-      - undici-types
       - utf-8-validate
-      - ws
-      - zod
 
-  '@earendil-works/pi-ai@1.5.1':
+  '@earendil-works/pi-ai@1.7.0(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(node-fetch@3.3.2)(supports-color@7.2.0)(undici@8.12.4)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)':
     dependencies:
-      '@anthropic-ai/sdk': 0.129.0
+      '@anthropic-ai/sdk': 0.129.0(node-fetch@3.3.2)(undici@8.12.4)(undici-types@7.24.6)(zod@4.6.7)
       '@aws-sdk/client-bedrock-runtime': 3.1127.0
-      '@earendil-works/pi-schema': 1.5.1
-      '@earendil-works/pi-telemetry': 1.5.1
-      '@google/genai': 2.21.0
+      '@aws-sdk/credential-provider-node': 3.972.82
+      '@earendil-works/pi-schema': 1.7.0
+      '@earendil-works/pi-telemetry': 1.7.0
+      '@google/genai': 3.6.1(supports-color@7.2.0)(undici-types@7.24.6)
       '@smithy/node-http-handler': 4.12.1
-      http-proxy-agent: 9.1.0
-      https-proxy-agent: 9.1.0
-      openai: 7.19.0
+      http-proxy-agent: 9.1.0(supports-color@7.2.0)
+      https-proxy-agent: 9.1.0(supports-color@7.2.0)
+      openai: 7.59.0(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(supports-color@7.2.0)(undici@8.12.4)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)
       partial-json: 0.1.7
     transitivePeerDependencies:
-      - '@aws-sdk/credential-provider-node'
       - '@modelcontextprotocol/sdk'
       - '@smithy/hash-node'
-      - '@smithy/signature-v4'
       - bufferutil
       - kerberos
-      - node-fetch
-      - supports-color
-      - undici
-      - undici-types
       - utf-8-validate
-      - ws
-      - zod
 
-  '@earendil-works/pi-codemode@1.5.1':
+  '@earendil-works/pi-codemode@1.7.0':
     dependencies:
       quickjs-wasi: 3.6.2
 
-  '@earendil-works/pi-coding-agent@1.5.1':
+  '@earendil-works/pi-coding-agent@1.7.0(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(node-fetch@3.3.2)(supports-color@7.2.0)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)':
     dependencies:
-      '@earendil-works/pi-agent-core': 1.5.1
-      '@earendil-works/pi-ai': 1.5.1
-      '@earendil-works/pi-codemode': 1.5.1
-      '@earendil-works/pi-mcp': 1.5.1
-      '@earendil-works/pi-tui': 1.5.1
+      '@earendil-works/pi-agent-core': 1.7.0(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(node-fetch@3.3.2)(supports-color@7.2.0)(undici@8.12.4)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)
+      '@earendil-works/pi-ai': 1.7.0(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(node-fetch@3.3.2)(supports-color@7.2.0)(undici@8.12.4)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)
+      '@earendil-works/pi-codemode': 1.7.0
+      '@earendil-works/pi-mcp': 1.7.0
+      '@earendil-works/pi-tui': 1.7.0
       '@silvia-odwyer/photon-node': 0.3.4
       brace-expansion: 5.0.12
       chalk: 6.0.0
@@ -2697,57 +2697,41 @@ snapshots:
       quickjs-wasi: 3.6.2
       semver: 7.8.5
       typebox: 1.3.27
-      undici: 8.12.3
+      undici: 8.12.4
       yaml: 2.9.0
     transitivePeerDependencies:
-      - '@aws-sdk/credential-provider-node'
       - '@modelcontextprotocol/sdk'
       - '@smithy/hash-node'
-      - '@smithy/signature-v4'
       - bufferutil
       - kerberos
-      - node-fetch
-      - supports-color
-      - undici
-      - undici-types
       - utf-8-validate
-      - ws
-      - zod
 
-  '@earendil-works/pi-durable@1.5.1(esbuild@0.28.2)':
+  '@earendil-works/pi-durable@1.7.0(@smithy/signature-v4@5.7.4)(esbuild@0.28.2)(google-auth-library@10.9.1)(node-fetch@3.3.2)(supports-color@7.2.0)(undici@8.12.4)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)':
     dependencies:
-      '@earendil-works/chord': 1.5.1(esbuild@0.28.2)
-      '@earendil-works/pi-ai': 1.5.1
-      '@earendil-works/pi-codemode': 1.5.1
-      '@earendil-works/pi-schema': 1.5.1
-      '@earendil-works/pi-telemetry': 1.5.1
+      '@earendil-works/chord': 1.7.0(esbuild@0.28.2)(ws@8.22.1)
+      '@earendil-works/pi-ai': 1.7.0(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(node-fetch@3.3.2)(supports-color@7.2.0)(undici@8.12.4)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7)
+      '@earendil-works/pi-codemode': 1.7.0
+      '@earendil-works/pi-schema': 1.7.0
+      '@earendil-works/pi-telemetry': 1.7.0
       '@silvia-odwyer/photon': 0.3.3
       diff: 8.0.4
     transitivePeerDependencies:
-      - '@aws-sdk/credential-provider-node'
       - '@modelcontextprotocol/sdk'
       - '@smithy/hash-node'
-      - '@smithy/signature-v4'
       - bufferutil
       - kerberos
-      - node-fetch
       - react
-      - supports-color
-      - undici
-      - undici-types
       - utf-8-validate
-      - ws
-      - zod
 
-  '@earendil-works/pi-mcp@1.5.1':
+  '@earendil-works/pi-mcp@1.7.0':
     dependencies:
       cross-spawn: 7.0.6
 
-  '@earendil-works/pi-schema@1.5.1': {}
+  '@earendil-works/pi-schema@1.7.0': {}
 
-  '@earendil-works/pi-telemetry@1.5.1': {}
+  '@earendil-works/pi-telemetry@1.7.0': {}
 
-  '@earendil-works/pi-tui@1.5.1':
+  '@earendil-works/pi-tui@1.7.0':
     dependencies:
       get-east-asian-width: 1.6.0
       marked: 18.0.11
@@ -2755,7 +2739,7 @@ snapshots:
 
   '@effect/language-service@0.87.5': {}
 
-  '@effect/opentelemetry@4.1.2(@opentelemetry/api@1.9.1)(@opentelemetry/api-logs@0.220.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-node@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/semantic-conventions@1.43.0)(effect@4.1.2)':
+  '@effect/opentelemetry@4.1.2(@opentelemetry/api@1.9.1)(@opentelemetry/api-logs@0.220.0)(@opentelemetry/resources@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.220.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-node@2.9.0(@opentelemetry/api@1.9.1))(@opentelemetry/semantic-conventions@1.43.0)(effect@4.1.2)':
     dependencies:
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/api-logs': 0.220.0
@@ -2765,6 +2749,8 @@ snapshots:
       '@opentelemetry/sdk-trace-node': 2.9.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/semantic-conventions': 1.43.0
       effect: 4.1.2
+    optionalDependencies:
+      '@opentelemetry/sdk-trace-base': 2.9.0(@opentelemetry/api@1.9.1)
 
   '@effect/platform-node-shared@4.1.2(effect@4.1.2)':
     dependencies:
@@ -2780,7 +2766,7 @@ snapshots:
       '@effect/platform-node-shared': 4.1.2(effect@4.1.2)
       effect: 4.1.2
       redis: 6.3.0(@opentelemetry/api@1.9.1)
-      undici: 8.12.3
+      undici: 8.12.4
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -2816,10 +2802,10 @@ snapshots:
       '@effect/tsgo-win32-arm64': 0.68.1
       '@effect/tsgo-win32-x64': 0.68.1
 
-  '@effect/vitest@4.1.2(effect@4.1.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)))':
+  '@effect/vitest@4.1.2(effect@4.1.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)))':
     dependencies:
       effect: 4.1.2
-      vitest: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2))
+      vitest: 5.0.5(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
 
   '@emnapi/core@1.11.2(@emnapi/runtime@1.11.2)':
     dependencies:
@@ -2916,16 +2902,14 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@google/genai@2.21.0':
+  '@google/genai@3.6.1(supports-color@7.2.0)(undici-types@7.24.6)':
     dependencies:
-      google-auth-library: 10.9.1
+      google-auth-library: 10.9.1(supports-color@7.2.0)(undici-types@7.24.6)
       p-retry: 4.6.2
       protobufjs: 8.6.6
-      ws: 8.22.0
+      ws: 8.22.1
     transitivePeerDependencies:
       - bufferutil
-      - supports-color
-      - undici-types
       - utf-8-validate
 
   '@jridgewell/resolve-uri@3.1.2': {}
@@ -3436,13 +3420,13 @@ snapshots:
     dependencies:
       '@types/node': 24.19.0
 
-  '@vitest/mocker@5.0.5(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2))':
+  '@vitest/mocker@5.0.5(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.5
       estree-walker: 3.0.3
       magic-string: 1.4.3
-      vite: 8.3.3(@types/node@24.19.0)(esbuild@0.28.2)
+      vite: 8.3.3(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
 
   '@vitest/spy@5.0.5': {}
 
@@ -3528,9 +3512,11 @@ snapshots:
 
   data-uri-to-buffer@4.0.1: {}
 
-  debug@4.4.3:
+  debug@4.4.3(supports-color@7.2.0):
     dependencies:
       ms: 2.1.3
+    optionalDependencies:
+      supports-color: 7.2.0
 
   dependency-cruiser@18.0.0(typescript@5.9.3):
     dependencies:
@@ -3670,22 +3656,19 @@ snapshots:
 
   fuzzy-search@3.2.1: {}
 
-  gaxios@7.3.1:
+  gaxios@7.3.1(supports-color@7.2.0)(undici-types@7.24.6):
     dependencies:
       extend: 3.0.2
-      https-proxy-agent: 7.0.6
+      https-proxy-agent: 7.0.6(supports-color@7.2.0)
       node-fetch: 3.3.2
-    transitivePeerDependencies:
-      - supports-color
+    optionalDependencies:
+      undici-types: 7.24.6
 
-  gcp-metadata@8.1.2:
+  gcp-metadata@8.1.2(supports-color@7.2.0)(undici-types@7.24.6):
     dependencies:
-      gaxios: 7.3.1
+      gaxios: 7.3.1(supports-color@7.2.0)(undici-types@7.24.6)
       google-logging-utils: 1.1.3
       json-bigint: 1.0.0
-    transitivePeerDependencies:
-      - supports-color
-      - undici-types
 
   get-east-asian-width@1.6.0: {}
 
@@ -3701,17 +3684,14 @@ snapshots:
     dependencies:
       ini: 4.1.1
 
-  google-auth-library@10.9.1:
+  google-auth-library@10.9.1(supports-color@7.2.0)(undici-types@7.24.6):
     dependencies:
       base64-js: 1.5.1
       ecdsa-sig-formatter: 1.0.11
-      gaxios: 7.3.1
-      gcp-metadata: 8.1.2
+      gaxios: 7.3.1(supports-color@7.2.0)(undici-types@7.24.6)
+      gcp-metadata: 8.1.2(supports-color@7.2.0)(undici-types@7.24.6)
       google-logging-utils: 1.1.3
       jws: 4.0.1
-    transitivePeerDependencies:
-      - supports-color
-      - undici-types
 
   google-logging-utils@1.1.3: {}
 
@@ -3729,30 +3709,26 @@ snapshots:
     dependencies:
       lru-cache: 11.5.3
 
-  http-proxy-agent@9.1.0:
+  http-proxy-agent@9.1.0(supports-color@7.2.0):
     dependencies:
       agent-base: 9.0.0
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
       proxy-agent-negotiate: 1.1.0
     transitivePeerDependencies:
       - kerberos
-      - supports-color
 
-  https-proxy-agent@7.0.6:
+  https-proxy-agent@7.0.6(supports-color@7.2.0):
     dependencies:
       agent-base: 7.1.4
-      debug: 4.4.3
-    transitivePeerDependencies:
-      - supports-color
+      debug: 4.4.3(supports-color@7.2.0)
 
-  https-proxy-agent@9.1.0:
+  https-proxy-agent@9.1.0(supports-color@7.2.0):
     dependencies:
       agent-base: 9.0.0
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
       proxy-agent-negotiate: 1.1.0
     transitivePeerDependencies:
       - kerberos
-      - supports-color
 
   ignore@7.0.5: {}
 
@@ -3920,7 +3896,14 @@ snapshots:
 
   obug@3.0.0: {}
 
-  openai@7.19.0: {}
+  openai@7.59.0(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.4)(google-auth-library@10.9.1)(supports-color@7.2.0)(undici@8.12.4)(undici-types@7.24.6)(ws@8.22.1)(zod@4.6.7):
+    optionalDependencies:
+      '@aws-sdk/credential-provider-node': 3.972.82
+      '@smithy/signature-v4': 5.7.4
+      google-auth-library: 10.9.1(supports-color@7.2.0)(undici-types@7.24.6)
+      undici: 8.12.4
+      ws: 8.22.1
+      zod: 4.6.7
 
   oxc-parser@0.150.0:
     dependencies:
@@ -4219,9 +4202,9 @@ snapshots:
 
   undici-types@7.24.6: {}
 
-  undici@8.12.3: {}
+  undici@8.12.4: {}
 
-  vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2):
+  vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1):
     dependencies:
       '@types/node': 24.19.0
       esbuild: 0.28.2
@@ -4232,13 +4215,15 @@ snapshots:
       tinyglobby: 0.2.17
     optionalDependencies:
       fsevents: 2.3.3
+      jiti: 2.7.0
+      yaml: 2.9.1
 
-  vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)):
+  vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)):
     dependencies:
       '@opentelemetry/api': 1.9.1
       '@types/chai': 5.2.3
       '@types/node': 24.19.0
-      '@vitest/mocker': 5.0.5(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2))
+      '@vitest/mocker': 5.0.5(vite@8.3.3(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
       chai: 6.3.0
       es-module-lexer: 2.3.2
       expect-type: 1.4.0
@@ -4249,7 +4234,7 @@ snapshots:
       tinybench: 6.2.2
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
-      vite: 8.3.3(@types/node@24.19.0)(esbuild@0.28.2)
+      vite: 8.3.3(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
       why-is-node-running: 3.2.1
     transitivePeerDependencies:
       - msw
@@ -4293,8 +4278,6 @@ snapshots:
       isexe: 2.0.0
 
   why-is-node-running@3.2.1: {}
-
-  ws@8.22.0: {}
 
   ws@8.22.1: {}
 
